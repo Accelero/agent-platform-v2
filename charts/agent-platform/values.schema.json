@@ -1,0 +1,604 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "imagePullPolicy",
+    "images"
+  ],
+  "properties": {
+    "imagePullPolicy": {
+      "enum": [
+        "IfNotPresent",
+        "Always",
+        "Never"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+          }
+        }
+      }
+    },
+    "images": {
+      "type": "object",
+      "required": [
+        "hermes",
+        "agent-runtime",
+        "hermes-manager"
+      ],
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "hermesManager": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "installation",
+        "dataIdentity",
+        "storageSources",
+        "publicOrigin",
+        "adminOrigin",
+        "oidcPrivateCa",
+        "nativeClientId",
+        "publicHttps",
+        "serviceEgress",
+        "resources",
+        "api",
+        "controller",
+        "gateway",
+        "operations",
+        "ingress"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "installation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "issuer"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "issuer": {
+              "type": "string"
+            }
+          }
+        },
+        "dataIdentity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "uid",
+            "gid"
+          ],
+          "properties": {
+            "uid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "gid": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "storageSources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+              },
+              "storageClass": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                  }
+                }
+              },
+              "localPath": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "node",
+                  "root"
+                ],
+                "properties": {
+                  "node": {
+                    "type": "string"
+                  },
+                  "root": {
+                    "type": "string",
+                    "pattern": "^/"
+                  }
+                }
+              },
+              "nfs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "server",
+                  "root"
+                ],
+                "properties": {
+                  "server": {
+                    "type": "string"
+                  },
+                  "root": {
+                    "type": "string",
+                    "pattern": "^/"
+                  }
+                }
+              }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "storageClass"
+                ]
+              },
+              {
+                "required": [
+                  "localPath"
+                ]
+              },
+              {
+                "required": [
+                  "nfs"
+                ]
+              }
+            ]
+          }
+        },
+        "publicOrigin": {
+          "type": "string",
+          "pattern": "^(|https://[^/?#\\s]+)$"
+        },
+        "adminOrigin": {
+          "type": "string",
+          "pattern": "^(|https://[^/?#\\s]+)$"
+        },
+        "oidcPrivateCa": {
+          "type": "boolean"
+        },
+        "nativeClientId": {
+          "type": "string"
+        },
+        "publicHttps": {
+          "type": "boolean"
+        },
+        "serviceEgress": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "namespace",
+              "labels",
+              "port"
+            ],
+            "properties": {
+              "namespace": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+              },
+              "labels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        },
+        "api": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "replicas",
+            "existingSecret",
+            "tokens",
+            "browser",
+            "directory",
+            "gatewayIdentity"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "replicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "tokens": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "jwksUrl",
+                "audience",
+                "authorizedClients"
+              ],
+              "properties": {
+                "jwksUrl": {
+                  "type": "string"
+                },
+                "audience": {
+                  "type": "string"
+                },
+                "authorizedClients": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                }
+              }
+            },
+            "browser": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "sessionKeys",
+                "clientId",
+                "confidential",
+                "scopes",
+                "revocationUrl"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "sessionKeys": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "active",
+                    "ids"
+                  ],
+                  "properties": {
+                    "active": {
+                      "type": "string"
+                    },
+                    "ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                      },
+                      "maxItems": 16
+                    }
+                  }
+                },
+                "clientId": {
+                  "type": "string"
+                },
+                "confidential": {
+                  "type": "boolean"
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                },
+                "revocationUrl": {
+                  "type": "string"
+                }
+              }
+            },
+            "directory": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "clientId"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "clientId": {
+                  "type": "string"
+                }
+              }
+            },
+            "gatewayIdentity": {
+              "type": "string"
+            }
+          }
+        },
+        "controller": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "existingSecret",
+            "serviceAccountName",
+            "instanceRole",
+            "workers",
+            "resyncSeconds"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "serviceAccountName": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+            },
+            "instanceRole": {
+              "type": "string"
+            },
+            "workers": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "resyncSeconds": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 3600
+            }
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "replicas",
+            "existingSecret",
+            "oidc",
+            "sessionKeys",
+            "clusterDomain",
+            "maxUploadMib",
+            "service"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "replicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "oidc": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "jwksUrl",
+                "audience",
+                "clientId",
+                "confidential",
+                "scopes",
+                "revocationUrl"
+              ],
+              "properties": {
+                "jwksUrl": {
+                  "type": "string"
+                },
+                "audience": {
+                  "type": "string"
+                },
+                "clientId": {
+                  "type": "string"
+                },
+                "confidential": {
+                  "type": "boolean"
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                },
+                "revocationUrl": {
+                  "type": "string"
+                }
+              }
+            },
+            "sessionKeys": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "active",
+                "ids"
+              ],
+              "properties": {
+                "active": {
+                  "type": "string"
+                },
+                "ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                  },
+                  "maxItems": 16
+                }
+              }
+            },
+            "clusterDomain": {
+              "type": "string"
+            },
+            "maxUploadMib": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "service": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "port"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "ClusterIP",
+                    "LoadBalancer",
+                    "NodePort"
+                  ]
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              }
+            }
+          }
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "migrate",
+            "initialize",
+            "grantAdministrator",
+            "rebindCluster"
+          ],
+          "properties": {
+            "migrate": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "existingSecret"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "existingSecret": {
+                  "type": "string"
+                }
+              }
+            },
+            "initialize": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "grantAdministrator": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "existingSecret",
+                "recover"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "existingSecret": {
+                  "type": "string"
+                },
+                "recover": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "rebindCluster": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "admin",
+            "gateway"
+          ],
+          "properties": {
+            "admin": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "gateway": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

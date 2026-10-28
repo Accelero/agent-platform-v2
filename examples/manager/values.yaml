@@ -1,0 +1,45 @@
+# Nonsecret shape reference. Provision the referenced Secrets privately, with
+# the key names in the chart README.
+hermesManager:
+  enabled: true
+  installation:
+    id: 00000000-0000-4000-8000-000000000001
+    issuer: https://sso.example.org/realms/agents
+  dataIdentity: {uid: 1000, gid: 1000}
+  storageSources:
+  - {id: nvme, storageClass: {name: local-nvme}}
+  - {id: host-data, localPath: {node: server-1, root: /srv/hermes-data}}
+  - {id: nas, nfs: {server: nas.internal, root: /export/homes}}
+  publicOrigin: https://hermes.example.org
+  adminOrigin: https://hermes-admin.example.org
+  api:
+    existingSecret: hermes-manager-api
+    tokens:
+      jwksUrl: https://sso.example.org/realms/agents/protocol/openid-connect/certs
+      audience: hermes-manager
+      authorizedClients: [manager-admin]
+    browser:
+      clientId: manager-admin
+      confidential: true
+      revocationUrl: https://sso.example.org/realms/agents/protocol/openid-connect/revoke
+      sessionKeys: {active: admin-2026-10, ids: [admin-2026-10]}
+    directory:
+      enabled: true
+      clientId: manager-directory-reader
+    gatewayIdentity: spiffe://agents.example.org/hermes-gateway
+  controller:
+    existingSecret: hermes-manager-controller
+  gateway:
+    existingSecret: hermes-gateway
+    oidc:
+      clientId: hermes-gateway
+      confidential: true
+      jwksUrl: https://sso.example.org/realms/agents/protocol/openid-connect/certs
+      audience: hermes-gateway
+      revocationUrl: https://sso.example.org/realms/agents/protocol/openid-connect/revoke
+    sessionKeys: {active: gateway-2026-10, ids: [gateway-2026-10]}
+  ingress:
+    admin:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress}}
+    gateway:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress}}

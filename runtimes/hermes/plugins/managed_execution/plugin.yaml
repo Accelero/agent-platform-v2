@@ -1,0 +1,17 @@
+name: managed_execution
+version: 3.0.0
+kind: backend
+description: Manager-provisioned SSH terminal environments for personal Hermes instances.
+provides_hooks: [pre_llm_call, on_session_end, on_session_finalize, on_session_reset]
+config_schema:
+  manager_url: {type: str, default: '', description: Manager execution HTTPS URL; read only from the manager's managed configuration}
+  ca_file: {type: str, default: '', description: Trusted manager certificate; read only from the manager's managed configuration}
+  token_file: {type: str, default: '', description: Instance execution credential file; read only from the manager's managed configuration}
+  ssh_key: {type: str, default: '', description: SSH client key; read only from the manager's managed configuration}
+  runtime_id: {type: str, default: '', description: Backend default; the active profile's dashboard terminal.runtime_id setting takes precedence}
+  mode:
+    type: str
+    default: per_session
+    choices: [per_session, per_profile_on_demand, per_profile_always_running]
+    description: Environment lifetime; read only from the manager's managed configuration
+  acquire_timeout_seconds: {type: int, default: 180, description: Maximum provisioning wait; read only from the manager's managed configuration}
