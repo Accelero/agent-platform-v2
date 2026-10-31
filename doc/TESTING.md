@@ -131,7 +131,7 @@ local diagnosis with verified fixture resources.
 | Commands and stores | Replay/conflict, stale revisions, concurrency, rollback, access changes, secret references, leases and controller state; memory and PostgreSQL share the contract cases |
 | Protocols | Administration, execution, resolver and gateway fixtures check declared responses and selected malformed headers/bodies, body bounds, authentication, CSRF and wrong-owner/wrong-interface refusals; complete operation/status/header coverage remains in G21 |
 | Storage and initialization | Approved roots, traversal, static sharing, read-only mounts, mount-path compatibility, dynamic claims, private-home isolation, retained state and interrupted initialization; live NFS, more permission variants and private-home restore remain gaps |
-| Worker identity | Domain range validation, backend UID/GID/fsGroup rendering, real SSH against the declared UID, and worker/Hermes admission cases; native alternate-identity file ownership and image mismatch execution remain in G23 |
+| Worker identity | Domain range validation, backend UID/GID/fsGroup rendering, real SSH against the declared UID, a session refused on every login, worker/Hermes admission cases, and a native scenario in which the default image, a specialized image and an identity-ignoring custom image serve one backend-only folder |
 | Browser | TypeScript workflows use mocked APIs; the Rust production browser case uses real assets/CSP with fixture sessions; pytest browser cases use the installed chart and Keycloak |
 | Failures and bounds | API/controller fault injection, leader turnover, worker loss, provider/database outages and selected timing boundaries; no full interleaving, capacity or sustained soak claim |
 

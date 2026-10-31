@@ -34,8 +34,9 @@ explicitly uncollected G01 entries; their existence never counts as a collected
 result. TypeScript and the native system script retain their
 existing jobs. Full clause/interface variant mapping remains G03 work.
 
-R14 is `partial`: the native alternate-identity ownership and image-mismatch
-case is implemented, with execution evidence still tracked in G23.
+R14 is `partial`: the native alternate-identity ownership, default-image and
+image-mismatch scenario is implemented and executed; live NFS, multi-node mount
+and scheduling, and group/permission variants remain open (G02, G16).
 
 ## Requirements
 

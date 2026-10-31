@@ -7,7 +7,7 @@ described in the [specification](../SPEC.md), the
 [`TESTS.md`](../../services/hermes-manager/TESTS.md) maps every requirement,
 acceptance scenario and contract operation to named tests and their levels;
 the statuses describe cited examples, not a passing execution receipt for this
-checkout. Native alternate-identity verification is tracked in G23. The
+checkout. The
 [coverage assessment](../testing/coverage.md) identifies the additional
 clause, boundary and security evidence needed beyond those examples.
 
@@ -71,8 +71,7 @@ including when invoked from pytest.
 
 These suites cover selected examples rather than every clause and security
 boundary. Live NFS, multi-node placement of the installed platform and full
-private-home restore are not established. The alternate-identity native case
-exists but its execution evidence is tracked in G23. The tables describe suite
+private-home restore are not established. The tables describe suite
 assertions; the verifier's reports identify actual outcomes for a candidate.
 
 The [collected-case verifier](../../tests/verification/README.md) provides
