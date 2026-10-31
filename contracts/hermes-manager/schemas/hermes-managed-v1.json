@@ -8,18 +8,37 @@
   "type": "object",
   "properties": {
     "terminal": {
+      "description": "Hermes terminal settings. The platform owns backend and the connection settings (manager_url, token_file, ca_file, ssh_key); other terminal keys are kept as given.",
       "type": "object",
       "properties": {
-        "backend": {"type": "string"},
-        "runtime_id": {"type": ["string", "null"], "maxLength": 63}
+        "backend": {
+          "description": "Always managed_execution; the platform enforces it. Any other value is refused.",
+          "type": "string"
+        },
+        "runtime_id": {
+          "description": "Pin the terminal backend by name for every profile, instead of letting users choose. The assignment must allow it, or terminal calls fail with no fallback.",
+          "type": ["string", "null"],
+          "maxLength": 63
+        }
       },
       "additionalProperties": true
     },
     "plugins": {
+      "description": "Hermes plugin lists. The managed_execution plugin belongs to the platform: it cannot be disabled or configured here.",
       "type": "object",
       "properties": {
-        "enabled": {"type": "array", "maxItems": 64, "items": {"type": "string"}},
-        "disabled": {"type": "array", "maxItems": 64, "items": {"type": "string"}}
+        "enabled": {
+          "description": "Names of the plugins to enable.",
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string" }
+        },
+        "disabled": {
+          "description": "Names of plugins to switch off. A plugin named here is not loaded even if it is also listed in enabled.",
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string" }
+        }
       },
       "additionalProperties": true
     }

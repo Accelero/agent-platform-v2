@@ -3,19 +3,19 @@ export const registry = [
   {
     id: "urn:hermes-manager:template:2",
     revision: 1,
-    digest: "a578c09dac7ef59cb1cf9f9bd2770c2cd254b73e92f18cffa417c0486684005d",
+    digest: "7787a8d8dbe1d2e495ec59b7ae5b44dc44a457fb81cdd5679c4c5fd0c5f34988",
     compatibleImageDigests: [],
   },
   {
     id: "urn:hermes-manager:terminal-backend:1",
     revision: 1,
-    digest: "c0c4e4b5708bd5e67058841c665d40b775ca47425ad629b2f96bcf5e7e8a115e",
+    digest: "1a8b56130dc181f083a0080af66d1fbd0c6639083c437bc1f4642cfa1d01a34d",
     compatibleImageDigests: [],
   },
   {
     id: "urn:hermes-manager:hermes-managed:1",
     revision: 1,
-    digest: "a20ca03fee1b0aa717e562316c676f7cd8e0ad0f4005cb16630de9e8ba1952f1",
+    digest: "81fb2d4375fa38c746cc90a73aa8938f61217fffdf60572fda7f9ed9c2a418b7",
     compatibleImageDigests: [
       "sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db",
     ],
@@ -33,19 +33,40 @@ export const schemas = {
     additionalProperties: false,
     required: ["schemaVersion", "image", "resources", "home"],
     properties: {
-      schemaVersion: { const: 2 },
+      schemaVersion: {
+        description: "The version of this definition format.",
+        const: 2,
+      },
       image: {
+        description:
+          "The Hermes image every instance of this version runs, pinned by digest. A tag is not accepted.",
         type: "string",
         maxLength: 600,
         pattern: "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$",
+        "x-constraint":
+          "Pinned by digest: registry/name@sha256:<64 hex digits>.",
+        examples: [
+          "ghcr.io/example/hermes@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ],
       },
       resources: {
+        description: "What each Hermes instance of this version may use.",
         type: "object",
         additionalProperties: false,
         required: ["cpuMillis", "memoryMib"],
         properties: {
-          cpuMillis: { type: "integer", minimum: 10, maximum: 64000 },
-          memoryMib: { type: "integer", minimum: 128, maximum: 262144 },
+          cpuMillis: {
+            description: "CPU limit in millicores: 1000 is one core.",
+            type: "integer",
+            minimum: 10,
+            maximum: 64000,
+          },
+          memoryMib: {
+            description: "Memory limit in MiB.",
+            type: "integer",
+            minimum: 128,
+            maximum: 262144,
+          },
         },
       },
       home: {
@@ -55,8 +76,18 @@ export const schemas = {
         additionalProperties: false,
         required: ["source", "sizeGib"],
         properties: {
-          source: { $ref: "#/$defs/name" },
-          sizeGib: { type: "integer", minimum: 1, maximum: 1048576 },
+          source: {
+            description:
+              "The storage source the home is created on. It must be a storage class, a source that provisions volumes on demand.",
+            $ref: "#/$defs/name",
+          },
+          sizeGib: {
+            description:
+              "Size of each user's home in GiB. A later version may grow it, but shrinking it or moving it to another source needs an explicit storage migration.",
+            type: "integer",
+            minimum: 1,
+            maximum: 1048576,
+          },
         },
       },
       mounts: {
@@ -74,10 +105,12 @@ export const schemas = {
       },
       adminConfig: {
         description:
-          "Hermes settings enforced over the user's own. Never secret values.",
+          "Hermes settings (config.yaml keys) enforced over the user's own, kept as given. Never secret values: deliver them under secrets and refer to them as ${NAME}.",
         type: "object",
       },
       secrets: {
+        description:
+          "Admin secrets delivered to every instance of this version, each as an environment variable or a read-only file.",
         type: "array",
         maxItems: 32,
         items: { $ref: "#/$defs/secretReference" },
@@ -89,45 +122,94 @@ export const schemas = {
         minLength: 1,
         maxLength: 63,
         pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$",
+        "x-constraint":
+          "Lowercase letters, digits and hyphens; starts with a letter.",
       },
       mount: {
+        description:
+          "One volume as Hermes sees it. The key is the volume's name; an assignment, or defaultVolumes, says where the volume comes from.",
         type: "object",
         additionalProperties: false,
         required: ["mountPath"],
         properties: {
           mountPath: {
+            description:
+              "Absolute path where the volume appears in Hermes. It must not overlap another mount or a path the platform reserves.",
             type: "string",
             minLength: 2,
             maxLength: 1024,
             pattern: "^/",
+            "x-constraint": "An absolute path, starting with /.",
+            examples: ["/workspace"],
           },
-          readOnly: { type: "boolean" },
+          readOnly: {
+            description: "Mount the volume read-only in Hermes.",
+            type: "boolean",
+            default: false,
+          },
         },
       },
       volume: {
+        description:
+          "One volume an assignment gets unless it defines its own. The key is the volume's name and must also appear under mounts.",
         type: "object",
         additionalProperties: false,
         required: ["source"],
         properties: {
-          source: { $ref: "#/$defs/name" },
+          source: {
+            description:
+              "The storage source the volume comes from. A storage class creates a volume of sizeGib; a static source (a local path or an NFS export) needs a path.",
+            $ref: "#/$defs/name",
+          },
           path: {
+            description:
+              "Static sources only: the folder under the source's root, relative and without '..' segments.",
             type: "string",
             minLength: 1,
             maxLength: 1024,
             pattern: "^[^/]",
+            "x-constraint": "A relative path, not starting with /.",
+            examples: ["team/shared"],
           },
-          sizeGib: { type: "integer", minimum: 1, maximum: 1048576 },
-          readOnly: { type: "boolean" },
+          sizeGib: {
+            description: "Storage classes only: the size of the volume in GiB.",
+            type: "integer",
+            minimum: 1,
+            maximum: 1048576,
+          },
+          readOnly: {
+            description: "Mount the volume read-only everywhere it appears.",
+            type: "boolean",
+            default: false,
+          },
         },
       },
       secretReference: {
+        description:
+          "One admin secret delivered to the instance, as an environment variable (env) or a read-only file (file).",
         type: "object",
         additionalProperties: false,
         required: ["name"],
         properties: {
-          name: { $ref: "#/$defs/name" },
-          env: { type: "string", pattern: "^[A-Z_][A-Z0-9_]{0,127}$" },
-          file: { $ref: "#/$defs/name" },
+          name: {
+            description:
+              "The admin secret to deliver. It must exist, with a kind that fits the delivery, when the version is published.",
+            $ref: "#/$defs/name",
+          },
+          env: {
+            description:
+              "Deliver the secret as this environment variable. Use env or file, not both.",
+            type: "string",
+            pattern: "^[A-Z_][A-Z0-9_]{0,127}$",
+            "x-constraint":
+              "Uppercase letters, digits and underscores; does not start with a digit.",
+            examples: ["OPENAI_API_KEY"],
+          },
+          file: {
+            description:
+              "Deliver the secret as a read-only file with this name under /run/hermes/admin-secrets/. Use env or file, not both.",
+            $ref: "#/$defs/name",
+          },
         },
         oneOf: [{ required: ["env"] }, { required: ["file"] }],
       },
@@ -145,31 +227,90 @@ export const schemas = {
     required: ["image", "sshContract", "uid", "gid", "resources", "limits"],
     properties: {
       image: {
+        description:
+          "The SSH worker image terminal environments run, pinned by digest. A tag is not accepted.",
         type: "string",
         maxLength: 600,
         pattern: "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$",
+        "x-constraint":
+          "Pinned by digest: registry/name@sha256:<64 hex digits>.",
+        examples: [
+          "ghcr.io/example/agent-runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ],
       },
-      sshContract: { const: "managed-ssh-v2" },
-      uid: { type: "integer", minimum: 1, maximum: 4294967294 },
-      gid: { type: "integer", minimum: 1, maximum: 4294967294 },
+      sshContract: {
+        description:
+          "The contract the image implements. Only managed-ssh-v2 is supported.",
+        const: "managed-ssh-v2",
+      },
+      uid: {
+        description: "The user ID the worker runs as. Never root: 1 or higher.",
+        type: "integer",
+        minimum: 1,
+        maximum: 4294967294,
+      },
+      gid: {
+        description:
+          "The group ID the worker runs as. Never root: 1 or higher.",
+        type: "integer",
+        minimum: 1,
+        maximum: 4294967294,
+      },
       resources: {
+        description: "What each worker environment may use.",
         type: "object",
         additionalProperties: false,
         required: ["cpuMillis", "memoryMib", "ephemeralGib"],
         properties: {
-          cpuMillis: { type: "integer", minimum: 10, maximum: 64000 },
-          memoryMib: { type: "integer", minimum: 64, maximum: 262144 },
-          ephemeralGib: { type: "integer", minimum: 1, maximum: 1024 },
+          cpuMillis: {
+            description: "CPU limit in millicores: 1000 is one core.",
+            type: "integer",
+            minimum: 10,
+            maximum: 64000,
+          },
+          memoryMib: {
+            description: "Memory limit in MiB.",
+            type: "integer",
+            minimum: 64,
+            maximum: 262144,
+          },
+          ephemeralGib: {
+            description:
+              "Limit in GiB for the worker's local scratch storage. It does not outlive the environment.",
+            type: "integer",
+            minimum: 1,
+            maximum: 1024,
+          },
         },
       },
       limits: {
+        description:
+          "How long environments live and how many an instance may have.",
         type: "object",
         additionalProperties: false,
         required: ["idleSeconds", "maxLeaseSeconds", "maxEnvironments"],
         properties: {
-          idleSeconds: { type: "integer", minimum: 60, maximum: 86400 },
-          maxLeaseSeconds: { type: "integer", minimum: 60, maximum: 86400 },
-          maxEnvironments: { type: "integer", minimum: 1, maximum: 64 },
+          idleSeconds: {
+            description:
+              "How long an environment with no live lease may sit idle before it is retired.",
+            type: "integer",
+            minimum: 60,
+            maximum: 86400,
+          },
+          maxLeaseSeconds: {
+            description:
+              "The longest a single lease on an environment may last. A lease never outlives it.",
+            type: "integer",
+            minimum: 60,
+            maximum: 86400,
+          },
+          maxEnvironments: {
+            description:
+              "How many live environments of this backend one instance may have at the same time.",
+            type: "integer",
+            minimum: 1,
+            maximum: 64,
+          },
         },
       },
       mounts: {
@@ -178,22 +319,40 @@ export const schemas = {
         type: "object",
         propertyNames: { $ref: "#/$defs/name" },
         additionalProperties: {
+          description: "One mount slot. The key is the volume's name.",
           type: "object",
           additionalProperties: false,
           required: ["mountPath"],
           properties: {
             mountPath: {
+              description:
+                "Absolute path where the volume appears in the worker. A volume shared with Hermes must use the same path as in the template.",
               type: "string",
               minLength: 2,
               maxLength: 1024,
               pattern: "^/",
+              "x-constraint": "An absolute path, starting with /.",
+              examples: ["/workspace"],
             },
-            readOnly: { type: "boolean" },
-            optional: { type: "boolean" },
+            readOnly: {
+              description: "Mount the volume read-only in the worker.",
+              type: "boolean",
+              default: false,
+            },
+            optional: {
+              description:
+                "An optional slot is skipped when the assignment binds no volume to it. An unbound required slot makes the backend unusable for that instance.",
+              type: "boolean",
+              default: false,
+            },
           },
         },
       },
-      registrySecret: { $ref: "#/$defs/name" },
+      registrySecret: {
+        description:
+          "The registry admin secret that holds the credentials to pull a private image.",
+        $ref: "#/$defs/name",
+      },
     },
     $defs: {
       name: {
@@ -201,6 +360,8 @@ export const schemas = {
         minLength: 1,
         maxLength: 63,
         pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$",
+        "x-constraint":
+          "Lowercase letters, digits and hyphens; starts with a letter.",
       },
     },
   },
@@ -217,18 +378,42 @@ export const schemas = {
     type: "object",
     properties: {
       terminal: {
+        description:
+          "Hermes terminal settings. The platform owns backend and the connection settings (manager_url, token_file, ca_file, ssh_key); other terminal keys are kept as given.",
         type: "object",
         properties: {
-          backend: { type: "string" },
-          runtime_id: { type: ["string", "null"], maxLength: 63 },
+          backend: {
+            description:
+              "Always managed_execution; the platform enforces it. Any other value is refused.",
+            type: "string",
+          },
+          runtime_id: {
+            description:
+              "Pin the terminal backend by name for every profile, instead of letting users choose. The assignment must allow it, or terminal calls fail with no fallback.",
+            type: ["string", "null"],
+            maxLength: 63,
+          },
         },
         additionalProperties: true,
       },
       plugins: {
+        description:
+          "Hermes plugin lists. The managed_execution plugin belongs to the platform: it cannot be disabled or configured here.",
         type: "object",
         properties: {
-          enabled: { type: "array", maxItems: 64, items: { type: "string" } },
-          disabled: { type: "array", maxItems: 64, items: { type: "string" } },
+          enabled: {
+            description: "Names of the plugins to enable.",
+            type: "array",
+            maxItems: 64,
+            items: { type: "string" },
+          },
+          disabled: {
+            description:
+              "Names of plugins to switch off. A plugin named here is not loaded even if it is also listed in enabled.",
+            type: "array",
+            maxItems: 64,
+            items: { type: "string" },
+          },
         },
         additionalProperties: true,
       },

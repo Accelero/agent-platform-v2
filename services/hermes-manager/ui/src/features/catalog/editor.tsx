@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ApiError,
   api,
@@ -9,10 +9,16 @@ import {
   type ConfigurationProblem,
   type Result,
 } from "../../api";
-import { queryClient, registerPrivateReset, useSession } from "../../app/state";
+import {
+  queryClient,
+  registerPrivateReset,
+  useActorKey,
+  useSession,
+} from "../../app/state";
 import { ProblemList } from "../../components/command";
 import { ErrorNotice } from "../../components/data";
 import type { Draft } from "./model";
+import type { Hints } from "./schema-help";
 import RawEditor from "./raw-editor";
 import {
   parseConfiguration,
@@ -42,6 +48,34 @@ export default function DraftEditor({
   onSaved: (receipt: Receipt) => void;
 }) {
   const session = useSession();
+  const actor = useActorKey();
+  // What this installation has, to suggest as values. Suggestions are an aid:
+  // when these cannot be read the editor simply offers fewer.
+  const sources = useQuery({
+    queryKey: [actor, "storage-sources", "hints"],
+    queryFn: ({ signal }) => api.storageSources(signal),
+    retry: false,
+  });
+  const secretNames = useQuery({
+    queryKey: [actor, "secrets", "hints"],
+    queryFn: ({ signal }) => api.secrets(undefined, signal),
+    retry: false,
+  });
+  const hints: Hints = {
+    storageSources: (sources.data?.items ?? []).map((source) => ({
+      id: source.id,
+      dynamic: !!source.storageClass,
+      detail: source.storageClass
+        ? "storage class"
+        : source.nfs
+          ? "NFS export"
+          : "local path",
+    })),
+    secrets: (secretNames.data?.items ?? []).map((secret) => ({
+      name: secret.name,
+      kind: secret.kind,
+    })),
+  };
   const [format, setFormat] = useState<ConfigurationFormat>("yaml");
   const [text, setText] = useState(() => serializeConfiguration(base, "yaml"));
   const [server, setServer] = useState<ConfigurationProblem[]>([]);
@@ -117,7 +151,12 @@ export default function DraftEditor({
           validate.reset();
         }}
         problems={server}
+        hints={hints}
       />
+      <p className="hint">
+        Hover a setting to see what it does. Type to get suggestions, or press
+        Ctrl+Space anywhere to list what can go there.
+      </p>
       {parsed.error && <p role="alert">{parsed.error}</p>}
       <ProblemList problems={server} />
       {validate.data?.valid && !refused && (

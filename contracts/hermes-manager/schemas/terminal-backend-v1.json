@@ -8,28 +8,80 @@
   "additionalProperties": false,
   "required": ["image", "sshContract", "uid", "gid", "resources", "limits"],
   "properties": {
-    "image": { "type": "string", "maxLength": 600, "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$" },
-    "sshContract": { "const": "managed-ssh-v2" },
-    "uid": { "type": "integer", "minimum": 1, "maximum": 4294967294 },
-    "gid": { "type": "integer", "minimum": 1, "maximum": 4294967294 },
+    "image": {
+      "description": "The SSH worker image terminal environments run, pinned by digest. A tag is not accepted.",
+      "type": "string",
+      "maxLength": 600,
+      "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$",
+      "x-constraint": "Pinned by digest: registry/name@sha256:<64 hex digits>.",
+      "examples": ["ghcr.io/example/agent-runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+    },
+    "sshContract": {
+      "description": "The contract the image implements. Only managed-ssh-v2 is supported.",
+      "const": "managed-ssh-v2"
+    },
+    "uid": {
+      "description": "The user ID the worker runs as. Never root: 1 or higher.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967294
+    },
+    "gid": {
+      "description": "The group ID the worker runs as. Never root: 1 or higher.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967294
+    },
     "resources": {
+      "description": "What each worker environment may use.",
       "type": "object",
       "additionalProperties": false,
       "required": ["cpuMillis", "memoryMib", "ephemeralGib"],
       "properties": {
-        "cpuMillis": { "type": "integer", "minimum": 10, "maximum": 64000 },
-        "memoryMib": { "type": "integer", "minimum": 64, "maximum": 262144 },
-        "ephemeralGib": { "type": "integer", "minimum": 1, "maximum": 1024 }
+        "cpuMillis": {
+          "description": "CPU limit in millicores: 1000 is one core.",
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 64000
+        },
+        "memoryMib": {
+          "description": "Memory limit in MiB.",
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 262144
+        },
+        "ephemeralGib": {
+          "description": "Limit in GiB for the worker's local scratch storage. It does not outlive the environment.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
       }
     },
     "limits": {
+      "description": "How long environments live and how many an instance may have.",
       "type": "object",
       "additionalProperties": false,
       "required": ["idleSeconds", "maxLeaseSeconds", "maxEnvironments"],
       "properties": {
-        "idleSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
-        "maxLeaseSeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
-        "maxEnvironments": { "type": "integer", "minimum": 1, "maximum": 64 }
+        "idleSeconds": {
+          "description": "How long an environment with no live lease may sit idle before it is retired.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "maxLeaseSeconds": {
+          "description": "The longest a single lease on an environment may last. A lease never outlives it.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "maxEnvironments": {
+          "description": "How many live environments of this backend one instance may have at the same time.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        }
       }
     },
     "mounts": {
@@ -37,19 +89,45 @@
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/name" },
       "additionalProperties": {
+        "description": "One mount slot. The key is the volume's name.",
         "type": "object",
         "additionalProperties": false,
         "required": ["mountPath"],
         "properties": {
-          "mountPath": { "type": "string", "minLength": 2, "maxLength": 1024, "pattern": "^/" },
-          "readOnly": { "type": "boolean" },
-          "optional": { "type": "boolean" }
+          "mountPath": {
+            "description": "Absolute path where the volume appears in the worker. A volume shared with Hermes must use the same path as in the template.",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 1024,
+            "pattern": "^/",
+            "x-constraint": "An absolute path, starting with /.",
+            "examples": ["/workspace"]
+          },
+          "readOnly": {
+            "description": "Mount the volume read-only in the worker.",
+            "type": "boolean",
+            "default": false
+          },
+          "optional": {
+            "description": "An optional slot is skipped when the assignment binds no volume to it. An unbound required slot makes the backend unusable for that instance.",
+            "type": "boolean",
+            "default": false
+          }
         }
       }
     },
-    "registrySecret": { "$ref": "#/$defs/name" }
+    "registrySecret": {
+      "description": "The registry admin secret that holds the credentials to pull a private image.",
+      "$ref": "#/$defs/name"
+    }
   },
   "$defs": {
-    "name": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$" }
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$",
+      "x-constraint": "Lowercase letters, digits and hyphens; starts with a letter."
+    }
   }
 }

@@ -250,8 +250,21 @@ terminal and plugin settings, blocks nothing. Save is disabled only while the
 text does not parse: saving a draft checks only that the request is well formed,
 so a draft may be incomplete, and publishing runs the same checks as Validate.
 The JSON Schemas under `contracts/hermes-manager/schemas/` are read in the
-browser only for the descriptions that autocomplete suggests; the manager embeds
-and runs them.
+browser only to help while typing; the manager embeds and runs them.
+
+Help while editing comes from the descriptions and annotations in those schemas.
+Hovering a setting in the editor shows its type, whether it is required, what it
+does and its limits, default and an example, and for a group the settings inside
+it. Typing suggests the settings that can go at that place, leaving out those
+already there and listing required ones first; after a setting's colon it
+suggests the values that fit: the fixed or allowed values, `true` or `false`,
+and the storage sources and admin secrets this installation has (a template's
+home offers only storage classes). Ctrl+Space lists the suggestions anywhere,
+each with the same explanation, which is the way to read it without a pointer.
+A unit test fails for a setting in the schemas that has no description. Under
+`adminConfig` only the reviewed `terminal` and `plugins` settings are described;
+any other Hermes setting shows that the manager keeps it as given and does not
+review it.
 
 ## Read-only Keycloak directory
 

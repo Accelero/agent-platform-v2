@@ -849,6 +849,49 @@ legend {
 .raw-editor .cm-scroller {
   overflow: auto;
 }
+.cm-tooltip .cm-help {
+  max-width: 420px;
+  padding: 10px 12px;
+  color: #203d37;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.cm-help-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cm-help-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.cm-help-type {
+  color: #5d7069;
+}
+.cm-help-tag {
+  padding: 0 6px;
+  border: 1px solid #b5c3af;
+  border-radius: 999px;
+  color: #274a41;
+  font-size: 11px;
+}
+.cm-help-text,
+.cm-help-settings {
+  margin: 4px 0;
+}
+.cm-help-facts {
+  margin: 4px 0;
+  padding-left: 18px;
+  color: #3b564f;
+}
+.cm-help-settings {
+  color: #5d7069;
+}
+.cm-completionInfo .cm-help {
+  padding: 0;
+}
 .dialog-content.wide {
   width: min(960px, calc(100vw - 32px));
 }

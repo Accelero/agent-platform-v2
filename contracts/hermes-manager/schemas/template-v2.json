@@ -8,15 +8,36 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "image", "resources", "home"],
   "properties": {
-    "schemaVersion": { "const": 2 },
-    "image": { "type": "string", "maxLength": 600, "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$" },
+    "schemaVersion": {
+      "description": "The version of this definition format.",
+      "const": 2
+    },
+    "image": {
+      "description": "The Hermes image every instance of this version runs, pinned by digest. A tag is not accepted.",
+      "type": "string",
+      "maxLength": 600,
+      "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$",
+      "x-constraint": "Pinned by digest: registry/name@sha256:<64 hex digits>.",
+      "examples": ["ghcr.io/example/hermes@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+    },
     "resources": {
+      "description": "What each Hermes instance of this version may use.",
       "type": "object",
       "additionalProperties": false,
       "required": ["cpuMillis", "memoryMib"],
       "properties": {
-        "cpuMillis": { "type": "integer", "minimum": 10, "maximum": 64000 },
-        "memoryMib": { "type": "integer", "minimum": 128, "maximum": 262144 }
+        "cpuMillis": {
+          "description": "CPU limit in millicores: 1000 is one core.",
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 64000
+        },
+        "memoryMib": {
+          "description": "Memory limit in MiB.",
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 262144
+        }
       }
     },
     "home": {
@@ -25,8 +46,16 @@
       "additionalProperties": false,
       "required": ["source", "sizeGib"],
       "properties": {
-        "source": { "$ref": "#/$defs/name" },
-        "sizeGib": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+        "source": {
+          "description": "The storage source the home is created on. It must be a storage class, a source that provisions volumes on demand.",
+          "$ref": "#/$defs/name"
+        },
+        "sizeGib": {
+          "description": "Size of each user's home in GiB. A later version may grow it, but shrinking it or moving it to another source needs an explicit storage migration.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        }
       }
     },
     "mounts": {
@@ -42,41 +71,99 @@
       "additionalProperties": { "$ref": "#/$defs/volume" }
     },
     "adminConfig": {
-      "description": "Hermes settings enforced over the user's own. Never secret values.",
+      "description": "Hermes settings (config.yaml keys) enforced over the user's own, kept as given. Never secret values: deliver them under secrets and refer to them as ${NAME}.",
       "type": "object"
     },
-    "secrets": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/secretReference" } }
+    "secrets": {
+      "description": "Admin secrets delivered to every instance of this version, each as an environment variable or a read-only file.",
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/secretReference" }
+    }
   },
   "$defs": {
-    "name": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$" },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z]([-a-z0-9]*[a-z0-9])?$",
+      "x-constraint": "Lowercase letters, digits and hyphens; starts with a letter."
+    },
     "mount": {
+      "description": "One volume as Hermes sees it. The key is the volume's name; an assignment, or defaultVolumes, says where the volume comes from.",
       "type": "object",
       "additionalProperties": false,
       "required": ["mountPath"],
       "properties": {
-        "mountPath": { "type": "string", "minLength": 2, "maxLength": 1024, "pattern": "^/" },
-        "readOnly": { "type": "boolean" }
+        "mountPath": {
+          "description": "Absolute path where the volume appears in Hermes. It must not overlap another mount or a path the platform reserves.",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 1024,
+          "pattern": "^/",
+          "x-constraint": "An absolute path, starting with /.",
+          "examples": ["/workspace"]
+        },
+        "readOnly": {
+          "description": "Mount the volume read-only in Hermes.",
+          "type": "boolean",
+          "default": false
+        }
       }
     },
     "volume": {
+      "description": "One volume an assignment gets unless it defines its own. The key is the volume's name and must also appear under mounts.",
       "type": "object",
       "additionalProperties": false,
       "required": ["source"],
       "properties": {
-        "source": { "$ref": "#/$defs/name" },
-        "path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^/]" },
-        "sizeGib": { "type": "integer", "minimum": 1, "maximum": 1048576 },
-        "readOnly": { "type": "boolean" }
+        "source": {
+          "description": "The storage source the volume comes from. A storage class creates a volume of sizeGib; a static source (a local path or an NFS export) needs a path.",
+          "$ref": "#/$defs/name"
+        },
+        "path": {
+          "description": "Static sources only: the folder under the source's root, relative and without '..' segments.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^[^/]",
+          "x-constraint": "A relative path, not starting with /.",
+          "examples": ["team/shared"]
+        },
+        "sizeGib": {
+          "description": "Storage classes only: the size of the volume in GiB.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "readOnly": {
+          "description": "Mount the volume read-only everywhere it appears.",
+          "type": "boolean",
+          "default": false
+        }
       }
     },
     "secretReference": {
+      "description": "One admin secret delivered to the instance, as an environment variable (env) or a read-only file (file).",
       "type": "object",
       "additionalProperties": false,
       "required": ["name"],
       "properties": {
-        "name": { "$ref": "#/$defs/name" },
-        "env": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,127}$" },
-        "file": { "$ref": "#/$defs/name" }
+        "name": {
+          "description": "The admin secret to deliver. It must exist, with a kind that fits the delivery, when the version is published.",
+          "$ref": "#/$defs/name"
+        },
+        "env": {
+          "description": "Deliver the secret as this environment variable. Use env or file, not both.",
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]{0,127}$",
+          "x-constraint": "Uppercase letters, digits and underscores; does not start with a digit.",
+          "examples": ["OPENAI_API_KEY"]
+        },
+        "file": {
+          "description": "Deliver the secret as a read-only file with this name under /run/hermes/admin-secrets/. Use env or file, not both.",
+          "$ref": "#/$defs/name"
+        }
       },
       "oneOf": [{ "required": ["env"] }, { "required": ["file"] }]
     }
