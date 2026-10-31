@@ -1,38 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
-import {
-  parseDraft,
-  pointerRange,
-  setPath,
-  validateDraft,
-  changedPaths,
-} from "./model";
-const fixtureRoot = new URL(
-  "../../../../../../contracts/hermes-manager/schemas/fixtures/",
-  import.meta.url,
-);
-describe("shared server/browser validation fixtures", () => {
-  for (const [directory, valid] of [
-    ["valid", true],
-    ["invalid", false],
-  ] as const) {
-    for (const file of readdirSync(new URL(`${directory}/`, fixtureRoot))) {
-      it(`${directory}/${file}`, () => {
-        const value = JSON.parse(
-          readFileSync(new URL(`${directory}/${file}`, fixtureRoot), "utf8"),
-        );
-        const collection = file.startsWith("terminal-backend")
-          ? "terminal-backends"
-          : "templates";
-        expect(
-          validateDraft(value, collection).filter(
-            (problem) => problem.severity === "error",
-          ).length === 0,
-        ).toBe(valid);
-      });
-    }
-  }
-});
+import { parseDraft, pointerRange, setPath, changedPaths } from "./model";
 describe("canonical draft round trips", () => {
   for (const value of [
     undefined,

@@ -6,8 +6,7 @@ import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
-import { linter, lintGutter } from "@codemirror/lint";
-import { validateDraft } from "./model";
+import { forceLinting, linter, lintGutter } from "@codemirror/lint";
 import { yaml } from "@codemirror/lang-yaml";
 import {
   parseConfiguration,
@@ -21,17 +20,13 @@ export default function RawEditor({
   format = "json",
   onChange,
   problems = [],
-  clientCompatible = true,
 }: {
   collection: CatalogCollection;
   value: string;
   format?: ConfigurationFormat;
   onChange: (value: string) => void;
   problems?: ConfigurationProblem[];
-  clientCompatible?: boolean;
 }) {
-  const compatible = useRef(clientCompatible);
-  compatible.current = clientCompatible;
   const parent = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView>(null);
   const changed = useRef(onChange);
@@ -62,12 +57,9 @@ export default function RawEditor({
                   message: parsed.error,
                 },
               ];
-            return [
-              ...(compatible.current
-                ? validateDraft(parsed.value, collection)
-                : []),
-              ...serverProblems.current,
-            ].map((problem) => ({
+            // Only syntax is checked here; every other finding is the
+            // manager's, shown after Validate.
+            return serverProblems.current.map((problem) => ({
               ...configurationRange(text, problem.pointer, format),
               severity: problem.severity,
               message: problem.message,
@@ -88,7 +80,6 @@ export default function RawEditor({
             interactionDelay: 0,
             override: [
               (context) => {
-                if (!compatible.current) return null;
                 const word = context.matchBefore(/"?[a-zA-Z_]*/);
                 if (!word || (!context.explicit && word.from === word.to))
                   return null;
@@ -119,6 +110,10 @@ export default function RawEditor({
       editor.current = null;
     };
   }, [format, collection]);
+  // The manager's findings arrive after the editor was last linted.
+  useEffect(() => {
+    if (editor.current) forceLinting(editor.current);
+  }, [problems]);
   useEffect(() => {
     const view = editor.current;
     if (view && view.state.doc.toString() !== value)

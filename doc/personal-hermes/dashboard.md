@@ -238,12 +238,20 @@ merge keys, explicit tags and multi-document streams are rejected. Comments and
 formatting may be discarded on conversion or save. YAML never becomes an
 arbitrary Kubernetes manifest or a separate server-side format.
 
-Schemas are local and versioned, with Ajv validators precompiled at build time.
-The manager envelope is validated completely; the Hermes schema covers reviewed
-keys for its recorded image digest, and other keys or unknown images are
-reported as unvalidated. Rust validation is authoritative. Errors carry a JSON
-Pointer, code, severity and safe message, mapped to form fields and editor
-positions.
+Validation is the manager's alone; the dashboard holds no copy of its rules. The
+editor parses the JSON or YAML text and reports only syntax errors itself. The
+**Validate** button sends the definition to `POST …/validate`, and the manager
+checks its shape, the installation's storage sources, the admin secrets it names
+and the content rules of its settings, then answers with every finding as a JSON
+Pointer, a code and a severity. The dashboard adds a safe message by code and
+marks each finding at its place in the editor and in the list below it. A
+warning, such as `unvalidated` for a template setting outside the reviewed
+terminal and plugin settings, blocks nothing. Save is disabled only while the
+text does not parse: saving a draft checks only that the request is well formed,
+so a draft may be incomplete, and publishing runs the same checks as Validate.
+The JSON Schemas under `contracts/hermes-manager/schemas/` are read in the
+browser only for the descriptions that autocomplete suggests; the manager embeds
+and runs them.
 
 ## Read-only Keycloak directory
 
@@ -280,7 +288,7 @@ Secret and restart the API role to reload the service credential.
 | Navigation | TanStack Router (code-based routes) | Typed detail routes and validated URL search state |
 | Tables and server data | TanStack Table, TanStack Query | Headless table state; Rust performs collection queries; in-memory caching and invalidation |
 | Forms and editors | React Hook Form, CodeMirror 6 (JSON and YAML), pinned `yaml` parser | One canonical draft per editing session; editors are views of it |
-| Validation | Versioned JSON Schema, precompiled Ajv; Rust `schemars` and `jsonschema` | Browser aid plus authoritative server validation |
+| Validation | Versioned JSON Schema, run by the Rust manager with `jsonschema`; the dashboard reads their descriptions for autocomplete only | The manager alone validates; the dashboard shows its findings |
 | Primitives and style | Radix Dialog, repository CSS tokens | Focus and keyboard behavior; existing visual design |
 | API contract | OpenAPI plus `openapi-typescript` | Generated client types from `contracts/hermes-manager/openapi.yaml` |
 | Tests | Vitest, Playwright, Rust HTTPS/PostgreSQL fixtures | Client, browser and authorization coverage |

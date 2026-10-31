@@ -6,6 +6,7 @@
 pub mod assets;
 pub mod auth;
 mod catalog;
+mod definitions;
 mod people;
 mod session;
 mod storage;

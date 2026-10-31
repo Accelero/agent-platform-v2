@@ -623,8 +623,11 @@ export interface components {
       pointer: string;
       /** @description A stable machine-readable code such as `unknown_secret`, `wrong_secret_kind` or `unknown_storage_source`; the set can grow */
       code: string;
-      /** @enum {string} */
-      severity: "error";
+      /**
+       * @description An `error` refuses publication; a `warning` reports something that is kept as given, such as a setting without a reviewed schema (`unvalidated`)
+       * @enum {string}
+       */
+      severity: "error" | "warning";
     };
     Error: {
       /** @enum {string} */
@@ -737,6 +740,7 @@ export interface components {
       version: number;
     };
     AssignmentPreview: {
+      /** @description False when any problem has severity `error` */
       valid: boolean;
       problems: components["schemas"]["Problem"][];
       restartsHermes: boolean;
@@ -1723,7 +1727,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Validation against installation settings; nothing is stored */
+      /** @description The complete validation of the definition, nothing stored. A definition of the wrong shape (an unknown, missing or mistyped setting, a value out of range) is reported as problems at their place, not refused; the installation settings, the admin secrets it names and the content rules of its settings are checked once its shape is sound */
       200: {
         headers: {
           [name: string]: unknown;
@@ -1979,7 +1983,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Validation against installation settings; nothing is stored */
+      /** @description The complete validation of the definition, nothing stored. A definition of the wrong shape (an unknown, missing or mistyped setting, a value out of range) is reported as problems at their place, not refused; the installation settings, the admin secrets it names and the content rules of its settings are checked once its shape is sound */
       200: {
         headers: {
           [name: string]: unknown;

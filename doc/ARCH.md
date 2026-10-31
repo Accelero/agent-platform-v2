@@ -387,6 +387,22 @@ hermesManager:
 Hermes applies that file over the user's configuration. Validation rejects any
 attempt to change platform-enforced keys.
 
+Definition validation runs only in the manager (`hermes-http`, `admin/definitions.rs`
+and `catalog.rs`). A validation request is read as JSON, not as a typed
+definition, so that every problem can be reported where it is. The contract's
+JSON Schemas for templates and terminal backends (`contracts/hermes-manager/schemas/`)
+are embedded at build time and run with the `jsonschema` crate; each failed
+rule becomes a problem at the pointer of the offending value, with the code the
+domain checks use for the same rule (`invalid_image`, `out_of_range`,
+`invalid_name`, `missing_setting`, `unknown_setting` and so on). Only when the
+shape is sound is the definition deserialized and checked by the domain
+(`TemplateDefinition::validate`, `BackendDefinition::validate`, including the
+content rules of `adminConfig` in `domain/settings.rs`) and against the admin
+secrets in the registry. `Definition::warnings` adds findings that never refuse a
+definition. Publication runs the same domain checks on the stored draft. The
+dashboard only parses the text and shows these findings; it holds no copy of the
+rules.
+
 Admin secret flow:
 
 1. The API seals each value with the controller's public key (an X25519

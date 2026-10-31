@@ -12,7 +12,7 @@ import {
 import { queryClient, registerPrivateReset, useSession } from "../../app/state";
 import { ProblemList } from "../../components/command";
 import { ErrorNotice } from "../../components/data";
-import { validateDraft, type Draft } from "./model";
+import type { Draft } from "./model";
 import RawEditor from "./raw-editor";
 import {
   parseConfiguration,
@@ -52,8 +52,7 @@ export default function DraftEditor({
     [],
   );
   const parsed = parseConfiguration(text, format);
-  const local = parsed.value ? validateDraft(parsed.value, collection) : [];
-  const errors = local.filter((problem) => problem.severity === "error");
+  const refused = server.some((problem) => problem.severity === "error");
   const validate = useMutation({
     mutationFn: () =>
       api.validate(collection, parsed.value!, session.data!.csrfToken!),
@@ -120,8 +119,8 @@ export default function DraftEditor({
         problems={server}
       />
       {parsed.error && <p role="alert">{parsed.error}</p>}
-      <ProblemList problems={[...local, ...server]} />
-      {validate.data?.valid && !server.length && (
+      <ProblemList problems={server} />
+      {validate.data?.valid && !refused && (
         <p role="status">The manager accepts this definition.</p>
       )}
       {(validate.error || save.error) && (
@@ -139,12 +138,7 @@ export default function DraftEditor({
         </button>
         <button
           type="button"
-          disabled={
-            !parsed.value ||
-            errors.length > 0 ||
-            save.isPending ||
-            !session.data?.csrfToken
-          }
+          disabled={!parsed.value || save.isPending || !session.data?.csrfToken}
           onClick={() => save.mutate()}
         >
           {version === undefined ? "Save as new draft" : "Save draft"}

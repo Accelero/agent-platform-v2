@@ -1664,6 +1664,7 @@ dependencies = [
  "hermes-testkit",
  "hermes-wire",
  "hyper-util",
+ "jsonschema",
  "jsonwebtoken",
  "reqwest",
  "rustls",

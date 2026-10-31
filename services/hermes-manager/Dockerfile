@@ -12,6 +12,8 @@ RUN npm run generate && npm run check:schemas && npm test && npm run build
 FROM rust@sha256:a24e292b4af7bdee351a31d3a6379972a5652f0ea22a1b6d6883324ac4f5097c AS rust
 WORKDIR /src/services/hermes-manager
 COPY services/hermes-manager/Cargo.toml services/hermes-manager/Cargo.lock services/hermes-manager/rust-toolchain.toml ./
+# The server embeds the definition schemas it validates against.
+COPY contracts/hermes-manager/schemas/ /src/contracts/hermes-manager/schemas/
 COPY services/hermes-manager/crates/ ./crates/
 # Only the two binaries; test features such as fault injection stay off.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

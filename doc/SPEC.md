@@ -319,8 +319,23 @@ Hermes configuration precedence, highest first:
 
 Layers 1–3 form the read-only managed configuration. They are not copied into
 the user's file, so removing an override exposes the user's retained value
-again. `adminConfig` is limited to 8 KiB and must not contain secret values;
-use admin secrets instead.
+again. `adminConfig` is limited to 8 KiB and 16 levels of nesting and must
+not contain secret values; use admin secrets instead. A template refuses a
+setting named like a credential or personal data (`sensitive_field`) unless its
+value is only a `${NAME}` reference to an environment variable that an admin
+secret delivers.
+
+Validation of a template or a terminal backend belongs to the manager alone.
+`POST …/validate` checks a definition completely and stores nothing: first its
+shape (unknown, missing or mistyped settings, values out of range, malformed
+names, paths and images), then, once the shape is sound, the installation's
+storage sources, the admin secrets it names and the content rules of its
+settings. Every finding carries a JSON pointer and a stable code. A finding of
+severity `error` refuses publication, which runs the same checks; one of
+severity `warning`, such as `unvalidated` for a template setting outside the
+reviewed terminal and plugin settings, is reported and the setting is kept.
+Saving a draft checks only that the request is well formed, so a draft may be
+incomplete.
 
 How admin secrets work:
 
