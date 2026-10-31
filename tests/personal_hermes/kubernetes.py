@@ -99,6 +99,42 @@ def import_worker_image(identifier, temporary, *, uid=1000, gid=1000):
     return import_image(identifier, tag, temporary)
 
 
+FIXED_ENTRYPOINT = """#!/bin/sh
+set -eu
+mkdir -p /home/worker/hostkeys
+cp /etc/ssh/hostkeys/ssh_host_ed25519_key /home/worker/hostkeys/ssh_host_ed25519_key
+chmod 600 /home/worker/hostkeys/ssh_host_ed25519_key
+exec /usr/sbin/sshd -D -e
+"""
+
+
+def import_fixed_worker_image(identifier, temporary):
+    """Builds a custom worker image that keeps the `worker` identity it was built
+    with (1000:1000) and never binds the account to the identity it runs as;
+    returns its digest reference."""
+    base, tag = "hermes-worker-fixed-base:test", "hermes-worker-fixed:test"
+    command(
+        [
+            "docker",
+            "build",
+            "--quiet",
+            "--tag",
+            base,
+            str(ROOT / "runtimes/agent-runtime"),
+        ],
+        timeout=600,
+    )
+    context = Path(temporary) / "fixed-worker"
+    context.mkdir()
+    (context / "Dockerfile").write_text(
+        f"FROM {base}\nUSER root\nCOPY entrypoint.sh /entrypoint.sh\n"
+        "RUN chmod 755 /entrypoint.sh\nUSER worker\n"
+    )
+    (context / "entrypoint.sh").write_text(FIXED_ENTRYPOINT)
+    command(["docker", "build", "--quiet", "--tag", tag, str(context)], timeout=600)
+    return import_image(identifier, tag, temporary)
+
+
 def start_k3s(network, name, run):
     """Starts a digest-pinned k3s server container labelled with its run;
     returns its ID."""

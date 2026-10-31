@@ -50,6 +50,7 @@ from tests.personal_hermes.kubernetes import (
     ROOT,
     WORKER_TAG,
     command,
+    import_fixed_worker_image,
     import_image,
     import_worker_image,
     remove_container,
@@ -2249,9 +2250,12 @@ def bobs_backends_share_the_workspace_and_idle_workers_retire(
 def a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
     identifier, admin, template, worker
 ):
-    """A backend-only folder belongs to its worker identity; mismatches fail."""
+    """A backend-only folder belongs to its worker identity. The default image
+    takes any identity and a specialized image bakes one; a custom image that
+    ignores the identity it runs as fails."""
     with tempfile.TemporaryDirectory(prefix="hermes-other-identity-") as temporary:
-        image = import_worker_image(identifier, temporary, uid=2000, gid=3000)
+        baked = import_worker_image(identifier, temporary, uid=2000, gid=3000)
+        fixed = import_fixed_worker_image(identifier, temporary)
     folder = "other-user-" + uuid.uuid4().hex[:8]
     command(
         [
@@ -2272,9 +2276,15 @@ def a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
         "limits": {"idleSeconds": 60, "maxLeaseSeconds": 900, "maxEnvironments": 2},
         "mounts": {"drive": {"mountPath": "/drive"}},
     }
-    good = admin.publish("terminal-backends", folder, {**definition, "image": image})
-    bad_id = folder + "-bad"
-    bad = admin.publish("terminal-backends", bad_id, definition)
+    baked_id, bad_id = folder + "-baked", folder + "-bad"
+    # The default image (in `worker`) is not built for 2000:3000.
+    served = {
+        folder: admin.publish("terminal-backends", folder, definition),
+        baked_id: admin.publish(
+            "terminal-backends", baked_id, {**definition, "image": baked}
+        ),
+    }
+    bad = admin.publish("terminal-backends", bad_id, {**definition, "image": fixed})
     receipt = admin.call(
         "POST",
         "/api/v1/assignments",
@@ -2284,7 +2294,10 @@ def a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
                 "access": "enabled",
                 "template": {"id": "personal", "version": template},
                 "volumes": {"drive": {"source": "host", "path": folder}},
-                "terminal": {"default": folder, "allowed": {folder: good, bad_id: bad}},
+                "terminal": {
+                    "default": folder,
+                    "allowed": {**served, bad_id: bad},
+                },
             },
         },
     ).json()
@@ -2302,26 +2315,31 @@ def a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
 provider = managed_execution.Provider(Context("BACKEND"))
 worker = provider.create_environment(
     cwd="/drive", timeout=120, task_id="other-identity")
-result = worker.execute("id -u; id -g; printf owned > /drive/created; "
-                        "test ! -e /opt/data")
+result = worker.execute("rm -f /drive/created; id -u; id -g; id -un; "
+                        "printf owned > /drive/created; test ! -e /opt/data")
 worker.cleanup()
 print(json.dumps(result))
 """
     )
-    result = hermes_python(identifier, namespace, script.replace("BACKEND", folder))
-    assert result["returncode"] == 0 and result["output"].split() == ["2000", "3000"]
-    ownership = command(
-        [
-            "docker",
-            "exec",
-            identifier,
-            "stat",
-            "-c",
-            "%u:%g",
-            f"/srv/hermes-data/{folder}/created",
-        ]
-    )
-    assert ownership.strip() == "2000:3000", ownership
+    for backend in served:
+        result = hermes_python(
+            identifier, namespace, script.replace("BACKEND", backend)
+        )
+        assert result["returncode"] == 0, (backend, result)
+        # The account is `worker` at the declared identity, whichever image.
+        assert result["output"].split() == ["2000", "3000", "worker"], (backend, result)
+        ownership = command(
+            [
+                "docker",
+                "exec",
+                identifier,
+                "stat",
+                "-c",
+                "%u:%g",
+                f"/srv/hermes-data/{folder}/created",
+            ]
+        )
+        assert ownership.strip() == "2000:3000", (backend, ownership)
     home = instance_pod_exec(
         identifier,
         namespace,

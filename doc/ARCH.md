@@ -301,8 +301,9 @@ pass as its instance:
    shell runs as the backend version's declared UID. A different shell UID,
    host-key mismatch or explicit authentication refusal gives `contract_failed`,
    as does a key that is accepted while three fresh logins in a row open no
-   session: sshd does that when the image's `worker` user is not the UID the Pod
-   runs as.
+   session: sshd does that when a custom image bakes a `worker` user of another
+   UID than the Pod runs as and does not adapt. The default image binds the
+   account to the Pod's identity at every start and cannot be mismatched.
    This probe checks UID, not GID; the Pod's group and `fsGroup` come from the
    backend record.
 

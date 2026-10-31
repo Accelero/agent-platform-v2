@@ -30,25 +30,36 @@ published versions:
 
 - **Image.** The image is pinned by digest. Custom images must implement
   `managed-ssh-v2`:
-  - non-root user `worker` with the version's declared UID/GID;
+  - a non-root user `worker` that is the version's declared UID/GID when the
+    container runs;
   - SSH on port 2222;
   - the authorized key at `/etc/ssh/authorized_keys/worker`;
   - the provisioned host key at `/etc/ssh/hostkeys/ssh_host_ed25519_key`;
   - shell and file transfer.
 
-  The repository's `agent-runtime` image implements this contract.
+  The repository's `agent-runtime` image implements this contract for any
+  declared UID and GID. At every start its entrypoint binds the account
+  `worker` to the identity the Pod runs as: the root file system is read-only,
+  so it rebuilds the account files below `/tmp` and points the user lookup
+  (`nss_wrapper`) at them, for sshd and for every SSH session. One image
+  therefore serves every backend identity, and the manager only sets
+  `runAsUser`, `runAsGroup` and `fsGroup` from the backend record.
 - **UID and GID.** Each is an integer from 1 through 4294967294. The
   administrator chooses them in the backend version; no installation allow-list
-  applies, and neither user nor agent can override them. They must match the
-  image's `worker` user. Hermes and its private home keep the data identity.
+  applies, and neither user nor agent can override them. The image's `worker`
+  user must be that identity when the container runs, which the default image
+  ensures itself. Hermes and its private home keep the data identity.
   Shared volumes are reliably usable with equal identities; different identities
   follow ordinary Unix permissions and may fail. There is no mapping or warning.
   Use backend-only volumes to give an agent another identity.
 
-  Build `runtimes/agent-runtime/Dockerfile` with
-  `--build-arg HOST_UID=<uid> --build-arg HOST_GID=<gid>`, or derive from
-  `agent-runtime` and recreate the `worker` user with those IDs. The release
-  provides one default image; no additional identity variants are published.
+  The default image needs no build per identity, and the release provides only
+  that image. A specialized image is possible when an image cannot bind the
+  account itself, for example one with its own entrypoint or SSH server. It
+  must provide a `worker` user with exactly the backend's UID and GID. Building
+  `runtimes/agent-runtime/Dockerfile` with `--build-arg HOST_UID=<uid>
+  --build-arg HOST_GID=<gid>` sets the identity of the account baked into the
+  image, which only applies to runs outside the manager.
 - **Mount slots.** Each slot names a volume and the path where it appears in
   the container. The assignment decides which actual volume fills the slot.
   A slot is required unless it is marked `optional`. If a required slot is
@@ -68,9 +79,10 @@ the instance's environments in the dashboard:
 
 A missing or mismatched image user can prevent startup (`start_failed`) or
 leave SSH unable to open a session as the declared UID (`contract_failed`),
-depending on the image. An image whose `worker` user has another UID than the
-backend declares starts and listens, then sshd accepts the key and resets the
-connection when the session opens. The readiness probe verifies `id -u`; it
+depending on the image. The default image cannot be mismatched. A custom image
+that bakes a `worker` user of another UID than the backend declares, and does
+not bind the account to the identity it runs as, starts and listens; sshd then
+accepts the key and resets the connection when the session opens. The readiness probe verifies `id -u`; it
 does not query the shell's GID. Other connection failures and SSH timeouts
 remain pending and are checked again, and so does a single refused session.
 
@@ -247,41 +259,3 @@ Not supported:
 
 - **Prewarming.** A worker is created on the first acquisition, not before.
 - **Service egress.** Terminal backends get no egress to cluster Services.
-
-## Planned: one worker image for any UID
-
-Not built, and no route is chosen. Today an image is built for exactly one
-UID/GID (the `HOST_UID` and `HOST_GID` build arguments), so a backend that
-declares another UID needs its own image, and a mismatch ends as
-`contract_failed`. The goal is that the default `agent-runtime` image runs as
-whatever UID and GID the backend declares, so an administrator sets only the
-two numbers. Isolation does not change: users are separated by their own
-Pods, Secrets, network policy and volumes, not by UID, and the image holds no
-per-user data.
-
-Two routes are possible:
-
-- **Manager-rendered account files.** The manager renders `passwd` and `group`
-  entries for `worker` from the backend's UID and GID and mounts them into the
-  worker Pod, as it mounts the authorized key and host key today, with
-  `/home/worker` as a writable scratch volume. This replaces the image's whole
-  account list.
-- **Entrypoint-built account files.** The entrypoint writes a copy of the
-  account files with the running UID into `/tmp` and points the user lookup at
-  it (`nss_wrapper`). This keeps the accounts the image defines but adds a
-  helper library to the image.
-
-Decide or do first:
-
-- Try both routes: whether OpenSSH runs as a non-root UID with a synthetic
-  account on a read-only root filesystem, and what the session then needs
-  (home directory, shell, `git`).
-- Choose the route, and decide which paths the image now owns by its build UID
-  (`/home/worker`, `/workspace`, the host-key folder) become volumes or are made
-  readable by any UID.
-- Decide whether `managed-ssh-v2` changes, and what happens to custom images
-  that still bake a UID.
-- Drop the Dockerfile's `chpasswd` call, which sets a real password string on
-  `worker` (password login is off); a generated account needs none.
-- Replace the alternate-identity image of the native scenario with one image
-  run as two different UIDs.
