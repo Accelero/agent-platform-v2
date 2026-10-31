@@ -31,9 +31,13 @@ mutable application state or deployment-specific backup scripts.
 
 `doc/SPEC.md` (what) and `doc/ARCH.md` (how) define the manager and gateway;
 keep the guides in `doc/personal-hermes/` and the implementation status there in step
-with the code. Documentation describes what is built: no plans, phases or
-migration history. The one exception is `doc/testing/gaps.md`, the register of
-test work still to do; delete an entry once its completion criteria hold.
+with the code. Documentation describes what is built and may also record
+planned work and open decisions anywhere in `doc/`. Mark every such passage
+as planned (a "Planned" or "Open decisions" heading or label), keep it apart
+from the built behaviour and say what must be decided or done first. Do not
+write migration history. `doc/testing/gaps.md` stays the register of test work
+still to do; delete an entry, or turn a plan into built-behaviour text, once its
+completion criteria hold.
 Manager code follows these rules:
 
 - Every desired-state write is a `Command` run through the command envelope.
