@@ -32,6 +32,12 @@ pub trait Definition:
     /// Checks the definition against installation settings, for publication.
     fn check(&self, settings: &Settings) -> Result<(), Vec<Problem>>;
 
+    /// Findings that never refuse the definition, such as settings without a
+    /// reviewed schema.
+    fn warnings(&self) -> Vec<Problem> {
+        Vec::new()
+    }
+
     /// The secrets the definition names, with the kind each use requires.
     fn secret_uses(&self) -> Vec<SecretUse>;
 }
@@ -90,6 +96,10 @@ impl Definition for TemplateDefinition {
 
     fn check(&self, settings: &Settings) -> Result<(), Vec<Problem>> {
         self.validate(&settings.sources)
+    }
+
+    fn warnings(&self) -> Vec<Problem> {
+        TemplateDefinition::warnings(self)
     }
 
     fn secret_uses(&self) -> Vec<SecretUse> {
@@ -319,13 +329,22 @@ impl<D: Definition> Command for Withdraw<D> {
     }
 }
 
+/// What validating a definition found.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Findings {
+    /// Problems that refuse publication.
+    pub problems: Vec<Problem>,
+    /// Findings that do not.
+    pub warnings: Vec<Problem>,
+}
+
 /// Validates a definition against installation settings and existing
 /// secrets, storing nothing.
 pub async fn validate<S: Store, D: Definition>(
     store: &S,
     settings: &Settings,
     definition: &D,
-) -> Result<Vec<Problem>, AppError> {
+) -> Result<Findings, AppError> {
     let mut problems = definition.check(settings).err().unwrap_or_default();
     let mut tx = store.begin().await?;
     match check_secret_uses(&mut tx, &definition.secret_uses()).await {
@@ -333,5 +352,8 @@ pub async fn validate<S: Store, D: Definition>(
         Err(Failure::Rejected(error)) => return Err(error),
         Err(Failure::Store(error)) => return Err(error.into()),
     }
-    Ok(problems)
+    Ok(Findings {
+        problems,
+        warnings: definition.warnings(),
+    })
 }

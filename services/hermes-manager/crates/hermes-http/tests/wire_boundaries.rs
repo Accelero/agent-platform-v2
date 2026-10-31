@@ -165,6 +165,14 @@ fn draft() -> Value {
     json!({"definition": template_fixture()})
 }
 
+/// The answer for the valid template fixture: no problem, and the one warning
+/// that its `model` setting has no reviewed schema.
+fn fixture_answer() -> Value {
+    json!({"valid": true, "problems": [
+        {"pointer": "/adminConfig/model", "code": "unvalidated", "severity": "warning"}
+    ]})
+}
+
 #[sqlx::test(migrator = "hermes_store::MIGRATOR")]
 async fn a_sized_body_is_accepted_at_exactly_16_kib_and_refused_one_byte_over(pool: PgPool) {
     let fixture = Fixture::new(pool).await;
@@ -179,7 +187,7 @@ async fn a_sized_body_is_accepted_at_exactly_16_kib_and_refused_one_byte_over(po
         let response = wire.post(path, None, &padded(&draft(), size)).await;
         if accepted {
             assert_eq!(response.status, 200, "{size} bytes");
-            assert_eq!(response.json(), json!({"valid": true, "problems": []}));
+            assert_eq!(response.json(), fixture_answer());
             wire.conforms("validateTemplate", &response);
         } else {
             wire.assert_refused("validateTemplate", &response, "one byte over");
@@ -197,7 +205,7 @@ async fn a_streamed_body_without_a_length_has_the_same_exact_bound(pool: PgPool)
         let response = wire.post_chunked(path, None, &padded(&draft(), size)).await;
         if accepted {
             assert_eq!(response.status, 200, "{size} streamed bytes");
-            assert_eq!(response.json(), json!({"valid": true, "problems": []}));
+            assert_eq!(response.json(), fixture_answer());
         } else {
             wire.assert_refused("validateTemplate", &response, "streamed one byte over");
         }
@@ -660,14 +668,17 @@ async fn admin_config_is_limited_to_8_kib_of_serialized_json(pool: PgPool) {
             if accepted {
                 assert_eq!(
                     reply,
-                    json!({"valid": true, "problems": []}),
+                    json!({"valid": true, "problems": [
+                        {"pointer": "/adminConfig/x", "code": "unvalidated", "severity": "warning"}
+                    ]}),
                     "{case} {size}"
                 );
             } else {
                 assert_eq!(
                     reply,
                     json!({"valid": false, "problems": [
-                        {"pointer": "/adminConfig", "code": "too_large", "severity": "error"}
+                        {"pointer": "/adminConfig", "code": "too_large", "severity": "error"},
+                        {"pointer": "/adminConfig/x", "code": "unvalidated", "severity": "warning"}
                     ]}),
                     "{case} {size}"
                 );

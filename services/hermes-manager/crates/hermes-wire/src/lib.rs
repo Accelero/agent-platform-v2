@@ -33,6 +33,26 @@ pub fn problems(problems: &[Problem]) -> Vec<ProblemBody> {
     problems.iter().take(64).map(ProblemBody::from).collect()
 }
 
+impl ProblemBody {
+    /// A finding that does not refuse the definition.
+    pub fn warning(problem: &Problem) -> Self {
+        Self {
+            severity: "warning",
+            ..Self::from(problem)
+        }
+    }
+}
+
+/// The findings of a validation: refusing problems first, then warnings.
+pub fn findings(problems: &[Problem], warnings: &[Problem]) -> Vec<ProblemBody> {
+    problems
+        .iter()
+        .map(ProblemBody::from)
+        .chain(warnings.iter().map(ProblemBody::warning))
+        .take(64)
+        .collect()
+}
+
 /// The body of every error response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ErrorBody {

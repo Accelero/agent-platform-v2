@@ -8,7 +8,9 @@ use sha2::{Digest, Sha256};
 
 use super::names::validate_image;
 use super::secrets::{SecretReference, validate_references};
-use super::settings::validate_admin_config;
+use super::settings::{
+    unvalidated_admin_keys, validate_admin_config, validate_admin_config_content,
+};
 use super::storage::{
     HERMES_RESERVED, MAX_VOLUME_GIB, StorageSources, VolumeSpec, validate_mount_paths,
 };
@@ -104,8 +106,15 @@ impl TemplateDefinition {
             volume.validate(sources, &at, &mut problems);
         }
         validate_admin_config(&self.admin_config, "/adminConfig", &mut problems);
+        validate_admin_config_content(&self.admin_config, "/adminConfig", &mut problems);
         validate_references(&self.secrets, "/secrets", &mut problems);
         problems.into_result()
+    }
+
+    /// Findings that never refuse a definition: settings without a reviewed
+    /// schema.
+    pub fn warnings(&self) -> Vec<Problem> {
+        unvalidated_admin_keys(&self.admin_config, "/adminConfig")
     }
 
     /// SHA-256 of the canonical serialization, lowercase hex.

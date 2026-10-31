@@ -130,14 +130,19 @@ async fn templates_move_from_draft_to_published_to_withdrawn(pool: PgPool) {
     assert_eq!(missing.status, 200);
     assert_eq!(
         missing.body,
-        json!({"valid": false, "problems": [{"pointer": "/secrets/0/name", "code": "unknown_secret", "severity": "error"}]})
+        json!({"valid": false, "problems": [
+            {"pointer": "/secrets/0/name", "code": "unknown_secret", "severity": "error"},
+            {"pointer": "/adminConfig/model", "code": "unvalidated", "severity": "warning"}
+        ]})
     );
     fixture
         .write_secret("llm-key", "env", LLM_KEY, "secret")
         .await;
     assert_eq!(
         validate("present").await.body,
-        json!({"valid": true, "problems": []})
+        json!({"valid": true, "problems": [
+            {"pointer": "/adminConfig/model", "code": "unvalidated", "severity": "warning"}
+        ]})
     );
 
     let base = "/api/v1/templates/standard/versions";
@@ -415,9 +420,12 @@ async fn publication_refuses_definitions_the_installation_cannot_honour(pool: Pg
                 .json(&json!({"definition": unknown})),
         )
         .await;
+    assert_eq!(structural.status, 200);
     assert_eq!(
-        (structural.status, structural.error()),
-        (422, "invalid_request")
+        structural.body,
+        json!({"valid": false, "problems": [
+            {"pointer": "/privileged", "code": "unknown_setting", "severity": "error"}
+        ]})
     );
 }
 
@@ -1332,4 +1340,141 @@ async fn instance_environments_are_listed_without_keys_or_addresses(pool: PgPool
         )
         .await;
     assert_eq!(missing.status, 404);
+}
+
+/// Validates one template definition and returns the findings as
+/// `(pointer, code, severity)`.
+async fn findings(
+    fixture: &Fixture,
+    case: &'static str,
+    definition: Value,
+) -> Vec<(String, String, String)> {
+    let reply = fixture
+        .call(
+            "validateTemplate",
+            fixture
+                .api(Method::POST, "/api/v1/templates/validate")
+                .header("x-case", case)
+                .json(&json!({"definition": definition})),
+        )
+        .await;
+    assert_eq!(reply.status, 200, "{case}: {:?}", reply.body);
+    reply.body["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let text = |key: &str| p[key].as_str().unwrap().to_owned();
+            (text("pointer"), text("code"), text("severity"))
+        })
+        .collect()
+}
+
+fn finding(pointer: &str, code: &str, severity: &str) -> (String, String, String) {
+    (pointer.to_owned(), code.to_owned(), severity.to_owned())
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn validation_is_complete_and_reports_every_problem_where_it_is(pool: PgPool) {
+    let fixture = Fixture::new(pool).await;
+    fixture
+        .write_secret("llm-key", "env", LLM_KEY, "secret")
+        .await;
+
+    // Shape, installation settings and content are found together, in one
+    // answer, each at its place; a warning never makes a definition invalid.
+    let mut template = template_fixture();
+    template["image"] = json!("");
+    template["colour"] = json!("red");
+    template["resources"]["cpuMillis"] = json!("many");
+    template["home"]["source"] = json!("unapproved");
+    let shape = findings(&fixture, "shape", template.clone()).await;
+    assert_eq!(
+        shape,
+        [
+            finding("/colour", "unknown_setting", "error"),
+            finding("/image", "invalid_image", "error"),
+            finding("/resources/cpuMillis", "invalid_type", "error"),
+        ],
+        "installation settings are checked once the shape is sound"
+    );
+    template["image"] = template_fixture()["image"].clone();
+    template.as_object_mut().unwrap().remove("colour");
+    template["resources"]["cpuMillis"] = json!(1000);
+    assert_eq!(
+        findings(&fixture, "settings", template).await,
+        [
+            finding("/home/source", "unknown_storage_source", "error"),
+            finding("/adminConfig/model", "unvalidated", "warning"),
+        ]
+    );
+
+    let mut content = template_fixture();
+    content["adminConfig"] = json!({
+        "model": {"api_key": "sk-live-123", "base_url": "https://llm.example.org"},
+        "terminal": {"runtime_id": "x".repeat(64)},
+        "plugins": {"enabled": ["a", 1]},
+    });
+    assert_eq!(
+        findings(&fixture, "content", content).await,
+        [
+            finding("/adminConfig/model/api_key", "sensitive_field", "error"),
+            finding("/adminConfig/terminal/runtime_id", "too_large", "error"),
+            finding("/adminConfig/plugins/enabled/1", "invalid_type", "error"),
+            finding("/adminConfig/model", "unvalidated", "warning"),
+        ]
+    );
+
+    // A reference to an admin secret is not a secret.
+    let mut reference = template_fixture();
+    reference["adminConfig"] =
+        json!({"terminal": {}, "plugins": {}, "model": {"api_key": "${LLM_KEY}"}});
+    assert_eq!(
+        findings(&fixture, "reference", reference).await,
+        [finding("/adminConfig/model", "unvalidated", "warning")]
+    );
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn publication_refuses_what_validation_refuses_for_the_content_of_settings(pool: PgPool) {
+    let fixture = Fixture::new(pool).await;
+    fixture
+        .write_secret("llm-key", "env", LLM_KEY, "secret")
+        .await;
+    let mut template = template_fixture();
+    template["adminConfig"] = json!({"model": {"password": "hunter2"}});
+    let draft = json!({"definition": template});
+    let created = fixture
+        .call(
+            "createTemplateDraft",
+            fixture.mutate(
+                Method::POST,
+                "/api/v1/templates/leaky/versions",
+                "create",
+                Some(&draft),
+            ),
+        )
+        .await;
+    assert_eq!(created.status, 201, "drafts may be incomplete");
+    let refused = fixture
+        .call(
+            "publishTemplate",
+            fixture
+                .mutate(
+                    Method::POST,
+                    "/api/v1/templates/leaky/versions/1/publish",
+                    "publish",
+                    None,
+                )
+                .header("if-match", if_match(1)),
+        )
+        .await;
+    assert_eq!(
+        (refused.status, refused.error()),
+        (422, "invalid_configuration")
+    );
+    assert_eq!(
+        refused.body["problems"],
+        json!([{"pointer": "/adminConfig/model/password", "code": "sensitive_field", "severity": "error"}])
+    );
 }

@@ -9,12 +9,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use hermes_core::app::catalog::{self, CreateDraft, Definition, EditDraft, Publish, Withdraw};
+use hermes_core::app::error::AppError;
 use hermes_core::app::queries::search;
 use hermes_core::domain::names::validate_name;
 use hermes_wire::admin::{Draft, Validation};
 use serde::Deserialize;
+use serde_json::{Map, Value};
 
 use super::auth::Authenticated;
+use super::definitions;
 use super::support::{
     Body, NOT_FOUND, idempotency_key, if_match, page, query, request_id, tagged, with_status,
 };
@@ -115,14 +118,32 @@ async fn version<S: AdminStore, D: Definition>(
     Ok(tagged(found.revision, &found))
 }
 
+/// Validates a definition completely and stores nothing: first its shape,
+/// then, once the shape is sound, the installation's settings, the admin
+/// secrets it names and the content rules of its settings.
 async fn validate<S: AdminStore, D: Definition>(
     State(state): State<Arc<AdminState<S>>>,
-    Body(draft): Body<Draft<D>>,
+    Body(mut draft): Body<Map<String, Value>>,
 ) -> Result<Response, ApiError> {
-    let problems = catalog::validate(&state.store, &state.settings, &draft.definition).await?;
+    // The request is `{"definition": …}` and nothing else; the definition
+    // itself stays as submitted so that its problems can be reported at their
+    // place.
+    let (Some(definition), true) = (draft.remove("definition"), draft.is_empty()) else {
+        return Err(AppError::invalid().into());
+    };
+    let shape = definitions::structural_problems(D::KIND, &definition);
+    if !shape.is_empty() {
+        return Ok(Json(Validation {
+            valid: false,
+            problems: hermes_wire::problems(&shape),
+        })
+        .into_response());
+    }
+    let definition: D = serde_json::from_value(definition).map_err(|_| AppError::invalid())?;
+    let found = catalog::validate(&state.store, &state.settings, &definition).await?;
     Ok(Json(Validation {
-        valid: problems.is_empty(),
-        problems: hermes_wire::problems(&problems),
+        valid: found.problems.is_empty(),
+        problems: hermes_wire::findings(&found.problems, &found.warnings),
     })
     .into_response())
 }

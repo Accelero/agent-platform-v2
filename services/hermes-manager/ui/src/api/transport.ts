@@ -27,7 +27,7 @@ export type Body<T extends keyof operations> = operations[T] extends {
 export type ConfigurationProblem = {
   pointer: string;
   code: string;
-  /** The server reports errors; "warning" is a local, advisory hint. */
+  /** An error refuses publication; a warning is reported and kept. */
   severity: "error" | "warning";
   message: string;
 };
@@ -101,6 +101,16 @@ const problemMessages: Record<string, string> = {
   template_unavailable: "This template version is not published.",
   unsupported_schema: "This schema version is not supported.",
   unsupported_contract: "Terminal backends must implement managed-ssh-v2.",
+  invalid_type: "This value has the wrong type.",
+  missing_setting: "This required setting is missing.",
+  unknown_setting: "This setting is not recognised.",
+  too_short: "This value is shorter than the supported minimum.",
+  invalid_format: "This value does not match the required format.",
+  unsupported_value: "This value is not supported.",
+  depth_limit: "Nesting deeper than 16 levels is not supported.",
+  unvalidated: "This setting is preserved but has no reviewed schema coverage.",
+  sensitive_field:
+    "This looks like a credential or personal data. Reference an admin secret instead of storing it here.",
 };
 export function problemMessage(code: string) {
   return (
@@ -137,7 +147,7 @@ function problemsOf(body: unknown): ConfigurationProblem[] {
   return body.problems
     .slice(0, 64)
     .filter(
-      (value): value is { pointer: string; code: string } =>
+      (value): value is { pointer: string; code: string; severity?: unknown } =>
         !!value &&
         typeof value === "object" &&
         typeof value.pointer === "string" &&
@@ -147,7 +157,10 @@ function problemsOf(body: unknown): ConfigurationProblem[] {
     .map((value) => ({
       pointer: value.pointer,
       code: value.code,
-      severity: "error" as const,
+      severity:
+        value.severity === "warning"
+          ? ("warning" as const)
+          : ("error" as const),
       message: problemMessage(value.code),
     }));
 }

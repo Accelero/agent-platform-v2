@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, createIntent } from "./api";
+import { api, ApiError, createIntent, displayProblems } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -117,6 +117,49 @@ describe("administration client", () => {
     expect(() =>
       createIntent()("PATCH", "/api/v1/assignments/a", {}, "c", null),
     ).toThrow("Refresh");
+  });
+  it("keeps a warning a warning and gives every validation code its own message", () => {
+    const codes = [
+      "invalid_image",
+      "out_of_range",
+      "invalid_name",
+      "invalid_path",
+      "invalid_type",
+      "invalid_format",
+      "missing_setting",
+      "unknown_setting",
+      "too_large",
+      "too_short",
+      "unsupported_schema",
+      "unsupported_contract",
+      "unsupported_value",
+      "one_delivery_required",
+      "platform_enforced",
+      "depth_limit",
+      "sensitive_field",
+      "unvalidated",
+    ];
+    const shown = displayProblems({
+      valid: true,
+      problems: [
+        ...codes.map((code) => ({
+          pointer: `/${code}`,
+          code,
+          severity: "error",
+        })),
+        {
+          pointer: "/adminConfig/model",
+          code: "unvalidated",
+          severity: "warning",
+        },
+      ],
+    });
+    expect(shown.at(-1)?.severity).toBe("warning");
+    expect(shown.slice(0, -1).every((p) => p.severity === "error")).toBe(true);
+    for (const problem of shown)
+      expect(problem.message, problem.code).not.toContain(
+        "Review this setting against",
+      );
   });
   it("keeps only well-formed problems and never echoes server text", async () => {
     vi.stubGlobal(

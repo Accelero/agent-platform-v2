@@ -1,9 +1,5 @@
 import { parseTree, getNodeValue, findNodeAtLocation } from "jsonc-parser";
 import type { ParseError, Node } from "jsonc-parser";
-import templateValidator from "../../schemas/generated/template.js";
-import backendValidator from "../../schemas/generated/backend.js";
-import managedValidator from "../../schemas/generated/managed.js";
-import type { CatalogCollection, ConfigurationProblem } from "../../api";
 export { initialDefinition } from "./initial";
 export type Draft = Record<string, unknown>;
 export function parseDraft(text: string): {
@@ -102,82 +98,6 @@ export function setPath(
   if (remove) delete target[path.at(-1)!];
   else target[path.at(-1)!] = next;
   return result;
-}
-/** Browser-side checks; the server's validation is authoritative. */
-export function validateDraft(
-  value: unknown,
-  collection: CatalogCollection = "templates",
-): ConfigurationProblem[] {
-  const problems: ConfigurationProblem[] = [];
-  const add = (
-    pointer: string,
-    code: string,
-    severity: "error" | "warning" = "error",
-  ) =>
-    problems.push({
-      pointer,
-      code,
-      severity,
-      message:
-        severity === "error"
-          ? "Review this setting against the configuration policy."
-          : "This setting is preserved but has no reviewed schema coverage.",
-    });
-  const validator =
-    collection === "templates" ? templateValidator : backendValidator;
-  if (!validator(value))
-    for (const error of validator.errors ?? [])
-      add(error.instancePath, "schema");
-  if (collection !== "templates") return problems.slice(0, 64);
-  const config = (value as { adminConfig?: unknown })?.adminConfig;
-  if (config !== undefined) {
-    if (!managedValidator(config))
-      for (const error of managedValidator.errors ?? [])
-        add(`/adminConfig${error.instancePath}`, "schema");
-    const typed = config as {
-      terminal?: { backend?: unknown };
-      plugins?: { disabled?: unknown[] };
-    };
-    if (
-      typed?.terminal?.backend !== undefined &&
-      typed.terminal.backend !== "managed_execution"
-    )
-      add("/adminConfig/terminal/backend", "managed_execution_required");
-    if (
-      Array.isArray(typed?.plugins?.disabled) &&
-      typed.plugins.disabled.includes("managed_execution")
-    )
-      add("/adminConfig/plugins/disabled", "managed_execution_required");
-    if (new TextEncoder().encode(JSON.stringify(config)).length > 8192)
-      add("/adminConfig", "size_limit");
-    const inspect = (item: unknown, path: string, depth: number) => {
-      if (depth > 16) {
-        add(path, "depth_limit");
-        return;
-      }
-      if (item && typeof item === "object")
-        for (const [key, child] of Object.entries(item)) {
-          const pointer = `${path}/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`;
-          if (
-            /apikey|password|token|secret|prompt|identity|memory|profile|credential|authorization/.test(
-              key.toLowerCase().replace(/[_-]/g, ""),
-            )
-          )
-            add(pointer, "sensitive_field");
-          else inspect(child, pointer, depth + 1);
-        }
-    };
-    inspect(config, "/adminConfig", 0);
-    if (config && typeof config === "object")
-      for (const key of Object.keys(config))
-        if (!["terminal", "plugins"].includes(key))
-          add(
-            `/adminConfig/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`,
-            "unvalidated",
-            "warning",
-          );
-  }
-  return problems.slice(0, 64);
 }
 export function changedPaths(
   before: unknown,

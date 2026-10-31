@@ -148,7 +148,7 @@ export function ProblemList({
   return (
     <ul className="problems" aria-label="Configuration problems">
       {problems.map((problem) => (
-        <li key={`${problem.pointer}-${problem.code}`}>
+        <li key={`${problem.pointer}-${problem.code}-${problem.message}`}>
           <code>{problem.pointer || "/"}</code> {problem.message}{" "}
           <span className="pill">{problem.code}</span>
         </li>

@@ -350,7 +350,7 @@ paths:
             schema: { $ref: '#/components/schemas/TemplateDraft' }
       responses:
         '200':
-          description: Validation against installation settings; nothing is stored
+          description: The complete validation of the definition, nothing stored. A definition of the wrong shape (an unknown, missing or mistyped setting, a value out of range) is reported as problems at their place, not refused; the installation settings, the admin secrets it names and the content rules of its settings are checked once its shape is sound
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Validation' }
@@ -504,7 +504,7 @@ paths:
             schema: { $ref: '#/components/schemas/BackendDraft' }
       responses:
         '200':
-          description: Validation against installation settings; nothing is stored
+          description: The complete validation of the definition, nothing stored. A definition of the wrong shape (an unknown, missing or mistyped setting, a value out of range) is reported as problems at their place, not refused; the installation settings, the admin secrets it names and the content rules of its settings are checked once its shape is sound
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Validation' }
@@ -993,7 +993,10 @@ components:
       properties:
         pointer: { type: string, description: JSON pointer into the submitted document }
         code: { type: string, description: 'A stable machine-readable code such as `unknown_secret`, `wrong_secret_kind` or `unknown_storage_source`; the set can grow' }
-        severity: { type: string, enum: [error] }
+        severity:
+          type: string
+          enum: [error, warning]
+          description: An `error` refuses publication; a `warning` reports something that is kept as given, such as a setting without a reviewed schema (`unvalidated`)
     Error:
       type: object
       additionalProperties: false
@@ -1141,7 +1144,7 @@ components:
       additionalProperties: false
       required: [valid, problems, restartsHermes, recreatesTerminals]
       properties:
-        valid: { type: boolean }
+        valid: { type: boolean, description: False when any problem has severity `error` }
         problems: { type: array, items: { $ref: '#/components/schemas/Problem' } }
         restartsHermes: { type: boolean }
         recreatesTerminals: { type: boolean }
