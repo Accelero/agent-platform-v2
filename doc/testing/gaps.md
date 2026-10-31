@@ -911,6 +911,183 @@ Remaining: execute and report the collected native identity case and full native
 run for the candidate. Remove this entry only after those checks pass, then update
 the R14 coverage evidence.
 
+## G24 — Hermes Desktop through the gateway
+
+**P2 · Design decided; specify, build, then test · R5, R6, R9, R18.**
+
+This entry records a feature the maintainer intends, not test adaptation; the
+preservation rules at the end of this register do not apply to it. Nothing here is
+built. The design is deliberately vanilla: the gateway keeps Hermes's own
+WebSocket tickets unchanged (no swapping or rewriting of tickets), accepts no
+bearer tokens and never advertises the native PKCE flow.
+
+Current: the gateway admits only requests that carry both platform cookies, so
+Hermes Desktop cannot use a gateway hostname as a "Remote gateway". Its first
+call, `GET /api/status`, is answered `401 invalid_identity_evidence`, and the app
+stops at "can't connect". Past that point its live WebSocket would fail too: it is
+opened by the app's main process without cookies, authenticated only by a ticket.
+
+Evidence and its limits: observed with Hermes Desktop 0.22.5 (the Arch/CachyOS
+package `hermes-agent-desktop`, an Electron app) pointed at a local server that
+logged every request and answered the way the gateway would, and by reading the
+installed app (`electron-main.mjs` and its renderer chunks) and the installed
+dashboard (`hermes_cli/dashboard_auth/*`, `web_routers/status.py`,
+`web_routers/chat_ws.py`). It has not been run against a real router, a real
+Keycloak or this repository's Hermes image. Re-derive every upstream detail below
+from the version pinned in `runtimes/hermes/requirements.lock`.
+
+**How Hermes Desktop connects (OAuth mode)**
+
+1. Main process, repeatedly: `GET /api/status`. No cookies, no `Origin`, no
+   `User-Agent`, no `Accept`. It needs `200` JSON and reads `auth_required`
+   (true selects OAuth mode), `auth_flows` and `version`. Any non-2xx answer is
+   shown as "can't connect"; the sign-in button appears only after a good answer.
+2. Main process, only if `auth_required`: `GET /api/auth/providers`, expecting
+   `{"providers": [{"name", "display_name", "supports_password"}]}`.
+3. Login strategy: the app uses the system browser, a loopback port and bearer
+   tokens (`native_pkce`) only if `auth_flows` contains `native_pkce`. Otherwise it
+   opens an embedded Chromium window. A provider list whose entries all support
+   passwords also selects the embedded window.
+4. Embedded window: a `GET /login` navigation (`Accept: text/html`), then whatever
+   redirects follow, with cookies kept in the window's own session. The app counts
+   itself signed in when that session holds a cookie named
+   `__Host-hermes_session_at`, `__Secure-hermes_session_at` or
+   `hermes_session_at`. This is a local cookie-jar check, not a request.
+5. Later REST calls run in the app's main process on Electron's session
+   networking: they carry the window's cookies and no `Origin` or `Referer`.
+6. For every WebSocket dial (first connect, every reconnect, every extra channel)
+   it first sends `POST /api/auth/ws-ticket` with those cookies and expects
+   `200` JSON `{"ticket": "<string>"}`. It then dials
+   `wss://<host>/api/ws?ticket=<ticket>` from Node code with no cookies, no
+   `Origin` and no `User-Agent`. Other channels reuse the URL with another path
+   suffix. There is no periodic refresh: a new ticket is minted for each dial, and
+   a failed dial was retried twice within a second with the same URL.
+7. Error handling: a `401`/`403` from the mint call is reported as "session
+   expired, sign in again". A cookie-authenticated REST `401` triggers the
+   interactive re-login only when its JSON body has `error` equal to
+   `unauthenticated` or `session_expired` and a non-empty `reason`.
+8. Custom per-connection headers are supported and applied to REST and
+   WebSocket calls, except `authorization`, `cookie`, `origin`, `referer`, `host`,
+   `connection`, `upgrade`, `content-type`, `content-length`, `te`, `trailer`,
+   `transfer-encoding` and `x-hermes-session-token`. Not used by this design.
+
+**Upstream ticket facts (installed 0.22.5)**: a ticket is
+`secrets.token_urlsafe(32)` (43 characters of base64url), lives 30 s, works once
+and is kept in memory in the dashboard process. The upgrade carries it as
+`?ticket=` or in the WebSocket subprotocol (the server must not echo it). The
+dashboard's WebSocket routes are `/api/ws`, `/api/pub`, `/api/events`, `/api/pty`,
+`/api/console`, `/api/audio/transcribe-stream`, `/api/audio/speak-stream` and
+`/api/display/ws`; a display ticket is refused as a login. Public, cookie-less
+paths include `/api/status`, `/api/health` and `/api/auth/providers`.
+
+**Design**
+
+1. **Static public answers.** Without a platform session the gateway answers
+   `GET /api/status`, `GET /api/health` and `GET /api/auth/providers` itself, never
+   forwards them and puts no instance or user data in them. All three carry
+   `Cache-Control: no-store` and the gateway's usual hygiene headers. `/api/status`
+   returns `auth_required: true`, `auth_providers` with the one configured
+   provider name, `auth_flows: ["cookie"]` (never `native_pkce`) and a `version`.
+   The probe sent more fields (`release_date`, `gateway_running`, `gateway_state`,
+   `active_sessions`, `overall`, `components`) and the app accepted them; the
+   minimum the app needs must be established and the value of `version` decided.
+   `/api/auth/providers` returns one provider with `supports_password: false`.
+   With a valid platform session the same paths are forwarded to the owner's
+   instance as today, since the app polls `/api/status` again with cookies.
+2. **Sign-in unchanged.** A session-less HTML navigation to `/login` already gets
+   `303` to `/_platform/login?returnTo=/login`; check that the `returnTo`
+   validation accepts `/login`. After the platform login and the callback, `/login`
+   is forwarded to the instance, whose native OIDC login sets the native session
+   cookies. The gateway passes them through and strips only platform cookies.
+3. **Ticket notes.** A table in the gateway's `gateway_sessions` schema (new
+   migration, store port and shared contract case on both stores) holds
+   `ticket_hash` (SHA-256, primary key), the minting session, the instance the
+   session resolved to, and creation and expiry times taken from database time so
+   replicas cannot disagree. A note is written only when a request to exactly
+   `POST /api/auth/ws-ticket` passed every existing gateway check on a valid
+   session and the instance answered `200` with a JSON body of at most 4 KiB whose
+   `ticket` is a string of 16 to 128 base64url characters. The response is
+   forwarded unchanged. If the write fails the gateway answers `503` rather than
+   hand out a ticket it could not admit. A note expires 30 s after creation, at
+   most 32 unexpired notes exist per session (the oldest is deleted first), and
+   expired rows are deleted on insert and by a periodic sweep.
+4. **Admission.** A request is eligible when it is a `GET` WebSocket upgrade on an
+   allow-listed path, carries no platform cookie and carries exactly one ticket of
+   the right format, as `?ticket=` or in the subprotocol. The allow-list is the set
+   of upstream routes the Desktop dials (observed: `/api/ws`; likely `/api/pub` and
+   `/api/events`), re-derived from the pinned image and kept as small as the app
+   allows. The existing `Origin` rule still applies first (an `Origin` other than
+   the public one is refused with `403`; none is allowed). The gateway then looks
+   up the hash and requires an unexpired note, a still valid session and a resolver
+   decision `ready` for the same instance as at minting. It forwards the upgrade
+   unchanged and deletes the note when the instance answers `101`. A failed attempt
+   leaves the note until it expires, so a retry works. Two concurrent attempts may
+   both pass the gateway; the instance consumes the ticket once. Unknown, expired
+   or used tickets and ended sessions get `401`; a denied, pending or unavailable
+   resolution is answered as for a cookie session. A request that does carry
+   platform cookies takes the existing session path and never reads the table.
+5. **After admission** the connection is bound to the minting session exactly like
+   a cookie WebSocket: re-checked every 5 s against the session and the resolver,
+   and closed within the R9 bounds on logout, session end, suspension, revocation
+   or a route change.
+6. **401 body for the app.** To get the Desktop's automatic re-sign-in prompt, a
+   session-less non-HTML request must be answered with `error` equal to
+   `unauthenticated` or `session_expired` plus a non-empty `reason`, whereas the
+   contract says `invalid_identity_evidence`. Decide whether to change the body
+   (contract, SPEC, tests and other clients) or accept a generic failure message
+   when the platform session lapses.
+7. **Secrets in logs (R18).** The ticket never appears in logs, errors, traces,
+   metric labels or audit records; log the path without its query. The hash is
+   not logged either.
+
+**Security reasoning to carry into ARCH.** Notes are created only from responses to
+authenticated requests and bound to one session, one user and one instance, so an
+outsider cannot create one. A stolen ticket gives one-shot access to that user's
+instance for at most 30 s and still has to satisfy the instance's own ticket and
+owner checks; upstream accepts the same exposure. The existing `Origin` rule keeps
+a page on a sibling host from minting tickets. Accepted residuals: an instance
+runs the owner's agent code and could return a weak ticket value, which makes only
+its own instance reachable without a session; the gateway now parses one bounded
+response body from an instance; and the gateway depends on three upstream facts
+(the ticket route, its JSON shape and the WebSocket paths), so a Hermes upgrade or
+a newer Desktop can break it. Pin a Desktop-to-image compatibility check.
+
+**Unverified; check on a real stack first**: the complete login chain inside the
+app's window (platform login, Keycloak, native login) including `__Host-` cookies
+over HTTPS; whether the app's REST calls carry both platform and native cookies for
+the router host (they carried the probe's); the minimum `/api/status` fields;
+whether concurrent platform sessions per user work, since several Desktops mean
+several sessions and many notes; behaviour of a failed dial as opposed to a failed
+mint; multi-replica gateway behaviour; and whether the app trusts the router's
+certificate (a private CA needs the OS trust store or Chromium flags).
+
+**Specify first**: `contracts/hermes-manager/gateway.openapi.yaml` (the public
+paths, ticket admission, the `x-proxy.session` and hygiene text), SPEC.md (R5, R6,
+R18 wording and an acceptance row), ARCH.md (gateway section and threat table),
+`doc/personal-hermes/instances.md` and `services/hermes-manager/TESTS.md`. The
+code is in the gateway crates (`hermes-proxy`, `hermes-gateway`), the session
+store (`hermes-store`, `0003_sessions.sql` for the existing tables) and its port;
+a new migration is a build input listed in `release-policy.json`.
+
+**Tests, at the lowest proving level.** Gateway and proxy unit and contract tests:
+the static answers need no session and reach no instance; `native_pkce` is never
+advertised; a note is created only from the exact route, status, content type,
+size and format; a failed write answers `503`; admission with an unknown, expired,
+used, malformed, duplicated or other user's ticket; a session ended, a user
+suspended or an instance changed between mint and use; a wrong path or method; a
+non-WebSocket request with a ticket; platform cookies present; the per-session cap
+and eviction; expiry on database time; deletion on `101` only; the subprotocol form;
+the `Origin` rule; the `ticket` never in any log line. Shared store contract cases
+on both stores, including two gateways racing for one ticket. System test: a
+scripted client replays the recorded sequence (status, providers, a browser login,
+a mint with cookies, a cookie-less WebSocket with the ticket, a chat turn against
+the fake model, a second use of the ticket refused, a ticket after 30 s refused,
+suspension between mint and use). Then a manual pass with the real Desktop.
+
+**Done:** the specification and contract state the behaviour, the collected tests
+above pass, and a real Hermes Desktop connects through the gateway, chats and
+reconnects after a dropped connection. Then delete this entry.
+
 ## Order of work and preservation rules
 
 1. The baseline case ledger exists (G03, partly). Keep it and the existing
