@@ -267,9 +267,12 @@ The rules for volumes:
 ## Terminal backends
 
 - **Immutable versions.** Terminal backend versions are immutable and pinned
-  by image digest. Custom images must implement `managed-ssh-v2`: non-root
-  user `worker` with the backend version's declared UID/GID, SSH on port 2222,
-  the provisioned authorized key and host key, shell and file transfer. Private registries use
+  by image digest. Custom images must implement `managed-ssh-v2`: a user
+  `worker` that is the backend version's declared UID/GID when the container
+  runs, SSH on port 2222, the provisioned authorized key and host key, shell and
+  file transfer. The default image binds `worker` to the identity it is started
+  with, so it serves every declared UID/GID; an image may bake one instead.
+  Private registries use
   `registry` admin secrets. Pull or compatibility failures are reported, never
   replaced by the default image.
 - **Lease protocol.** The `managed_execution` plugin requests a backend by

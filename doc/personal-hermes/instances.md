@@ -45,7 +45,8 @@ hermesManager:
   chart upgrade. The dashboard lists them read-only.
 - **`dataIdentity`** is the UID/GID of every Hermes container. Backend versions
   require explicit `uid` and `gid`; they do not inherit these values. The
-  default Hermes and `agent-runtime` images use `1000:1000`.
+  default Hermes image uses `1000:1000`; the default `agent-runtime` image runs
+  as whatever identity a backend declares.
 - **Existing folders.** For `localPath` and `nfs` sources, the deployment
   creates each folder an administrator will assign with permissions for its
   consuming identities. Backend-only folders may be owned by the backend
