@@ -176,30 +176,41 @@ async fn asset(State(assets): State<DashboardAssets>, request: Request) -> Respo
     response
 }
 
-/// Page navigations without credentials go to login. Assets and invalid
-/// credentials keep their status; nothing turns into an HTML shell unauthenticated.
+/// Where a page navigation goes to sign in, and back to afterwards.
+fn sign_in(path: &str) -> Response {
+    let mut url = url::Url::parse("https://unused.invalid/auth/login").expect("static URL");
+    url.query_pairs_mut().append_pair("returnTo", path);
+    let location = &url[url::Position::BeforePath..];
+    (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+}
+
+/// Page navigations without a working session go to login, whether the
+/// browser sends no session or one that has ended. Assets, the API and every
+/// other refusal keep their status; nothing turns into an HTML shell
+/// unauthenticated.
 async fn navigate<S: AdminStore>(
     State(state): State<Arc<AdminState<S>>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let page = !request.uri().path().starts_with("/assets/")
-        && !request.headers().contains_key(header::AUTHORIZATION);
+    let path = request.uri().path().to_owned();
+    let page =
+        !path.starts_with("/assets/") && !request.headers().contains_key(header::AUTHORIZATION);
     if page && let Some(browser) = &state.browser {
         match cookie(request.headers(), browser.session_cookie()) {
-            Ok(None) => {
-                let mut url =
-                    url::Url::parse("https://unused.invalid/auth/login").expect("static URL");
-                url.query_pairs_mut()
-                    .append_pair("returnTo", request.uri().path());
-                let location = &url[url::Position::BeforePath..];
-                return (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response();
-            }
+            Ok(None) => return sign_in(&path),
             Ok(Some(_)) => {}
             Err(error) => return error_response(error),
         }
     }
-    authenticate(State(state), request, next).await
+    let response = authenticate(State(state.clone()), request, next).await;
+    // A session that has ended is not a reason to show bare JSON: the cookie
+    // outlives the session, so the page a person returns to asks them to sign
+    // in again.
+    if page && state.browser.is_some() && response.status() == StatusCode::UNAUTHORIZED {
+        return sign_in(&path);
+    }
+    response
 }
 
 pub fn router<S: AdminStore>(assets: DashboardAssets, state: Arc<AdminState<S>>) -> Router {

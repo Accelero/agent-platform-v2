@@ -277,6 +277,35 @@ async fn dashboard_pages_need_a_session_and_unknown_paths_stay_json(pool: PgPool
         script.headers()["content-type"],
         "text/javascript; charset=utf-8"
     );
+    // A session that has ended is asked to sign in again, on a page; assets and
+    // the API keep their refusal.
+    let ended = "__Host-hermes-admin=ended; __Host-hermes-admin-browser=ended";
+    let stale = fixture
+        .get("/assignments")
+        .header("cookie", ended)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), 303);
+    assert_eq!(
+        stale.headers()["location"],
+        "/auth/login?returnTo=%2Fassignments"
+    );
+    for path in ["/assets/app.js", "/api/v1/session"] {
+        let refused = fixture
+            .get(path)
+            .header("cookie", ended)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(refused.status(), 401, "{path}");
+        assert_eq!(
+            body(refused).await,
+            json!({"error": "invalid_identity_evidence"}),
+            "{path}"
+        );
+    }
+
     // Fonts come from the dashboard itself and from nowhere else.
     let font = fixture
         .get("/assets/face.woff2")
