@@ -62,9 +62,58 @@ test("a list entry suggests the admin secrets that exist", async ({ page }) => {
     .getByRole("textbox", { name: "Configuration YAML editor" })
     .click();
   await page.keyboard.press("Control+A");
-  await page.keyboard.insertText("secrets:\n  - name: ");
-  await page.keyboard.press("Control+Space");
-  await expect(page.locator(".cm-tooltip-autocomplete")).toContainText(
-    "llm-key",
+  await page.keyboard.type("secrets:");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("  - name: ");
+  // The installation's secrets load in the background; ask again until they are in.
+  await expect(async () => {
+    await page.keyboard.press("Control+Space");
+    await expect(page.locator(".cm-tooltip-autocomplete")).toContainText(
+      "llm-key",
+      { timeout: 1000 },
+    );
+  }).toPass();
+});
+
+test("the manager's findings are marked in the editor until the text changes", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await expect(page.locator(".cm-lint-marker")).toHaveCount(0);
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(page.getByText("No admin secret has this name.")).toBeVisible();
+
+  // The finding is on the secret's name: marked in the gutter and underlined.
+  await expect(page.locator(".cm-lint-marker").first()).toBeVisible();
+  await expect(page.locator(".cm-lintRange").first()).toBeVisible();
+  await expect(page.locator(".cm-lintRange").first()).toHaveText("llm-key");
+
+  // Once the text changes the answer is stale and its marks go.
+  await page
+    .getByRole("textbox", { name: "Configuration YAML editor" })
+    .click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("# edited");
+  await expect(page.locator(".cm-lint-marker")).toHaveCount(0);
+});
+
+test("keys, strings and numbers are coloured apart, in YAML and JSON", async ({
+  page,
+}) => {
+  await openEditor(page);
+  const colours = () =>
+    page
+      .locator(".cm-content span")
+      .evaluateAll((spans) => [
+        ...new Set(spans.map((span) => getComputedStyle(span).color)),
+      ]);
+  const key = "rgb(27, 94, 75)";
+  const string = "rgb(154, 52, 18)";
+  const number = "rgb(29, 78, 216)";
+  expect(await colours()).toEqual(expect.arrayContaining([key, number]));
+  await page.getByRole("tab", { name: "JSON" }).click();
+  await expect(page.getByLabel("Configuration JSON editor")).toBeVisible();
+  expect(await colours()).toEqual(
+    expect.arrayContaining([key, string, number]),
   );
 });
