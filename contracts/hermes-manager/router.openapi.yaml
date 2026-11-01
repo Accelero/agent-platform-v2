@@ -1,13 +1,13 @@
 openapi: 3.1.0
 info:
-  title: Personal Hermes route resolution
+  title: Hermes route resolution
   version: 0.1.0
   description: >-
     Internal API on the manager's resolver listener. hermes-gateway, identified
     by the URI SAN of its mTLS client certificate, asserts the identity it
     verified through its own OIDC session; the manager resolves it to that
-    identity's enabled, ready instance. The API mutates nothing and grants
-    nothing.
+    identity's enabled, ready personal instance or an explicitly granted shared
+    agent. The API mutates nothing and grants nothing.
 servers:
   - url: https://hermes-manager-resolver.internal.example.org
 security:
@@ -21,7 +21,7 @@ paths:
         Require the configured gateway client certificate identity. Resolve the
         exact issuer and subject against current PostgreSQL state with no
         positive decision cache. Complete within the caller's 2-second
-        deadline. Bodies are limited to 16 KiB. Never log identities or bodies.
+        deadline. Bodies are limited to 16 KiB. Never log identities, labels or bodies.
         All responses use no-store. The destination comes only from the
         instance registry; the gateway never dials anything else.
       requestBody:
@@ -64,7 +64,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/PendingDecision'
         '403':
-          description: The caller is not the gateway, or the identity has no enabled assignment
+          description: >-
+            The caller is not the gateway, the personal identity has no enabled
+            assignment, or the shared endpoint is missing, disabled or ungranted.
+            Shared endpoint denials have the same response.
           headers:
             Cache-Control:
               $ref: '#/components/headers/NoStore'
@@ -125,8 +128,28 @@ components:
       additionalProperties: false
       required: [identity]
       properties:
+        target:
+          $ref: '#/components/schemas/Target'
         identity:
           $ref: '#/components/schemas/Identity'
+    Target:
+      description: Absent target means personal for compatibility. Shared access needs an explicit current direct or group grant; administration grants confer no access.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind: { const: personal }
+        - type: object
+          additionalProperties: false
+          required: [kind, label]
+          properties:
+            kind: { const: shared }
+            label:
+              type: string
+              maxLength: 63
+              pattern: '^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$'
+              not: { pattern: '--' }
     ReadyDecision:
       type: object
       additionalProperties: false

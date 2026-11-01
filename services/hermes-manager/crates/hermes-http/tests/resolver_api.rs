@@ -83,8 +83,11 @@ impl Fixture {
 
     /// What the controller records once the instance is ready.
     async fn make_ready(&self) {
+        self.mark_ready(self.receipt.instance_id).await;
+    }
+
+    async fn mark_ready(&self, instance: uuid::Uuid) {
         let epoch = self.store.advance_epoch().await.unwrap();
-        let instance = self.receipt.instance_id;
         self.store
             .bind_namespace(instance, "namespace-uid")
             .await
@@ -349,5 +352,144 @@ async fn resolver_bodies_are_bounded_at_exactly_16_kib_and_only_the_gateway_is_a
             (foreign.status, foreign.json()),
             (403, json!({"status": "denied", "reason": "access_denied"}))
         );
+    }
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn shared_targets_require_current_grants_and_keep_personal_compatibility(pool: PgPool) {
+    use hermes_core::app::actor::Actor;
+    use hermes_core::app::assignments::CreateSharedAssignment;
+    use hermes_core::app::envelope::{CommandEnvelope, IdempotencyKey};
+    use hermes_core::app::faults::NoFaults;
+    use hermes_core::app::shared::{EndpointChanges, ReplaceAgentGrants, UpdateEndpoint};
+    use hermes_core::app::testing::contracts::bob_spec;
+    use hermes_core::app::testing::{identity as exact_identity, settings};
+    use hermes_core::domain::endpoints::EndpointNames;
+    use hermes_core::domain::shared::{GrantPrincipal, NewSharedAgent};
+    use std::sync::Arc;
+    use uuid::Uuid;
+    let fixture = Fixture::new(pool).await;
+    let mut settings = (*settings()).clone();
+    settings.endpoint_names = Some(EndpointNames::new("agents.test", &[], &[]).unwrap());
+    let env = CommandEnvelope::new(
+        fixture.store.clone(),
+        Arc::new(settings),
+        Arc::new(NoFaults),
+    );
+    let actor = Actor::Administrator(exact_identity("alice"));
+    let receipt = env
+        .execute(
+            &actor,
+            Uuid::new_v4(),
+            &IdempotencyKey::parse("create").unwrap(),
+            &CreateSharedAssignment {
+                shared_agent: NewSharedAgent {
+                    name: "engineering".into(),
+                    display_name: "Engineering".into(),
+                    label: "engineering".into(),
+                    enabled: true,
+                },
+                spec: bob_spec(),
+            },
+        )
+        .await
+        .unwrap();
+    let denied = json!({"status":"denied", "reason":"access_denied"});
+    let mut member = identity("carol");
+    member["target"] = json!({"kind":"shared", "label":"engineering"});
+    assert_eq!(
+        fixture.resolve("gateway", &member).await,
+        (403, denied.clone())
+    );
+    env.execute(
+        &actor,
+        Uuid::new_v4(),
+        &IdempotencyKey::parse("grant").unwrap(),
+        &ReplaceAgentGrants {
+            assignment_id: receipt.assignment_id,
+            expected_version: 1,
+            grants: vec![GrantPrincipal::Identity {
+                identity: exact_identity("carol"),
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(fixture.resolve("gateway", &member).await.0, 202);
+    fixture.mark_ready(receipt.instance_id).await;
+    let ready = fixture.resolve("gateway", &member).await;
+    assert_eq!(ready.0, 200);
+    assert_eq!(ready.1["instanceId"], receipt.instance_id.to_string());
+    assert_eq!(
+        ready.1["destination"]["namespace"],
+        installation().instance_namespace(receipt.instance_id)
+    );
+    assert_eq!(
+        fixture.resolve("foreign", &member).await,
+        (403, denied.clone())
+    );
+    assert_eq!(
+        fixture.resolve("gateway", &identity("carol")).await,
+        (403, denied.clone())
+    );
+    fixture.make_ready().await;
+    let implicit_personal = fixture.resolve("gateway", &identity("bob")).await;
+    let mut personal = identity("bob");
+    personal["target"] = json!({"kind":"personal"});
+    assert_eq!(
+        fixture.resolve("gateway", &personal).await,
+        implicit_personal
+    );
+    for subject in ["alice", "bob", "CarOl", "unknown"] {
+        let mut request = identity(subject);
+        request["target"] = member["target"].clone();
+        assert_eq!(
+            fixture.resolve("gateway", &request).await,
+            (403, denied.clone())
+        );
+    }
+    let mut foreign = member.clone();
+    foreign["identity"]["issuer"] = json!("https://foreign.test/realm");
+    assert_eq!(
+        fixture.resolve("gateway", &foreign).await,
+        (403, denied.clone())
+    );
+    let mut missing = member.clone();
+    missing["target"]["label"] = json!("missing");
+    assert_eq!(
+        fixture.resolve("gateway", &missing).await,
+        (403, denied.clone())
+    );
+    env.execute(
+        &actor,
+        Uuid::new_v4(),
+        &IdempotencyKey::parse("disable").unwrap(),
+        &UpdateEndpoint {
+            assignment_id: receipt.assignment_id,
+            expected_version: 1,
+            changes: EndpointChanges {
+                label: None,
+                enabled: Some(false),
+            },
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fixture.resolve("gateway", &member).await,
+        (403, denied.clone())
+    );
+    for target in [
+        json!({"kind":"shared"}),
+        json!({"kind":"shared","label":"Bad"}),
+        json!({"kind":"shared","label":"xn--x"}),
+        json!({"kind":"personal","label":"secret-label"}),
+    ] {
+        let mut bad = member.clone();
+        bad["target"] = target;
+        let reply = fixture.resolve("gateway", &bad).await;
+        assert_eq!(reply, (422, json!({"error":"invalid_request"})));
+        assert!(!reply.1.to_string().contains("carol"));
+        assert!(!reply.1.to_string().contains("secret-label"));
     }
 }

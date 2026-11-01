@@ -253,7 +253,25 @@ fn route_decisions_match_the_router_contract() {
     let parsed: ResolveRequest = hermes_wire::strict::from_slice(example.to_string().as_bytes())
         .expect("the contract example parses");
     assert!(accepts(&request, &parsed));
+    assert_eq!(
+        parsed.target,
+        hermes_core::domain::routing::Target::Personal {}
+    );
+    for target in [
+        json!({"kind":"personal"}),
+        json!({"kind":"shared", "label":"engineering"}),
+    ] {
+        let mut example = example.clone();
+        example["target"] = target;
+        assert!(request.is_valid(&example));
+        let parsed: ResolveRequest =
+            hermes_wire::strict::from_slice(example.to_string().as_bytes()).unwrap();
+        assert!(accepts(&request, &parsed));
+    }
     for refused in [
+        json!({"identity": {"issuer": "https://sso.example.org/realms/agents", "subject": "bob"}, "target":{"kind":"shared"}}),
+        json!({"identity": {"issuer": "https://sso.example.org/realms/agents", "subject": "bob"}, "target":{"kind":"personal", "label":"engineering"}}),
+        json!({"identity": {"issuer": "https://sso.example.org/realms/agents", "subject": "bob"}, "target":{"kind":"other"}}),
         json!({"identity": {"issuer": "https://sso.example.org/realms/agents", "subject": "bob"}, "extra": 1}),
         json!({"identity": {"issuer": "https://sso.example.org/realms/agents", "subject": "bob", "email": "b@x"}}),
     ] {

@@ -19,15 +19,17 @@ clause, boundary and security evidence needed beyond those examples.
 | Terminal worker image | `agent-runtime`, `managed-ssh-v2`; its entrypoint binds the `worker` account to the UID/GID the Pod runs as, so one image serves every backend identity; a custom image may bake one instead |
 | Manager | `services/hermes-manager`: the `api` role (administration API and dashboard, execution API, route resolver), the leader-elected `controller` role and the operator commands (`migrate`, `check`, `initialize`, `grant-administrator`, `rebind-cluster`, `generate-sealing-key`), all with state only in PostgreSQL |
 | Dashboard | React and TypeScript, served by the `api` role under a strict CSP: users and the Keycloak directory, assignments with instance status and terminal environments, the template and backend catalogs with form, JSON and YAML editing, storage with orphans, secrets, administrators and the audit log |
+| Shared administration | Immutable shared assignments, endpoints with callback URLs, explicit identity/group grants, versioned groups and memberships; API previews, updates, retries, rollouts and inventories cover both kinds. Access-only commands do not alter workloads. Shared serving and dashboard workflows remain planned |
 | Desired state | Administrator commands through the command envelope: assignments, template and terminal backend versions (Draft, Published, Withdrawn), volumes from installation storage sources, admin settings and write-only admin secrets sealed to the controller |
 | Reconciliation | Pure planners and server-side apply; create-once material; epoch-guarded status; preconditioned deletes; static admission policies and RBAC from the chart; orphaned namespaces and volumes reported, never adopted |
 | Terminal backends | Environments and leases with database-time expiry; worker Pods with the instance's keys, the assignment's mounts and private registry credentials; backend-declared UID/GID and `fsGroup`; in-process SSH readiness against the declared UID; pull, start and contract failures reported without replacement |
+| Shared resolver | Explicit personal/shared targets; one-snapshot endpoint, grant and group checks; shared grants do not provision personal instances. Native shared serving and per-host gateway sessions remain planned |
 | Routing | `hermes-gateway`: OIDC platform sessions, route resolution over mTLS, forwarding to the owner's instance only, header and cookie hygiene, revocation of open WebSockets and streams |
 | Chart | `charts/agent-platform` deploys `api`, `controller` and `hermes-gateway` with generated configuration, RBAC, admission policies, NetworkPolicies and one-shot operator Jobs |
 
 Not part of the platform, by the specification's scope: coordinated
 checkpoints, automatic backups (they are deployment-owned), SMB storage,
-terminal service egress, worker prewarming, board integration, team instances
+terminal service egress, worker prewarming, board integration, serving shared instances
 and a command that permanently deletes an instance's data.
 
 An update or stop sends SIGTERM: the runtime gives its gateway and dashboard

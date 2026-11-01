@@ -1478,3 +1478,659 @@ async fn publication_refuses_what_validation_refuses_for_the_content_of_settings
         json!([{"pointer": "/adminConfig/model/password", "code": "sensitive_field", "severity": "error"}])
     );
 }
+
+impl Fixture {
+    /// A complete mutation boundary: missing/stale preconditions, current authorization,
+    /// one committed audit event, and receipt replay even after the version changes.
+    async fn shared_change(
+        &self,
+        op: &str,
+        method: Method,
+        path: &str,
+        key: &str,
+        body: Option<&Value>,
+        version: Option<i64>,
+    ) -> Reply {
+        let request = || {
+            let request = self.mutate(method.clone(), path, key, body);
+            if let Some(version) = version {
+                request.header("if-match", if_match(version))
+            } else {
+                request
+            }
+        };
+        let mut denied = self
+            .as_("no-grant", method.clone(), path)
+            .header("idempotency-key", format!("{key}-denied"));
+        if let Some(body) = body {
+            denied = denied.json(body);
+        }
+        if let Some(version) = version {
+            denied = denied.header("if-match", if_match(version));
+        }
+        assert_eq!(self.call(op, denied).await.status, 403);
+        if version.is_some() {
+            assert_eq!(
+                self.call(
+                    op,
+                    self.mutate(method.clone(), path, &format!("{key}-missing"), body)
+                )
+                .await
+                .status,
+                422
+            );
+            assert_eq!(
+                self.call(
+                    op,
+                    self.mutate(method.clone(), path, &format!("{key}-stale"), body)
+                        .header("if-match", "\"999999\"")
+                )
+                .await
+                .status,
+                412
+            );
+        }
+        let before: i64 = sqlx::query_scalar("SELECT count(*) FROM manager.audit_events")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap();
+        let accepted = self.call(op, request()).await;
+        assert_eq!(accepted.status, 202, "{op}: {}", accepted.body);
+        assert_eq!(self.call(op, request()).await.body, accepted.body);
+        if let Some(version) = version {
+            // A changed precondition is a changed command body, not a receipt replay.
+            let changed = self
+                .call(
+                    op,
+                    self.mutate(method, path, key, body)
+                        .header("if-match", if_match(version + 1)),
+                )
+                .await;
+            assert_eq!(
+                (changed.status, changed.body["error"].as_str()),
+                (409, Some("idempotency_conflict"))
+            );
+        }
+        let after: i64 = sqlx::query_scalar("SELECT count(*) FROM manager.audit_events")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap();
+        assert_eq!(after, before + 1, "{op}: one atomic audit event");
+        accepted
+    }
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn shared_agent_administration_is_complete_through_the_contract(pool: PgPool) {
+    use hermes_core::app::controller::InstanceStore;
+    let fixture = Fixture::with_endpoints(pool).await;
+    fixture.seed().await;
+    let settings = fixture
+        .call(
+            "getEndpointSettings",
+            fixture.api(Method::GET, "/api/v1/endpoint-settings"),
+        )
+        .await;
+    assert_eq!(settings.body["agentDomain"], "agents.test");
+    assert!(
+        settings.body["reservedLabels"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("ops"))
+    );
+    let body = json!({"sharedAgent": {"name": "engineering", "displayName": "Engineering", "label": "engineering", "enabled": true}, "spec": {"access": "enabled", "template": {"id": "standard", "version": 1}}});
+    let created = fixture
+        .shared_change(
+            "createAssignment",
+            Method::POST,
+            "/api/v1/assignments",
+            "shared-create",
+            Some(&body),
+            None,
+        )
+        .await;
+    let id = created.body["assignmentId"].as_str().unwrap();
+    let instance = uuid::Uuid::parse_str(created.body["instanceId"].as_str().unwrap()).unwrap();
+    let before = fixture
+        .store
+        .desired_instance(instance)
+        .await
+        .unwrap()
+        .unwrap();
+    let base = format!("/api/v1/assignments/{id}");
+    let detail = fixture
+        .call("getAssignment", fixture.api(Method::GET, &base))
+        .await;
+    assert_eq!(detail.body["kind"], "shared");
+    assert!(detail.body.get("identity").is_none());
+    let list = fixture
+        .call(
+            "listAssignments",
+            fixture.api(
+                Method::GET,
+                "/api/v1/assignments?kind=shared&q=engineering&limit=1",
+            ),
+        )
+        .await;
+    assert_eq!(list.body["items"][0]["id"], id);
+    assert_eq!(
+        fixture
+            .call(
+                "listAssignments",
+                fixture.api(Method::GET, "/api/v1/assignments?kind=personal")
+            )
+            .await
+            .body["items"],
+        json!([])
+    );
+    let volumes = fixture
+        .call("listVolumes", fixture.api(Method::GET, "/api/v1/volumes"))
+        .await;
+    assert!(
+        volumes.body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["assignmentId"] == id)
+    );
+    let endpoint = fixture
+        .call(
+            "getAssignmentEndpoint",
+            fixture.api(Method::GET, &format!("{base}/endpoint")),
+        )
+        .await;
+    assert_eq!(endpoint.body["url"], "https://engineering.agents.test");
+    assert_eq!(
+        endpoint.body["gatewayCallbackUrl"],
+        "https://engineering.agents.test/_platform/oidc/callback"
+    );
+    assert_eq!(
+        endpoint.body["nativeCallbackUrl"],
+        "https://engineering.agents.test/auth/callback"
+    );
+    let group = fixture
+        .shared_change(
+            "createAccessGroup",
+            Method::POST,
+            "/api/v1/access-groups",
+            "group-create",
+            Some(&json!({"name":"team", "displayName":"Team"})),
+            None,
+        )
+        .await;
+    let group_id = group.body["groupId"].as_str().unwrap();
+    let group_base = format!("/api/v1/access-groups/{group_id}");
+    fixture
+        .shared_change(
+            "updateAccessGroup",
+            Method::PATCH,
+            &group_base,
+            "group-update",
+            Some(&json!({"displayName":"Engineering team"})),
+            Some(1),
+        )
+        .await;
+    assert_eq!(
+        fixture
+            .call("getAccessGroup", fixture.api(Method::GET, &group_base))
+            .await
+            .body["version"],
+        2
+    );
+    assert_eq!(
+        fixture
+            .call(
+                "listAccessGroups",
+                fixture.api(Method::GET, "/api/v1/access-groups?q=team&limit=1")
+            )
+            .await
+            .body["items"][0]["id"],
+        group_id
+    );
+    fixture
+        .shared_change(
+            "addAccessGroupMember",
+            Method::POST,
+            &format!("{group_base}/members"),
+            "member-add",
+            Some(&json!({"identity":fixture.identity_json("before-login")})),
+            Some(2),
+        )
+        .await;
+    let members = fixture
+        .call(
+            "listAccessGroupMembers",
+            fixture.api(Method::GET, &format!("{group_base}/members")),
+        )
+        .await;
+    let identity_id = members.body["items"][0]["identityId"].as_str().unwrap();
+    assert_eq!(
+        members.body["items"][0]["identity"]["subject"],
+        "before-login"
+    );
+    let personal_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM manager.assignments WHERE identity_id = $1")
+            .bind(uuid::Uuid::parse_str(identity_id).unwrap())
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        personal_count, 0,
+        "membership provisions no personal instance"
+    );
+    let grant_path = format!("{base}/grants");
+    let grant_body = json!({"grants":[{"groupId":group_id}, {"identity":fixture.identity_json("direct-before-login")}]});
+    fixture
+        .shared_change(
+            "replaceAssignmentGrants",
+            Method::PUT,
+            &grant_path,
+            "grants-add",
+            Some(&grant_body),
+            Some(1),
+        )
+        .await;
+    let grants = fixture
+        .call(
+            "listAssignmentGrants",
+            fixture.api(Method::GET, &grant_path),
+        )
+        .await;
+    assert_eq!(grants.body["grantsVersion"], 2);
+    assert_eq!(grants.body["grants"].as_array().unwrap().len(), 2);
+    let refused = fixture
+        .call(
+            "deleteAccessGroup",
+            fixture
+                .mutate(Method::DELETE, &group_base, "group-in-use", None)
+                .header("if-match", if_match(3)),
+        )
+        .await;
+    assert_eq!(
+        (refused.status, refused.body["error"].as_str()),
+        (409, Some("group_in_use"))
+    );
+    fixture
+        .shared_change(
+            "updateAssignmentEndpoint",
+            Method::PATCH,
+            &format!("{base}/endpoint"),
+            "disable",
+            Some(&json!({"enabled":false})),
+            Some(1),
+        )
+        .await;
+    assert_eq!(
+        fixture
+            .store
+            .desired_instance(instance)
+            .await
+            .unwrap()
+            .unwrap(),
+        before
+    );
+    fixture
+        .shared_change(
+            "removeAccessGroupMember",
+            Method::DELETE,
+            &format!("{group_base}/members/{identity_id}"),
+            "member-remove",
+            None,
+            Some(3),
+        )
+        .await;
+    fixture
+        .shared_change(
+            "replaceAssignmentGrants",
+            Method::PUT,
+            &grant_path,
+            "grants-clear",
+            Some(&json!({"grants":[]})),
+            Some(2),
+        )
+        .await;
+    fixture
+        .shared_change(
+            "deleteAccessGroup",
+            Method::DELETE,
+            &group_base,
+            "group-delete",
+            None,
+            Some(4),
+        )
+        .await;
+    fixture
+        .shared_change(
+            "updateAssignmentEndpoint",
+            Method::PATCH,
+            &format!("{base}/endpoint"),
+            "rename",
+            Some(&json!({"label":"engineers","enabled":true})),
+            Some(2),
+        )
+        .await;
+    let after = fixture
+        .store
+        .desired_instance(instance)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.desired_generation, before.desired_generation + 1);
+    assert_eq!(after.execution_generation, before.execution_generation);
+    assert_eq!(after.endpoint_label.as_deref(), Some("engineers"));
+    assert_eq!(
+        fixture
+            .call("getAssignment", fixture.api(Method::GET, &base))
+            .await
+            .body["version"],
+        1
+    );
+    let preview = fixture
+        .call(
+            "previewAssignment",
+            fixture
+                .api(Method::POST, &format!("{base}/preview"))
+                .json(&json!({"access":"suspended"})),
+        )
+        .await;
+    assert_eq!(preview.body["valid"], true);
+    let updated = fixture
+        .call(
+            "updateAssignment",
+            fixture
+                .mutate(
+                    Method::PATCH,
+                    &base,
+                    "shared-update",
+                    Some(&json!({"access":"suspended"})),
+                )
+                .header("if-match", if_match(1)),
+        )
+        .await;
+    assert_eq!(updated.body["version"], 2);
+    assert_eq!(
+        fixture
+            .call(
+                "retryAssignment",
+                fixture
+                    .mutate(Method::POST, &format!("{base}/retry"), "shared-retry", None)
+                    .header("if-match", if_match(2))
+            )
+            .await
+            .status,
+        202
+    );
+    let mut template = template_fixture();
+    template["image"] = json!(format!("ghcr.io/example/hermes@sha256:{}", "b".repeat(64)));
+    assert_eq!(fixture.publish("templates", "standard", &template).await, 2);
+    let rollout = fixture.call("rolloutTemplate", fixture.mutate(Method::POST, "/api/v1/assignment-rollouts", "shared-rollout", Some(&json!({"template":{"id":"standard","version":2}, "items":[{"assignmentId":id,"expectedVersion":2}]})))).await;
+    assert_eq!(rollout.body["results"][0]["outcome"], "accepted");
+    assert_eq!(rollout.body["results"][0]["receipt"]["version"], 3);
+    let detail_after = fixture
+        .call("getAssignment", fixture.api(Method::GET, &base))
+        .await;
+    assert_eq!(detail_after.body["kind"], "shared");
+    assert_eq!(detail_after.body["sharedAgent"]["name"], "engineering");
+    let audit = fixture
+        .call(
+            "listAuditEvents",
+            fixture.api(Method::GET, "/api/v1/audit-events"),
+        )
+        .await;
+    assert!(!audit.body.to_string().contains(LLM_KEY));
+    assert!(!detail.body.to_string().contains(LLM_KEY));
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn shared_database_guards_keep_kind_and_endpoint_bindings_immutable(pool: PgPool) {
+    let fixture = Fixture::with_endpoints(pool.clone()).await;
+    fixture.seed().await;
+    let body = json!({"sharedAgent":{"name":"shared", "displayName":"Shared", "label":"shared", "enabled":true}, "spec":{"access":"enabled", "template":{"id":"standard","version":1}}});
+    let receipt = fixture
+        .call(
+            "createAssignment",
+            fixture.mutate(
+                Method::POST,
+                "/api/v1/assignments",
+                "shared-guard",
+                Some(&body),
+            ),
+        )
+        .await;
+    assert_eq!(receipt.status, 202);
+    let shared_id = uuid::Uuid::parse_str(receipt.body["assignmentId"].as_str().unwrap()).unwrap();
+    let personal = fixture.assign("bob", "personal-guard").await;
+    let personal_id =
+        uuid::Uuid::parse_str(personal.body["assignmentId"].as_str().unwrap()).unwrap();
+    let queries = [
+        (
+            "DELETE FROM manager.endpoints WHERE assignment_id = $1",
+            shared_id,
+        ),
+        (
+            "UPDATE manager.endpoints SET assignment_id = $1",
+            personal_id,
+        ),
+        (
+            "UPDATE manager.assignments SET kind = 'shared', identity_id = NULL, name = 'converted', display_name = 'Converted' WHERE id = $1",
+            personal_id,
+        ),
+        (
+            "INSERT INTO manager.endpoints (assignment_id, label, enabled, version) VALUES ($1, 'personal', true, 1)",
+            personal_id,
+        ),
+        (
+            "INSERT INTO manager.agent_grants (assignment_id, identity_id) SELECT $1, identity_id FROM manager.assignments WHERE id = $1",
+            personal_id,
+        ),
+    ];
+    for (query, id) in queries {
+        let error = sqlx::query(query)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("P0001")
+        );
+    }
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn shared_agent_refusals_leave_no_receipt_audit_or_instance(pool: PgPool) {
+    let fixture = Fixture::with_endpoints(pool).await;
+    fixture.seed().await;
+    let before: (i64,i64,i64) = sqlx::query_as("SELECT (SELECT count(*) FROM manager.audit_events), (SELECT count(*) FROM manager.command_receipts), (SELECT count(*) FROM manager.instances)").fetch_one(&fixture.pool).await.unwrap();
+    for (label, code) in [
+        ("Bad", "invalid_hostname_label"),
+        ("xn--test", "invalid_hostname_label"),
+        ("admin", "reserved_hostname_label"),
+        ("ops", "reserved_hostname_label"),
+        ("a.b", "invalid_hostname_label"),
+    ] {
+        let body = json!({"sharedAgent":{"name":"team", "displayName":"Team", "label":label, "enabled":true}, "spec":{"access":"enabled", "template":{"id":"standard","version":1}}});
+        let reply = fixture
+            .call(
+                "createAssignment",
+                fixture.mutate(
+                    Method::POST,
+                    "/api/v1/assignments",
+                    &format!("label-{label}"),
+                    Some(&body),
+                ),
+            )
+            .await;
+        assert_eq!((reply.status, reply.error()), (422, code));
+    }
+    let ambiguous = json!({"identity":fixture.identity_json("bob"), "sharedAgent":{"name":"team", "displayName":"Team", "label":"team", "enabled":true}, "spec":{"access":"enabled", "template":{"id":"standard","version":1}}});
+    assert_eq!(
+        fixture
+            .call(
+                "createAssignment",
+                fixture.mutate(
+                    Method::POST,
+                    "/api/v1/assignments",
+                    "ambiguous-binding",
+                    Some(&ambiguous)
+                )
+            )
+            .await
+            .status,
+        422
+    );
+    let after: (i64,i64,i64) = sqlx::query_as("SELECT (SELECT count(*) FROM manager.audit_events), (SELECT count(*) FROM manager.command_receipts), (SELECT count(*) FROM manager.instances)").fetch_one(&fixture.pool).await.unwrap();
+    assert_eq!(after, before);
+    let personal = fixture.assign("bob", "personal").await;
+    let id = personal.body["assignmentId"].as_str().unwrap();
+    for (op, suffix) in [
+        ("getAssignmentEndpoint", "endpoint"),
+        ("listAssignmentGrants", "grants"),
+    ] {
+        assert_eq!(
+            fixture
+                .call(
+                    op,
+                    fixture.api(Method::GET, &format!("/api/v1/assignments/{id}/{suffix}"))
+                )
+                .await
+                .status,
+            404
+        );
+    }
+    assert_eq!(
+        fixture
+            .call(
+                "updateAssignment",
+                fixture
+                    .mutate(
+                        Method::PATCH,
+                        &format!("/api/v1/assignments/{id}"),
+                        "convert-kind",
+                        Some(&json!({"kind":"shared"}))
+                    )
+                    .header("if-match", if_match(1))
+            )
+            .await
+            .status,
+        422
+    );
+    let endpoint = fixture
+        .call(
+            "updateAssignmentEndpoint",
+            fixture
+                .mutate(
+                    Method::PATCH,
+                    &format!("/api/v1/assignments/{id}/endpoint"),
+                    "personal-endpoint",
+                    Some(&json!({"enabled":true})),
+                )
+                .header("if-match", if_match(1)),
+        )
+        .await;
+    assert_eq!(
+        (endpoint.status, endpoint.error()),
+        (422, "endpoint_on_personal_agent")
+    );
+    let grants = fixture
+        .call(
+            "replaceAssignmentGrants",
+            fixture
+                .mutate(
+                    Method::PUT,
+                    &format!("/api/v1/assignments/{id}/grants"),
+                    "personal-grants",
+                    Some(&json!({"grants":[]})),
+                )
+                .header("if-match", if_match(1)),
+        )
+        .await;
+    assert_eq!(
+        (grants.status, grants.error()),
+        (422, "grant_on_personal_agent")
+    );
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn shared_and_personal_inventory_pagination_keeps_unassigned_identities(pool: PgPool) {
+    let fixture = Fixture::with_endpoints(pool).await;
+    fixture.seed().await;
+    fixture.assign("bob", "bob").await;
+    let body = json!({"sharedAgent":{"name":"bob", "displayName":"Shared Bob", "label":"team", "enabled":true}, "spec":{"access":"enabled", "template":{"id":"standard","version":1}}});
+    let shared = fixture
+        .call(
+            "createAssignment",
+            fixture.mutate(
+                Method::POST,
+                "/api/v1/assignments",
+                "shared-bob",
+                Some(&body),
+            ),
+        )
+        .await;
+    let shared_id = shared.body["assignmentId"].as_str().unwrap();
+    let grants = json!({"grants":[{"identity":fixture.identity_json("aa-unassigned")},{"identity":fixture.identity_json("zz-unassigned")}]});
+    fixture
+        .call(
+            "replaceAssignmentGrants",
+            fixture
+                .mutate(
+                    Method::PUT,
+                    &format!("/api/v1/assignments/{shared_id}/grants"),
+                    "grants",
+                    Some(&grants),
+                )
+                .header("if-match", if_match(1)),
+        )
+        .await;
+    for (op, path, expected) in [
+        ("listIdentities", "/api/v1/identities", 4),
+        ("listAssignments", "/api/v1/assignments", 2),
+    ] {
+        let mut cursor: Option<String> = None;
+        let mut ids = std::collections::BTreeSet::new();
+        loop {
+            let mut request = fixture.api(Method::GET, path).query(&[("limit", "1")]);
+            if let Some(cursor) = &cursor {
+                request = request.query(&[("after", cursor)]);
+            }
+            let page = fixture.call(op, request).await;
+            for item in page.body["items"].as_array().unwrap() {
+                assert!(
+                    ids.insert(item["id"].as_str().unwrap().to_owned()),
+                    "no repeats"
+                );
+            }
+            cursor = page.body["nextCursor"].as_str().map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+            assert!(ids.len() <= expected);
+        }
+        assert_eq!(ids.len(), expected, "{op}: no dropped rows");
+    }
+    fixture.sign_in_once("aa-unassigned").await;
+    fixture.sign_in_once("zz-unassigned").await;
+    let first = fixture
+        .call(
+            "listAdministratorCandidates",
+            fixture.api(Method::GET, "/api/v1/administrator-candidates?limit=1"),
+        )
+        .await;
+    assert_eq!(
+        first.body["items"][0]["identity"]["subject"],
+        "aa-unassigned"
+    );
+    let second = fixture
+        .call(
+            "listAdministratorCandidates",
+            fixture
+                .api(Method::GET, "/api/v1/administrator-candidates?limit=1")
+                .query(&[("after", first.body["nextCursor"].as_str().unwrap())]),
+        )
+        .await;
+    assert_eq!(
+        second.body["items"][0]["identity"]["subject"],
+        "zz-unassigned"
+    );
+}

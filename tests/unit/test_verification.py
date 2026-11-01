@@ -176,7 +176,7 @@ def test_reviewed_ledger_accounts_for_every_cited_helper():
         "Interfaces",
         "Operational bounds",
     }
-    assert len([row for row in rows if row["section"] == "Interfaces"]) == 58
+    assert len([row for row in rows if row["section"] == "Interfaces"]) == 71
     assert len([row for row in rows if row["section"] == "Operational bounds"]) == 10
 
 

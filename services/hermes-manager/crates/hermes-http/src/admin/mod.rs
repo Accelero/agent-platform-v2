@@ -9,6 +9,7 @@ mod catalog;
 mod definitions;
 mod people;
 mod session;
+mod shared;
 mod storage;
 mod support;
 mod work;
@@ -42,9 +43,26 @@ use assets::DashboardAssets;
 const DEADLINE: Duration = Duration::from_secs(15);
 
 /// What administration handlers need from the store.
-pub trait AdminStore: Store + AccessReader + AdminQueries + Clone + 'static {}
+pub trait AdminStore:
+    Store
+    + AccessReader
+    + AdminQueries
+    + hermes_core::app::shared_ports::SharedQueries
+    + Clone
+    + 'static
+{
+}
 
-impl<T: Store + AccessReader + AdminQueries + Clone + 'static> AdminStore for T {}
+impl<
+    T: Store
+        + AccessReader
+        + AdminQueries
+        + hermes_core::app::shared_ports::SharedQueries
+        + Clone
+        + 'static,
+> AdminStore for T
+{
+}
 
 /// Everything administration handlers use.
 pub struct AdminState<S: Store> {
@@ -82,6 +100,7 @@ pub fn router<S: AdminStore>(
     let browser = state.browser.clone();
     let state = Arc::new(state);
     let api = Router::new()
+        .merge(shared::routes::<S>())
         .route("/api/v1/session", get(session::session))
         .route("/api/v1/identities", get(people::identities::<S>))
         .route(

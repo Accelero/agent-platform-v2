@@ -23,10 +23,17 @@ pub struct Session {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CreateAssignment {
-    pub identity: Identity,
-    pub spec: AssignmentSpec,
+#[serde(untagged, deny_unknown_fields)]
+pub enum CreateAssignment {
+    Personal {
+        identity: Identity,
+        spec: AssignmentSpec,
+    },
+    Shared {
+        #[serde(rename = "sharedAgent")]
+        shared_agent: hermes_core::domain::shared::NewSharedAgent,
+        spec: AssignmentSpec,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]

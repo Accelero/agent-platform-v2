@@ -32,6 +32,12 @@ const MAX_CONFIG: usize = 64 * 1024;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
     pub installation: Installation,
+    #[serde(default)]
+    pub agent_domain: Option<String>,
+    #[serde(default)]
+    pub reserved_agent_labels: Vec<String>,
+    #[serde(default)]
+    pub public_origin: Option<String>,
     pub database_url_file: PathBuf,
     /// Private CA for the identity provider, if it is not publicly trusted.
     #[serde(default)]
@@ -249,7 +255,41 @@ impl Config {
     pub fn settings(&self) -> Result<Arc<Settings>, AppError> {
         let sources = StorageSources::new(self.storage_sources.clone())
             .map_err(AppError::invalid_configuration)?;
+        let mut endpoint_port = 443;
+        let endpoint_names =
+            if let Some(domain) = self.agent_domain.as_deref().filter(|s| !s.is_empty()) {
+                let browser = self
+                    .administration
+                    .as_ref()
+                    .and_then(|a| a.browser.as_ref());
+                let public = self
+                    .public_origin
+                    .as_deref()
+                    .or_else(|| self.controller.as_ref().map(|c| c.public_origin.as_str()))
+                    .or_else(|| browser.map(|b| b.other_origin.as_str()))
+                    .ok_or_else(AppError::invalid)?;
+                let origin = url::Url::parse(public).map_err(|_| AppError::invalid())?;
+                if origin.scheme() != "https" || origin.origin().ascii_serialization() != public {
+                    return Err(AppError::invalid());
+                }
+                endpoint_port = origin
+                    .port_or_known_default()
+                    .ok_or_else(AppError::invalid)?;
+                let mut origins = vec![public, self.installation.issuer.as_str()];
+                if let Some(browser) = browser {
+                    origins.push(&browser.public_origin);
+                }
+                Some(hermes_core::domain::endpoints::EndpointNames::new(
+                    domain,
+                    &self.reserved_agent_labels,
+                    &origins,
+                )?)
+            } else {
+                None
+            };
         Ok(Arc::new(Settings {
+            endpoint_names,
+            endpoint_port,
             installation: self.installation.clone(),
             sources,
             data_identity: self.data_identity,
@@ -376,6 +416,26 @@ mod tests {
         assert!(administration.browser.is_some() && administration.directory.is_some());
         assert!(api.execution.is_some() && api.resolver.is_some() && api.controller.is_none());
         assert_eq!(api.settings().unwrap().sources.iter().count(), 3);
+        let mut endpoint_config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(fixture("api.json")).unwrap()).unwrap();
+        endpoint_config["agentDomain"] = json!("agents.test");
+        endpoint_config["publicOrigin"] = json!("https://personal.agents.test:8443");
+        endpoint_config["reservedAgentLabels"] = json!(["ops"]);
+        let parsed: Config = serde_json::from_value(endpoint_config.clone()).unwrap();
+        let settings = parsed.settings().unwrap();
+        assert_eq!(settings.endpoint_port, 8443);
+        let names = settings.endpoint_names.as_ref().unwrap();
+        assert_eq!(names.domain(), "agents.test");
+        assert!(names.validate_label("ops").is_err());
+        assert!(names.validate_label("personal").is_err());
+        assert!(names.validate_label("engineering").is_ok());
+        endpoint_config["agentDomain"] = json!("Agents.test.");
+        assert!(
+            serde_json::from_value::<Config>(endpoint_config)
+                .unwrap()
+                .settings()
+                .is_err()
+        );
         let controller = Config::load(&fixture("controller.json")).await.unwrap();
         let section = controller.controller.as_ref().unwrap();
         assert!(controller.administration.is_none() && section.kubeconfig.is_none());

@@ -46,10 +46,11 @@ impl InstanceStore for PgStore {
             .map_err(store_error)?;
         let Some(row) = sqlx::query(
             "SELECT i.assignment_id, i.namespace, i.namespace_uid, i.desired_generation, \
-             i.execution_generation, d.issuer, d.subject, c.definition \
+             i.execution_generation, d.issuer, d.subject, c.definition, e.label \
              FROM manager.instances i \
              JOIN manager.assignments a ON a.id = i.assignment_id \
-             JOIN manager.identities d ON d.id = a.identity_id \
+             LEFT JOIN manager.identities d ON d.id = a.identity_id \
+             LEFT JOIN manager.endpoints e ON e.assignment_id = a.id \
              JOIN manager.catalog_versions c \
                ON c.kind = 'template' AND c.id = a.template_id AND c.version = a.template_version \
              WHERE i.id = $1",
@@ -103,10 +104,20 @@ impl InstanceStore for PgStore {
         Ok(Some(DesiredInstance {
             instance_id: instance,
             assignment_id,
-            identity: Identity {
-                issuer: row.get("issuer"),
-                subject: row.get("subject"),
+            binding: match &record.binding {
+                hermes_core::domain::shared::AssignmentBinding::Personal { .. } => {
+                    hermes_core::domain::shared::InstanceBinding::Personal(Identity {
+                        issuer: row.get("issuer"),
+                        subject: row.get("subject"),
+                    })
+                }
+                hermes_core::domain::shared::AssignmentBinding::Shared(_) => {
+                    hermes_core::domain::shared::InstanceBinding::Shared {
+                        agent_id: assignment_id,
+                    }
+                }
             },
+            endpoint_label: row.get("label"),
             namespace: row.get("namespace"),
             namespace_uid: row.get("namespace_uid"),
             access: spec.access,

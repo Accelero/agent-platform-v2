@@ -14,6 +14,7 @@ mod kernel;
 mod queries;
 mod routing;
 mod secrets;
+mod shared;
 #[cfg(test)]
 mod testing;
 

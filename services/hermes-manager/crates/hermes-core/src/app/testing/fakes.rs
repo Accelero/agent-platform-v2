@@ -236,7 +236,14 @@ impl Cluster for FakeCluster {
                             key,
                             materials.initialization_id,
                             desired.instance_id,
-                            desired.identity.subject.clone(),
+                            match &desired.binding {
+                                crate::domain::shared::InstanceBinding::Personal(identity) => {
+                                    identity.subject.clone()
+                                }
+                                crate::domain::shared::InstanceBinding::Shared { agent_id } => {
+                                    agent_id.to_string()
+                                }
+                            },
                         ));
                     }
                     workload

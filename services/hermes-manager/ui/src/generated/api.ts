@@ -596,10 +596,215 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/endpoint-settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getEndpointSettings"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/assignments/{assignmentId}/endpoint": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getAssignmentEndpoint"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: operations["updateAssignmentEndpoint"];
+    trace?: never;
+  };
+  "/api/v1/assignments/{assignmentId}/grants": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listAssignmentGrants"];
+    put: operations["replaceAssignmentGrants"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/access-groups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listAccessGroups"];
+    put?: never;
+    post: operations["createAccessGroup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/access-groups/{groupId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["getAccessGroup"];
+    put?: never;
+    post?: never;
+    delete: operations["deleteAccessGroup"];
+    options?: never;
+    head?: never;
+    patch: operations["updateAccessGroup"];
+    trace?: never;
+  };
+  "/api/v1/access-groups/{groupId}/members": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["listAccessGroupMembers"];
+    put?: never;
+    post: operations["addAccessGroupMember"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/access-groups/{groupId}/members/{identityId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete: operations["removeAccessGroupMember"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @enum {string} */
+    AssignmentKind: "personal" | "shared";
+    SharedAgent: {
+      name: components["schemas"]["Name"];
+      displayName: string;
+    };
+    NewSharedAgent: {
+      name: components["schemas"]["Name"];
+      displayName: string;
+      label: components["schemas"]["Name"];
+      enabled: boolean;
+    };
+    EndpointSettings: {
+      agentDomain: string | null;
+      reservedLabels: string[];
+    };
+    AssignmentEndpoint: {
+      label: components["schemas"]["Name"];
+      hostname: string;
+      /** Format: uri */
+      url: string;
+      /** Format: uri */
+      gatewayCallbackUrl: string;
+      /** Format: uri */
+      nativeCallbackUrl: string;
+      enabled: boolean;
+      version: number;
+    };
+    EndpointChanges: {
+      label?: components["schemas"]["Name"];
+      enabled?: boolean;
+    };
+    EndpointReceipt: {
+      /** Format: uuid */
+      assignmentId: string;
+      version: number;
+    };
+    GrantPrincipal:
+      | {
+          identity: components["schemas"]["Identity"];
+        }
+      | {
+          /** Format: uuid */
+          groupId: string;
+        };
+    ReplaceAgentGrants: {
+      grants: components["schemas"]["GrantPrincipal"][];
+    };
+    AgentGrants: {
+      grants: components["schemas"]["GrantPrincipal"][];
+      grantsVersion: number;
+    };
+    GrantsReceipt: {
+      /** Format: uuid */
+      assignmentId: string;
+      grantsVersion: number;
+    };
+    CreateAccessGroup: {
+      name: components["schemas"]["Name"];
+      displayName: string;
+    };
+    GroupChanges: {
+      name?: components["schemas"]["Name"];
+      displayName?: string;
+    };
+    AccessGroup: {
+      /** Format: uuid */
+      id: string;
+      name: components["schemas"]["Name"];
+      displayName: string;
+      version: number;
+    };
+    GroupReceipt: {
+      /** Format: uuid */
+      groupId: string;
+      version: number;
+    };
+    AddGroupMember: {
+      identity: components["schemas"]["Identity"];
+    };
+    GroupMember: {
+      /** Format: uuid */
+      identityId: string;
+      identity: components["schemas"]["Identity"];
+    };
+    AccessGroupPage: {
+      items: components["schemas"]["AccessGroup"][];
+      nextCursor: string | null;
+    };
+    GroupMemberPage: {
+      items: components["schemas"]["GroupMember"][];
+      nextCursor: string | null;
+    };
     Name: string;
     Identity: {
       /**
@@ -635,6 +840,15 @@ export interface components {
         | "access_denied"
         | "administrator_grant_exists"
         | "administrators_exist"
+        | "hostname_taken"
+        | "name_taken"
+        | "group_in_use"
+        | "invalid_hostname_label"
+        | "reserved_hostname_label"
+        | "endpoints_not_configured"
+        | "endpoint_on_personal_agent"
+        | "grant_on_personal_agent"
+        | "unknown_group"
         | "assignment_exists"
         | "backend_unavailable"
         | "concurrent_change"
@@ -718,10 +932,15 @@ export interface components {
       adminConfig?: Record<string, never>;
       secrets?: components["schemas"]["secretReference"][];
     };
-    CreateAssignment: {
-      identity: components["schemas"]["Identity"];
-      spec: components["schemas"]["AssignmentSpec"];
-    };
+    CreateAssignment:
+      | {
+          identity: components["schemas"]["Identity"];
+          spec: components["schemas"]["AssignmentSpec"];
+        }
+      | {
+          sharedAgent: components["schemas"]["NewSharedAgent"];
+          spec: components["schemas"]["AssignmentSpec"];
+        };
     AssignmentChanges: {
       access?: components["schemas"]["Access"];
       template?: components["schemas"]["VersionRef"];
@@ -772,7 +991,9 @@ export interface components {
     AssignmentSummary: {
       /** Format: uuid */
       id: string;
-      identity: components["schemas"]["Identity"];
+      kind: components["schemas"]["AssignmentKind"];
+      identity?: components["schemas"]["Identity"];
+      sharedAgent?: components["schemas"]["SharedAgent"];
       access: components["schemas"]["Access"];
       template: components["schemas"]["VersionRef"];
       version: number;
@@ -788,8 +1009,10 @@ export interface components {
       /** Format: uuid */
       id: string;
       /** Format: uuid */
-      identityId: string;
-      identity: components["schemas"]["Identity"];
+      identityId?: string;
+      kind: components["schemas"]["AssignmentKind"];
+      identity?: components["schemas"]["Identity"];
+      sharedAgent?: components["schemas"]["SharedAgent"];
       spec: components["schemas"]["AssignmentSpec"];
       version: number;
       instance: components["schemas"]["Instance"];
@@ -931,7 +1154,9 @@ export interface components {
     VolumeUse: {
       /** Format: uuid */
       assignmentId: string;
-      identity: components["schemas"]["Identity"];
+      kind: components["schemas"]["AssignmentKind"];
+      identity?: components["schemas"]["Identity"];
+      sharedAgent?: components["schemas"]["SharedAgent"];
       name: components["schemas"]["Name"];
       source: components["schemas"]["Name"];
       path: string | null;
@@ -1275,6 +1500,7 @@ export interface components {
     };
   };
   parameters: {
+    GroupId: string;
     /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
     IdempotencyKey: string;
     IfMatch: string;
@@ -1484,6 +1710,7 @@ export interface operations {
   listAssignments: {
     parameters: {
       query?: {
+        kind?: components["schemas"]["AssignmentKind"];
         q?: components["parameters"]["Search"];
         access?: components["schemas"]["Access"];
         templateId?: components["schemas"]["Name"];
@@ -2638,6 +2865,435 @@ export interface operations {
       401: components["responses"]["Unauthenticated"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+    };
+  };
+  getEndpointSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EndpointSettings"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  getAssignmentEndpoint: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        assignmentId: components["parameters"]["AssignmentId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current state */
+      200: {
+        headers: {
+          ETag: components["headers"]["ETag"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssignmentEndpoint"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  updateAssignmentEndpoint: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+        "If-Match": components["parameters"]["IfMatch"];
+      };
+      path: {
+        assignmentId: components["parameters"]["AssignmentId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EndpointChanges"];
+      };
+    };
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EndpointReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      412: components["responses"]["Stale"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  listAssignmentGrants: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        assignmentId: components["parameters"]["AssignmentId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current state */
+      200: {
+        headers: {
+          ETag: components["headers"]["ETag"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentGrants"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  replaceAssignmentGrants: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+        "If-Match": components["parameters"]["IfMatch"];
+      };
+      path: {
+        assignmentId: components["parameters"]["AssignmentId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReplaceAgentGrants"];
+      };
+    };
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GrantsReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      412: components["responses"]["Stale"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  listAccessGroups: {
+    parameters: {
+      query?: {
+        q?: components["parameters"]["Search"];
+        /** @description The previous page's nextCursor */
+        after?: components["parameters"]["After"];
+        limit?: components["parameters"]["Limit"];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccessGroupPage"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  createAccessGroup: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateAccessGroup"];
+      };
+    };
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  getAccessGroup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        groupId: components["parameters"]["GroupId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current state */
+      200: {
+        headers: {
+          ETag: components["headers"]["ETag"];
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccessGroup"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  deleteAccessGroup: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+        "If-Match": components["parameters"]["IfMatch"];
+      };
+      path: {
+        groupId: components["parameters"]["GroupId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      412: components["responses"]["Stale"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  updateAccessGroup: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+        "If-Match": components["parameters"]["IfMatch"];
+      };
+      path: {
+        groupId: components["parameters"]["GroupId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GroupChanges"];
+      };
+    };
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      412: components["responses"]["Stale"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  listAccessGroupMembers: {
+    parameters: {
+      query?: {
+        /** @description The previous page's nextCursor */
+        after?: components["parameters"]["After"];
+        limit?: components["parameters"]["Limit"];
+      };
+      header?: never;
+      path: {
+        groupId: components["parameters"]["GroupId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupMemberPage"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  addAccessGroupMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+        "If-Match": components["parameters"]["IfMatch"];
+      };
+      path: {
+        groupId: components["parameters"]["GroupId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddGroupMember"];
+      };
+    };
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      412: components["responses"]["Stale"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
+    };
+  };
+  removeAccessGroupMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description One intended change. Repeating it with the same body returns the original result; the same command with a different body is a conflict. A key is scoped to the actor and the command, so the same key sent to another command is a separate change. */
+        "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+        /** @description Required for browser-session mutations; ignored for bearer requests */
+        "X-CSRF-Token"?: components["parameters"]["Csrf"];
+        "If-Match": components["parameters"]["IfMatch"];
+      };
+      path: {
+        groupId: components["parameters"]["GroupId"];
+        identityId: components["parameters"]["IdentityId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Committed */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GroupReceipt"];
+        };
+      };
+      401: components["responses"]["Unauthenticated"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      412: components["responses"]["Stale"];
+      422: components["responses"]["Invalid"];
+      503: components["responses"]["Unavailable"];
     };
   };
 }

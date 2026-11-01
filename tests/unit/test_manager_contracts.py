@@ -102,9 +102,14 @@ def test_manager_contract_is_valid_openapi_31(name):
 def test_assignments_carry_no_workload_specifications():
     document = yaml.safe_load((CONTRACTS / "openapi.yaml").read_text())
     schemas = document["components"]["schemas"]
-    for name in ("CreateAssignment", "AssignmentSpec", "AssignmentChanges"):
+    for name in ("AssignmentSpec", "AssignmentChanges"):
         assert schemas[name]["additionalProperties"] is False, name
-    assert set(schemas["CreateAssignment"]["properties"]) == {"identity", "spec"}
+    variants = schemas["CreateAssignment"]["oneOf"]
+    assert len(variants) == 2
+    for variant, binding in zip(variants, ("identity", "sharedAgent"), strict=True):
+        assert variant["additionalProperties"] is False
+        assert set(variant["properties"]) == {binding, "spec"}
+        assert set(variant["required"]) == {binding, "spec"}
     allowed = {"access", "template", "volumes", "terminal", "adminConfig", "secrets"}
     assert set(schemas["AssignmentChanges"]["properties"]) == allowed
     assert set(schemas["AssignmentSpec"]["properties"]) == allowed
@@ -124,7 +129,14 @@ def test_resolver_trusts_only_the_gateway_certificate():
     operation = document["paths"]["/internal/v1/routes/resolve"]["post"]
     assert set(operation["responses"]) == {"200", "202", "403", "422", "503"}
     request = document["components"]["schemas"]["ResolveRequest"]
-    assert set(request["properties"]) == {"identity"}
+    assert set(request["properties"]) == {"identity", "target"}
+    assert request["required"] == ["identity"]
+    targets = document["components"]["schemas"]["Target"]["oneOf"]
+    assert {target["properties"]["kind"]["const"] for target in targets} == {
+        "personal",
+        "shared",
+    }
+    assert all(target["additionalProperties"] is False for target in targets)
     assert request["additionalProperties"] is False
 
 

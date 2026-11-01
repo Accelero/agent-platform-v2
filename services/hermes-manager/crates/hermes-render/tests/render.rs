@@ -77,7 +77,8 @@ fn desired() -> DesiredInstance {
     DesiredInstance {
         instance_id: instance,
         assignment_id: Uuid::from_u128(1),
-        identity: identity("bob"),
+        binding: hermes_core::domain::shared::InstanceBinding::Personal(identity("bob")),
+        endpoint_label: None,
         namespace: installation().instance_namespace(instance),
         namespace_uid: Some("namespace-uid".into()),
         access: Access::Enabled,
@@ -417,7 +418,7 @@ fn shared_static_paths_render_distinct_claims_and_independent_read_only_mounts()
         second.instance_id = Uuid::from_u128(42);
         second.assignment_id = Uuid::from_u128(43);
         second.namespace = installation().instance_namespace(second.instance_id);
-        second.identity = identity("carol");
+        second.binding = hermes_core::domain::shared::InstanceBinding::Personal(identity("carol"));
         second.volumes.get_mut("home").unwrap().read_only = true;
         let left = instance::render(
             &config(),
@@ -477,7 +478,9 @@ fn foreign_namespaces_and_identities_are_refused() {
     foreign.namespace = "kube-system".into();
     assert!(instance::render(&config(), &foreign, &materials(), &[], Workload::Run).is_err());
     let mut other = desired();
-    other.identity.issuer = "https://elsewhere.example.org/realms/x".into();
+    if let hermes_core::domain::shared::InstanceBinding::Personal(identity) = &mut other.binding {
+        identity.issuer = "https://elsewhere.example.org/realms/x".into();
+    }
     assert!(instance::render(&config(), &other, &materials(), &[], Workload::Run).is_err());
     assert!(
         instance::render(

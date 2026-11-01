@@ -28,6 +28,7 @@ use crate::app::ports::{
     IdentityRecord, KernelTx, Reservation, SecretRecord, SecretTx, Store,
 };
 use crate::app::routing::RouteStore;
+use crate::app::shared_ports::SharedTx;
 use crate::domain::access::Grant;
 use crate::domain::assignments::{Access, LifetimeMode};
 use crate::domain::backends::BackendDefinition;
@@ -41,8 +42,9 @@ use crate::domain::installation::Installation;
 use crate::domain::instances::{InstanceStatus, Phase};
 use crate::domain::materials::MaterialPurpose;
 use crate::domain::orphans::Orphan;
-use crate::domain::routing::RouteRow;
+use crate::domain::routing::{RouteRow, SharedRouteRow};
 use crate::domain::secrets::SecretKind;
+use crate::domain::shared::{AccessGroup, AgentGrants, AssignmentBinding, Endpoint, Principal};
 use crate::domain::templates::TemplateDefinition;
 
 type ReceiptKey = (String, &'static str, String);
@@ -61,6 +63,10 @@ struct State {
     catalog: BTreeMap<(&'static str, String, i64), (VersionStatus, serde_json::Value)>,
     assignments: BTreeMap<Uuid, AssignmentRecord>,
     instances: BTreeMap<Uuid, Instance>,
+    endpoints: BTreeMap<Uuid, Endpoint>,
+    agent_grants: BTreeMap<Uuid, AgentGrants>,
+    access_groups: BTreeMap<Uuid, AccessGroup>,
+    group_members: std::collections::BTreeSet<(Uuid, Uuid)>,
     secrets: BTreeMap<String, SecretVersions>,
     materials: BTreeMap<(Uuid, MaterialPurpose), StoredMaterial>,
     epoch: i64,
@@ -353,6 +359,109 @@ impl CatalogTx for MemTx {
 }
 
 #[async_trait]
+impl SharedTx for MemTx {
+    async fn shared_name_owner(&mut self, name: &str) -> Result<Option<Uuid>, StoreError> {
+        Ok(self
+            .state
+            .assignments
+            .values()
+            .find(|a| a.binding.shared_agent().is_some_and(|s| s.name == name))
+            .map(|a| a.id))
+    }
+    async fn endpoint(&mut self, assignment: Uuid) -> Result<Option<Endpoint>, StoreError> {
+        Ok(self.state.endpoints.get(&assignment).cloned())
+    }
+    async fn label_owner(&mut self, label: &str) -> Result<Option<Uuid>, StoreError> {
+        Ok(self
+            .state
+            .endpoints
+            .values()
+            .find(|e| e.label == label)
+            .map(|e| e.assignment_id))
+    }
+    async fn put_endpoint(&mut self, endpoint: &Endpoint) -> Result<(), StoreError> {
+        if !self
+            .state
+            .assignments
+            .get(&endpoint.assignment_id)
+            .is_some_and(|a| matches!(a.binding, AssignmentBinding::Shared(_)))
+        {
+            return Err(StoreError::Unavailable);
+        }
+        self.state
+            .endpoints
+            .insert(endpoint.assignment_id, endpoint.clone());
+        Ok(())
+    }
+    async fn agent_grants(&mut self, assignment: Uuid) -> Result<AgentGrants, StoreError> {
+        Ok(self
+            .state
+            .agent_grants
+            .get(&assignment)
+            .cloned()
+            .unwrap_or(AgentGrants {
+                grants: vec![],
+                grants_version: 1,
+            }))
+    }
+    async fn put_agent_grants(
+        &mut self,
+        assignment: Uuid,
+        grants: &[Principal],
+        version: i64,
+    ) -> Result<(), StoreError> {
+        self.state.agent_grants.insert(
+            assignment,
+            AgentGrants {
+                grants: grants.to_vec(),
+                grants_version: version,
+            },
+        );
+        Ok(())
+    }
+    async fn access_group(&mut self, id: Uuid) -> Result<Option<AccessGroup>, StoreError> {
+        Ok(self.state.access_groups.get(&id).cloned())
+    }
+    async fn group_name_owner(&mut self, name: &str) -> Result<Option<Uuid>, StoreError> {
+        Ok(self
+            .state
+            .access_groups
+            .values()
+            .find(|g| g.name == name)
+            .map(|g| g.id))
+    }
+    async fn put_access_group(&mut self, group: &AccessGroup) -> Result<(), StoreError> {
+        self.state.access_groups.insert(group.id, group.clone());
+        Ok(())
+    }
+    async fn group_in_use(&mut self, id: Uuid) -> Result<bool, StoreError> {
+        Ok(self
+            .state
+            .agent_grants
+            .values()
+            .any(|g| g.grants.contains(&Principal::Group(id))))
+    }
+    async fn delete_access_group(&mut self, id: Uuid) -> Result<(), StoreError> {
+        self.state.access_groups.remove(&id);
+        self.state.group_members.retain(|(g, _)| *g != id);
+        Ok(())
+    }
+    async fn put_group_member(
+        &mut self,
+        group: Uuid,
+        identity: Uuid,
+        present: bool,
+    ) -> Result<(), StoreError> {
+        if present {
+            self.state.group_members.insert((group, identity));
+        } else {
+            self.state.group_members.remove(&(group, identity));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl AssignmentTx for MemTx {
     async fn assignment(&mut self, id: Uuid) -> Result<Option<AssignmentRecord>, StoreError> {
         Ok(self.state.assignments.get(&id).cloned())
@@ -363,7 +472,7 @@ impl AssignmentTx for MemTx {
             .state
             .assignments
             .values()
-            .find(|record| record.identity_id == identity)
+            .find(|record| record.binding.identity_id() == Some(identity))
             .map(|record| record.id))
     }
 
@@ -494,7 +603,7 @@ impl RouteStore for MemStore {
             let assignment = s
                 .assignments
                 .values()
-                .find(|a| a.identity_id == record.id)?;
+                .find(|a| a.binding.identity_id() == Some(record.id))?;
             let instance = s.instances.get(&assignment.instance_id)?;
             Some(RouteRow {
                 instance_id: assignment.instance_id,
@@ -508,6 +617,42 @@ impl RouteStore for MemStore {
                 desired_generation: instance.desired_generation,
                 observed_generation: instance.observed_generation,
                 assignment_version: assignment.version,
+            })
+        }))
+    }
+    async fn shared_route_row(
+        &self,
+        identity: &Identity,
+        label: &str,
+    ) -> Result<Option<SharedRouteRow>, StoreError> {
+        Ok(self.read(|s| {
+            let endpoint = s.endpoints.values().find(|e| e.label == label)?;
+            let assignment = s.assignments.get(&endpoint.assignment_id)?;
+            let instance = s.instances.get(&assignment.instance_id)?;
+            let granted = s.identities.get(identity).is_some_and(|identity| {
+                s.agent_grants.get(&assignment.id).is_some_and(|grants| {
+                    grants.grants.iter().any(|p| match p {
+                        Principal::Identity(id) => *id == identity.id,
+                        Principal::Group(group) => s.group_members.contains(&(*group, identity.id)),
+                    })
+                })
+            });
+            Some(SharedRouteRow {
+                endpoint_enabled: endpoint.enabled,
+                granted,
+                route: RouteRow {
+                    instance_id: assignment.instance_id,
+                    namespace: instance.namespace.clone(),
+                    namespace_bound: instance.namespace_uid.is_some(),
+                    access: assignment.spec.access,
+                    phase: instance
+                        .status
+                        .as_ref()
+                        .map_or(Phase::Provisioning, |(_, status)| status.phase),
+                    desired_generation: instance.desired_generation,
+                    observed_generation: instance.observed_generation,
+                    assignment_version: assignment.version,
+                },
             })
         }))
     }
@@ -612,11 +757,19 @@ impl InstanceStore for MemStore {
         Ok(self.read(|s| {
             let row = s.instances.get(&instance)?;
             let assignment = s.assignments.values().find(|a| a.instance_id == instance)?;
-            let identity = s
+            let personal_identity = s
                 .identities
                 .iter()
-                .find(|(_, record)| record.id == assignment.identity_id)
-                .map(|(identity, _)| identity.clone())?;
+                .find(|(_, record)| Some(record.id) == assignment.binding.identity_id())
+                .map(|(identity, _)| identity.clone());
+            let binding = match &assignment.binding {
+                AssignmentBinding::Personal { .. } => {
+                    crate::domain::shared::InstanceBinding::Personal(personal_identity?)
+                }
+                AssignmentBinding::Shared(_) => crate::domain::shared::InstanceBinding::Shared {
+                    agent_id: assignment.id,
+                },
+            };
             let definition = s.template(&assignment.spec.template)?;
             let mut admin_config = definition.admin_config.clone();
             crate::domain::settings::merge(&mut admin_config, &assignment.spec.admin_config);
@@ -645,7 +798,8 @@ impl InstanceStore for MemStore {
             Some(DesiredInstance {
                 instance_id: instance,
                 assignment_id: assignment.id,
-                identity,
+                binding,
+                endpoint_label: s.endpoints.get(&assignment.id).map(|e| e.label.clone()),
                 namespace: row.namespace.clone(),
                 namespace_uid: row.namespace_uid.clone(),
                 access: assignment.spec.access,

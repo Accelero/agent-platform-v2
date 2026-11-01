@@ -13,6 +13,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{PgTx, store_error};
+use hermes_core::domain::shared::{AssignmentBinding, SharedAgent};
 
 /// The full assignment record from its three tables.
 pub(crate) async fn load(
@@ -92,7 +93,20 @@ pub(crate) async fn load(
     };
     Ok(Some(AssignmentRecord {
         id,
-        identity_id: row.get("identity_id"),
+        binding: match row.get::<&str, _>("kind") {
+            "personal" => AssignmentBinding::Personal {
+                identity_id: row
+                    .try_get("identity_id")
+                    .map_err(|_| StoreError::Unavailable)?,
+            },
+            "shared" => AssignmentBinding::Shared(SharedAgent {
+                name: row.try_get("name").map_err(|_| StoreError::Unavailable)?,
+                display_name: row
+                    .try_get("display_name")
+                    .map_err(|_| StoreError::Unavailable)?,
+            }),
+            _ => return Err(StoreError::Unavailable),
+        },
         instance_id: row.get("instance_id"),
         spec,
         version: row.get("version"),
@@ -162,10 +176,10 @@ impl AssignmentTx for PgTx {
         let spec = &record.spec;
         sqlx::query(
             "INSERT INTO manager.assignments (id, identity_id, access, template_id, template_version, terminal_mode, \
-             default_backend, admin_config, secrets, version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             default_backend, admin_config, secrets, version, kind, name, display_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(record.id)
-        .bind(record.identity_id)
+        .bind(record.binding.identity_id())
         .bind(spec.access.as_str())
         .bind(&spec.template.id)
         .bind(spec.template.version)
@@ -174,6 +188,9 @@ impl AssignmentTx for PgTx {
         .bind(Json(&spec.admin_config))
         .bind(Json(&spec.secrets))
         .bind(record.version)
+        .bind(record.binding.kind().as_str())
+        .bind(record.binding.shared_agent().map(|s| &s.name))
+        .bind(record.binding.shared_agent().map(|s| &s.display_name))
         .execute(&mut *self.tx)
         .await
         .map_err(store_error)?;

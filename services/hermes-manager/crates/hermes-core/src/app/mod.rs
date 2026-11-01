@@ -18,6 +18,8 @@ pub mod queries;
 pub mod routing;
 pub mod secrets;
 pub mod settings;
+pub mod shared;
+pub mod shared_ports;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

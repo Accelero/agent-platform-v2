@@ -73,7 +73,8 @@ impl fmt::Debug for Plain {
 pub struct DesiredInstance {
     pub instance_id: Uuid,
     pub assignment_id: Uuid,
-    pub identity: Identity,
+    pub binding: crate::domain::shared::InstanceBinding,
+    pub endpoint_label: Option<String>,
     pub namespace: String,
     pub namespace_uid: Option<String>,
     pub access: Access,
@@ -776,7 +777,12 @@ impl<S: InstanceStore, C: Cluster, V: Vault, N: Native> Controller<S, C, V, N> {
             installation_id: self.settings.installation.id,
             instance_id: desired.instance_id,
             material_id: row.id,
-            owner: desired.identity.clone(),
+            owner: match &desired.binding {
+                crate::domain::shared::InstanceBinding::Personal(owner) => owner.clone(),
+                crate::domain::shared::InstanceBinding::Shared { .. } => {
+                    return Ok(NativeCheck::ReceiptInvalid);
+                }
+            },
         };
         if !self.native.receipt_valid(&key, &binding, receipt) {
             return Ok(NativeCheck::ReceiptInvalid);

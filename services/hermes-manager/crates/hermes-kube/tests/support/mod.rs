@@ -276,7 +276,10 @@ pub fn desired(fixture: &Fixture) -> DesiredInstance {
     DesiredInstance {
         instance_id: instance,
         assignment_id: Uuid::new_v4(),
-        identity: hermes_core::app::testing::identity("bob"),
+        binding: hermes_core::domain::shared::InstanceBinding::Personal(
+            hermes_core::app::testing::identity("bob"),
+        ),
+        endpoint_label: None,
         namespace: fixture.installation().instance_namespace(instance),
         namespace_uid: None,
         access: Access::Enabled,

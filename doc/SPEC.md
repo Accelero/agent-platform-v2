@@ -40,7 +40,7 @@ Not in scope:
 - non-empty terminal service egress;
 - worker prewarming;
 - board integration;
-- team instances.
+- serving shared instances; their administration model is built, while shared routing, runtime and browser support remain planned.
 
 ## Terminology
 
@@ -84,6 +84,7 @@ Not in scope:
 | R17 | Every acknowledged administration change is durable before acknowledgement. After an abrupt process kill at any point, the system converges without duplicate instances, regenerated credentials, duplicate worker generations or lease grants, revived leases or deletion of anything it did not observe. |
 | R18 | Credentials and secret values never appear in API responses, audit records, logs, errors, images, chart values or build contexts. |
 | R19 | The installation can be restored from deployment-owned backups of PostgreSQL and the data under its storage sources, on the same or a new cluster, without adopting resources it did not create. |
+| R20 | Shared-agent administration has immutable assignment kinds, unique reusable endpoint labels, explicit identity/group grants and versioned groups. Audience and endpoint enable changes never restart workloads; all writes use the command envelope. |
 
 ## Administration model
 
@@ -139,6 +140,49 @@ refuses them.
 The dashboard never exposes model keys, native tokens, chat history, private
 files, raw Pod specifications or an impersonation function. The optional
 Keycloak directory lookup is read-only.
+
+### Shared-agent administration
+
+An assignment has an immutable kind. Personal assignments retain one exact
+identity each. Shared assignments have a unique name and display name, no
+identity, and one endpoint created in the same command. Endpoint labels follow
+the configured agent domain's DNS and reservation rules. Disabled labels remain
+owned; a rename frees the old label for reuse. Endpoint rows cannot be deleted
+or reassigned.
+
+The administration API supports both kinds in lists, details, previews, updates,
+retries, rollouts and volume inventory. A shared assignment requires an agent
+domain in the API configuration. Endpoint settings report that domain and the
+reserved labels. Endpoint details report the public URL and both callbacks that
+must be registered with the provider.
+
+Shared access grants name exact identities or manager-owned access groups.
+Groups have unique names, display names and versioned membership. An identity
+can be recorded before its first login. Membership provisions no assignment;
+administrators have no implicit shared-agent use grant. A group still referenced
+by a grant cannot be deleted. All mutations use the existing administrator,
+idempotency, precondition, audit and durability rules.
+
+Assignment configuration version, endpoint version, grants version and group
+version are independent. Grant, group, membership and endpoint enable/disable
+commands change neither the assignment version nor either instance generation.
+Renaming an endpoint advances only the instance's desired generation. No endpoint
+or audience command replaces instance material.
+
+The internal resolver accepts a personal target (also the default when omitted)
+or a shared endpoint label. Shared resolution reads endpoint state, assignment
+access, direct grants, group membership and readiness in one database snapshot.
+Absent, disabled and ungranted endpoints have the same denied response. Only an
+enabled assignment and endpoint with a current grant can reach readiness checks;
+only its recorded, converged instance can be returned. Reads begun after a
+revocation commits are denied; a read overlapping that commit uses its single
+snapshot. Resolving neither provisions an identity nor creates an instance.
+
+**Planned connection support:** runtime home binding,
+per-host browser sessions, chart configuration and administration dashboard
+workflows must land before shared agents can serve users. The controller reads
+shared instances explicitly; rendering currently refuses them while the runtime
+branch remains planned.
 
 ## User experience
 
@@ -540,6 +584,20 @@ restorable:
 | Concurrent enable, retry and controller kill | One stable instance; credentials generated once |
 | Email change or new subject with an old email | Ownership unchanged; the new subject gets nothing |
 | Forged headers, foreign cookie or ticket, callback race | No cross-owner access |
+| SH-D01: Shared hostname labels | Valid, malformed, reserved and over-long labels follow the configured domain policy |
+| SH-D02: Concurrent shared creation | Concurrent retries create one assignment, endpoint and instance; a contested label has one winner |
+| SH-D03: Endpoint rename and reuse | Renaming frees the old label; disabled labels remain owned; concurrent renames have one winner; endpoint binding is immutable |
+| SH-D04: Assignment kind boundaries | Personal assignments cannot carry endpoints or shared grants, and kind cannot change |
+| SH-D05: Independent audience state | Audience and endpoint enable changes leave assignment version, generations and desired workload unchanged; rename advances only desired generation |
+| SH-D06: Shared command envelope | New mutations enforce current administration authority, idempotency, preconditions and atomic audit events |
+| SH-D07: Group administration | A granted group cannot be deleted; membership provisions no assignment; identities can be recorded before login |
+| SH-D08: Shared administration API | Every shared administration workflow has a contract-checked API path; inventories include shared instances and expose no secret values |
+| SH-R01: Shared route decision table | Endpoint and grant checks precede access, phase and readiness checks, with one denial response |
+| SH-R02: Shared route snapshot | Endpoint, grants, membership and readiness share one snapshot; resolves begun after revocation commits are denied |
+| SH-R03: Shared registered destination | A shared route names only its registered instance namespace; foreign registry data is unavailable |
+| SH-R04: Personal route compatibility | Absent and explicit personal targets preserve personal routing; shared grants create no personal assignment |
+| SH-R05: Shared route failures | Store failures return unavailable without a fallback |
+| SH-R06: Shared resolver boundary | Only the configured gateway mTLS identity can resolve; identity and target input are neither logged nor reflected |
 | SH-G01: Gateway authority classification | HTTP/1.1 and HTTP/2 authorities outside the configured public host and port are `421` before session lookup or forwarding; health probes work on any authority |
 | SH-G02: Forged host and absolute target | Forwarded headers never choose a target, and a URI authority that differs from Host is refused |
 | SH-G04: Tossed platform cookies | Lookalike cookies do not disturb a valid session and are stripped; duplicate exact platform-cookie names remain refused |

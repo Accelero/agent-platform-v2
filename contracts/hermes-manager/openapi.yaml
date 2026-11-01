@@ -134,6 +134,9 @@ paths:
     get:
       operationId: listAssignments
       parameters:
+        - name: kind
+          in: query
+          schema: { $ref: '#/components/schemas/AssignmentKind' }
         - { $ref: '#/components/parameters/Search' }
         - name: access
           in: query
@@ -847,6 +850,271 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/endpoint-settings:
+    get:
+      operationId: getEndpointSettings
+      responses:
+        '200':
+          description: Current state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EndpointSettings' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/assignments/{assignmentId}/endpoint:
+    get:
+      operationId: getAssignmentEndpoint
+      parameters:
+        - { $ref: '#/components/parameters/AssignmentId' }
+      responses:
+        '200':
+          description: Current state
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentEndpoint' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    patch:
+      operationId: updateAssignmentEndpoint
+      parameters:
+        - { $ref: '#/components/parameters/AssignmentId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EndpointChanges' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EndpointReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/Stale' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/assignments/{assignmentId}/grants:
+    get:
+      operationId: listAssignmentGrants
+      parameters:
+        - { $ref: '#/components/parameters/AssignmentId' }
+      responses:
+        '200':
+          description: Current state
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentGrants' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    put:
+      operationId: replaceAssignmentGrants
+      parameters:
+        - { $ref: '#/components/parameters/AssignmentId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceAgentGrants' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrantsReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/Stale' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/access-groups:
+    get:
+      operationId: listAccessGroups
+      parameters:
+        - { $ref: '#/components/parameters/Search' }
+        - { $ref: '#/components/parameters/After' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessGroupPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    post:
+      operationId: createAccessGroup
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAccessGroup' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/access-groups/{groupId}:
+    get:
+      operationId: getAccessGroup
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+      responses:
+        '200':
+          description: Current state
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessGroup' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    patch:
+      operationId: updateAccessGroup
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupChanges' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/Stale' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    delete:
+      operationId: deleteAccessGroup
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/Stale' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/access-groups/{groupId}/members:
+    get:
+      operationId: listAccessGroupMembers
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { $ref: '#/components/parameters/After' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupMemberPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+    post:
+      operationId: addAccessGroupMember
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddGroupMember' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/Stale' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/access-groups/{groupId}/members/{identityId}:
+    delete:
+      operationId: removeAccessGroupMember
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { $ref: '#/components/parameters/IdentityId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/Csrf' }
+        - { $ref: '#/components/parameters/IfMatch' }
+      responses:
+        '202':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupReceipt' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/Stale' }
+        '422': { $ref: '#/components/responses/Invalid' }
+        '503': { $ref: '#/components/responses/Unavailable' }
 components:
   securitySchemes:
     AdministratorAccessToken:
@@ -864,6 +1132,11 @@ components:
       description: The quoted version of the resource
       schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
   parameters:
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -966,6 +1239,147 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
   schemas:
+    AssignmentKind:
+      type: string
+      enum: [personal, shared]
+    SharedAgent:
+      type: object
+      additionalProperties: false
+      required: [name, displayName]
+      properties:
+        name: { $ref: '#/components/schemas/Name' }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+    NewSharedAgent:
+      type: object
+      additionalProperties: false
+      required: [name, displayName, label, enabled]
+      properties:
+        name: { $ref: '#/components/schemas/Name' }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+        label: { $ref: '#/components/schemas/Name' }
+        enabled: { type: boolean }
+    EndpointSettings:
+      type: object
+      additionalProperties: false
+      required: [agentDomain, reservedLabels]
+      properties:
+        agentDomain: { type: [string, 'null'] }
+        reservedLabels: { type: array, items: { type: string } }
+    AssignmentEndpoint:
+      type: object
+      additionalProperties: false
+      required: [label, hostname, url, gatewayCallbackUrl, nativeCallbackUrl, enabled, version]
+      properties:
+        label: { $ref: '#/components/schemas/Name' }
+        hostname: { type: string }
+        url: { type: string, format: uri }
+        gatewayCallbackUrl: { type: string, format: uri }
+        nativeCallbackUrl: { type: string, format: uri }
+        enabled: { type: boolean }
+        version: { type: integer, minimum: 1 }
+    EndpointChanges:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: { $ref: '#/components/schemas/Name' }
+        enabled: { type: boolean }
+    EndpointReceipt:
+      type: object
+      additionalProperties: false
+      required: [assignmentId, version]
+      properties:
+        assignmentId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+    GrantPrincipal:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [identity]
+          properties:
+            identity: { $ref: '#/components/schemas/Identity' }
+        - type: object
+          additionalProperties: false
+          required: [groupId]
+          properties:
+            groupId: { type: string, format: uuid }
+    ReplaceAgentGrants:
+      type: object
+      additionalProperties: false
+      required: [grants]
+      properties:
+        grants: { type: array, uniqueItems: true, items: { $ref: '#/components/schemas/GrantPrincipal' } }
+    AgentGrants:
+      type: object
+      additionalProperties: false
+      required: [grants, grantsVersion]
+      properties:
+        grants: { type: array, uniqueItems: true, items: { $ref: '#/components/schemas/GrantPrincipal' } }
+        grantsVersion: { type: integer, minimum: 1 }
+    GrantsReceipt:
+      type: object
+      additionalProperties: false
+      required: [assignmentId, grantsVersion]
+      properties:
+        assignmentId: { type: string, format: uuid }
+        grantsVersion: { type: integer, minimum: 1 }
+    CreateAccessGroup:
+      type: object
+      additionalProperties: false
+      required: [name, displayName]
+      properties:
+        name: { $ref: '#/components/schemas/Name' }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+    GroupChanges:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { $ref: '#/components/schemas/Name' }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+    AccessGroup:
+      type: object
+      additionalProperties: false
+      required: [id, name, displayName, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { $ref: '#/components/schemas/Name' }
+        displayName: { type: string, minLength: 1, maxLength: 128 }
+        version: { type: integer, minimum: 1 }
+    GroupReceipt:
+      type: object
+      additionalProperties: false
+      required: [groupId, version]
+      properties:
+        groupId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+    AddGroupMember:
+      type: object
+      additionalProperties: false
+      required: [identity]
+      properties:
+        identity: { $ref: '#/components/schemas/Identity' }
+    GroupMember:
+      type: object
+      additionalProperties: false
+      required: [identityId, identity]
+      properties:
+        identityId: { type: string, format: uuid }
+        identity: { $ref: '#/components/schemas/Identity' }
+    AccessGroupPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AccessGroup' } }
+        nextCursor: { type: [string, 'null'] }
+    GroupMemberPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/GroupMember' } }
+        nextCursor: { type: [string, 'null'] }
     Name:
       type: string
       minLength: 1
@@ -1008,6 +1422,15 @@ components:
             - access_denied
             - administrator_grant_exists
             - administrators_exist
+            - hostname_taken
+            - name_taken
+            - group_in_use
+            - invalid_hostname_label
+            - reserved_hostname_label
+            - endpoints_not_configured
+            - endpoint_on_personal_agent
+            - grant_on_personal_agent
+            - unknown_group
             - assignment_exists
             - backend_unavailable
             - concurrent_change
@@ -1112,12 +1535,19 @@ components:
         adminConfig: { type: object, description: Overrides layered over the template's admin settings }
         secrets: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/SecretReference' } }
     CreateAssignment:
-      type: object
-      additionalProperties: false
-      required: [identity, spec]
-      properties:
-        identity: { $ref: '#/components/schemas/Identity' }
-        spec: { $ref: '#/components/schemas/AssignmentSpec' }
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [identity, spec]
+          properties:
+            identity: { $ref: '#/components/schemas/Identity' }
+            spec: { $ref: '#/components/schemas/AssignmentSpec' }
+        - type: object
+          additionalProperties: false
+          required: [sharedAgent, spec]
+          properties:
+            sharedAgent: { $ref: '#/components/schemas/NewSharedAgent' }
+            spec: { $ref: '#/components/schemas/AssignmentSpec' }
     AssignmentChanges:
       type: object
       additionalProperties: false
@@ -1177,15 +1607,27 @@ components:
     AssignmentSummary:
       type: object
       additionalProperties: false
-      required: [id, identity, access, template, version, instanceId, phase]
+      required: [id, kind, access, template, version, instanceId, phase]
       properties:
         id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/AssignmentKind' }
         identity: { $ref: '#/components/schemas/Identity' }
+        sharedAgent: { $ref: '#/components/schemas/SharedAgent' }
         access: { $ref: '#/components/schemas/Access' }
         template: { $ref: '#/components/schemas/VersionRef' }
         version: { type: integer, minimum: 1 }
         instanceId: { type: string, format: uuid }
         phase: { $ref: '#/components/schemas/Phase' }
+      if:
+        properties: { kind: { const: personal } }
+      then:
+        required: [identity]
+        not: { required: [sharedAgent] }
+      else:
+        required: [sharedAgent]
+        not:
+          anyOf:
+            - required: [identity]
     AssignmentPage:
       type: object
       additionalProperties: false
@@ -1196,14 +1638,27 @@ components:
     Assignment:
       type: object
       additionalProperties: false
-      required: [id, identityId, identity, spec, version, instance]
+      required: [id, kind, spec, version, instance]
       properties:
         id: { type: string, format: uuid }
         identityId: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/AssignmentKind' }
         identity: { $ref: '#/components/schemas/Identity' }
+        sharedAgent: { $ref: '#/components/schemas/SharedAgent' }
         spec: { $ref: '#/components/schemas/AssignmentSpec' }
         version: { type: integer, minimum: 1 }
         instance: { $ref: '#/components/schemas/Instance' }
+      if:
+        properties: { kind: { const: personal } }
+      then:
+        required: [identity, identityId]
+        not: { required: [sharedAgent] }
+      else:
+        required: [sharedAgent]
+        not:
+          anyOf:
+            - required: [identity]
+            - required: [identityId]
     Rollout:
       type: object
       additionalProperties: false
@@ -1412,15 +1867,27 @@ components:
     VolumeUse:
       type: object
       additionalProperties: false
-      required: [assignmentId, identity, name, source, path, sizeGib, readOnly]
+      required: [assignmentId, kind, name, source, path, sizeGib, readOnly]
       properties:
         assignmentId: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/AssignmentKind' }
         identity: { $ref: '#/components/schemas/Identity' }
+        sharedAgent: { $ref: '#/components/schemas/SharedAgent' }
         name: { $ref: '#/components/schemas/Name' }
         source: { $ref: '#/components/schemas/Name' }
         path: { type: [string, 'null'] }
         sizeGib: { type: [integer, 'null'] }
         readOnly: { type: boolean }
+      if:
+        properties: { kind: { const: personal } }
+      then:
+        required: [identity]
+        not: { required: [sharedAgent] }
+      else:
+        required: [sharedAgent]
+        not:
+          anyOf:
+            - required: [identity]
     VolumePage:
       type: object
       additionalProperties: false

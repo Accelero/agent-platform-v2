@@ -8,7 +8,8 @@ use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use hermes_core::app::assignments::{
-    self, AssignmentChanges, CreateAssignment, RetryInstance, UpdateAssignment,
+    self, AssignmentChanges, CreateAssignment, CreateSharedAssignment, RetryInstance,
+    UpdateAssignment,
 };
 use hermes_core::app::error::AppError;
 use hermes_core::app::queries::{AssignmentFilter, AuditFilter, EnvironmentList, search};
@@ -29,6 +30,7 @@ use crate::error::ApiError;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssignmentQuery {
     q: Option<String>,
+    kind: Option<hermes_core::domain::shared::AssignmentKind>,
     access: Option<Access>,
     template_id: Option<String>,
     after: Option<String>,
@@ -41,6 +43,7 @@ pub async fn assignments<S: AdminStore>(
 ) -> Result<Response, ApiError> {
     let params: AssignmentQuery = query(raw.as_deref())?;
     let filter = AssignmentFilter {
+        kind: params.kind,
         q: search(params.q)?,
         access: params.access,
         template_id: params.template_id,
@@ -81,20 +84,33 @@ pub async fn create<S: AdminStore>(
     headers: HeaderMap,
     Body(request): Body<wire::CreateAssignment>,
 ) -> Result<Response, ApiError> {
-    let command = CreateAssignment {
-        identity: request.identity,
-        spec: request.spec,
-    };
-    let receipt = state
-        .envelope
-        .execute(
-            &authenticated.actor,
-            request_id(),
-            &idempotency_key(&headers)?,
-            &command,
-        )
-        .await
-        .map_err(within_the_submitted_document)?;
+    let actor = &authenticated.actor;
+    let key = idempotency_key(&headers)?;
+    let receipt = match request {
+        wire::CreateAssignment::Personal { identity, spec } => {
+            state
+                .envelope
+                .execute(
+                    actor,
+                    request_id(),
+                    &key,
+                    &CreateAssignment { identity, spec },
+                )
+                .await
+        }
+        wire::CreateAssignment::Shared { shared_agent, spec } => {
+            state
+                .envelope
+                .execute(
+                    actor,
+                    request_id(),
+                    &key,
+                    &CreateSharedAssignment { shared_agent, spec },
+                )
+                .await
+        }
+    }
+    .map_err(within_the_submitted_document)?;
     Ok(with_status(StatusCode::ACCEPTED, &receipt))
 }
 

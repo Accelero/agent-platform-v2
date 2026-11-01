@@ -162,7 +162,7 @@ export function Overview() {
               <li key={item.id}>
                 <i className="dot status-blocked" aria-hidden="true" />
                 <Link to="/assignments/$id" params={{ id: item.id }}>
-                  {item.identity.subject}
+                  {item.identity?.subject ?? item.sharedAgent?.displayName}
                 </Link>
                 <span className="muted">instance is blocked</span>
               </li>

@@ -16,6 +16,7 @@ use hermes_core::domain::execution::{EnvironmentState, WorkerFailure};
 use hermes_core::domain::identity::Identity;
 use hermes_core::domain::orphans::OrphanKind;
 use hermes_core::domain::secrets::SecretKind;
+use hermes_core::domain::shared::{AssignmentKind, SharedAgent};
 use sqlx::Row;
 use sqlx::postgres::PgRow;
 use sqlx::types::Json;
@@ -241,20 +242,24 @@ impl AdminQueries for PgStore {
         request: &PageRequest,
     ) -> Result<Page<AssignmentSummary>, StoreError> {
         let rows = sqlx::query(
-            "SELECT a.id, i.issuer, i.subject, a.access, a.template_id, a.template_version, a.version, \
+            "SELECT a.id, a.kind, a.name, a.display_name, i.issuer, i.subject, a.access, a.template_id, a.template_version, a.version, \
              n.id AS instance_id, n.phase FROM manager.assignments a \
-             JOIN manager.identities i ON i.id = a.identity_id JOIN manager.instances n ON n.assignment_id = a.id \
-             WHERE ($1::text IS NULL OR i.subject > $1) \
+             LEFT JOIN manager.identities i ON i.id = a.identity_id JOIN manager.instances n ON n.assignment_id = a.id \
+             WHERE ($1::text IS NULL OR coalesce(i.subject, a.name) || '/' || a.id::text > $1) \
              AND ($2::text IS NULL OR strpos(lower(i.subject), lower($2)) > 0 \
-                  OR strpos(lower(coalesce(i.email, '')), lower($2)) > 0) \
+                  OR strpos(lower(coalesce(i.email, '')), lower($2)) > 0 \
+                  OR strpos(lower(coalesce(a.name, '')), lower($2)) > 0 \
+                  OR strpos(lower(coalesce(a.display_name, '')), lower($2)) > 0) \
              AND ($3::text IS NULL OR a.access = $3) AND ($4::text IS NULL OR a.template_id = $4) \
-             ORDER BY i.subject LIMIT $5",
+             AND ($6::text IS NULL OR a.kind = $6) \
+             ORDER BY coalesce(i.subject, a.name) || '/' || a.id::text LIMIT $5",
         )
         .bind(&request.after)
         .bind(&filter.q)
         .bind(filter.access.map(Access::as_str))
         .bind(&filter.template_id)
         .bind(fetch_limit(request))
+        .bind(filter.kind.map(AssignmentKind::as_str))
         .fetch_all(&self.pool)
         .await
         .map_err(store_error)?;
@@ -263,7 +268,9 @@ impl AdminQueries for PgStore {
             .map(|row| {
                 Ok(AssignmentSummary {
                     id: row.get("id"),
-                    identity: identity(row),
+                    kind: kind(row)?,
+                    identity: optional_identity(row),
+                    shared_agent: shared_agent(row),
                     access: Access::parse(row.get("access")).ok_or(StoreError::Unavailable)?,
                     template: VersionRef {
                         id: row.get("template_id"),
@@ -276,7 +283,19 @@ impl AdminQueries for PgStore {
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         Ok(page(items, request, |item: &AssignmentSummary| {
-            item.identity.subject.clone()
+            format!(
+                "{}/{}",
+                item.identity
+                    .as_ref()
+                    .map(|i| i.subject.as_str())
+                    .unwrap_or_else(|| item
+                        .shared_agent
+                        .as_ref()
+                        .expect("shared binding")
+                        .name
+                        .as_str()),
+                item.id
+            )
         }))
     }
 
@@ -287,8 +306,8 @@ impl AdminQueries for PgStore {
         };
         let identity_row =
             sqlx::query("SELECT issuer, subject FROM manager.identities WHERE id = $1")
-                .bind(record.identity_id)
-                .fetch_one(&mut *tx)
+                .bind(record.binding.identity_id())
+                .fetch_optional(&mut *tx)
                 .await
                 .map_err(store_error)?;
         let instance_row = sqlx::query(
@@ -304,8 +323,10 @@ impl AdminQueries for PgStore {
         tx.commit().await.map_err(store_error)?;
         Ok(Some(AssignmentView {
             id: record.id,
-            identity_id: record.identity_id,
-            identity: identity(&identity_row),
+            kind: record.binding.kind(),
+            identity_id: record.binding.identity_id(),
+            identity: identity_row.as_ref().map(identity),
+            shared_agent: record.binding.shared_agent().cloned(),
             spec: record.spec,
             version: record.version,
             instance: instance(&instance_row)?,
@@ -461,9 +482,9 @@ impl AdminQueries for PgStore {
             None => (None, None),
         };
         let rows = sqlx::query(
-            "SELECT v.assignment_id, i.issuer, i.subject, v.name, v.source, v.path, v.size_gib, v.read_only \
+            "SELECT v.assignment_id, a.kind, a.name AS agent_name, a.display_name, i.issuer, i.subject, v.name, v.source, v.path, v.size_gib, v.read_only \
              FROM manager.assignment_volumes v JOIN manager.assignments a ON a.id = v.assignment_id \
-             JOIN manager.identities i ON i.id = a.identity_id \
+             LEFT JOIN manager.identities i ON i.id = a.identity_id \
              WHERE ($1::text IS NULL OR v.source = $1) \
              AND ($2::uuid IS NULL OR (v.assignment_id, v.name) > ($2, $3)) \
              ORDER BY v.assignment_id, v.name LIMIT $4",
@@ -479,7 +500,18 @@ impl AdminQueries for PgStore {
             .iter()
             .map(|row| VolumeUse {
                 assignment_id: row.get("assignment_id"),
-                identity: identity(row),
+                kind: if row.get::<&str, _>("kind") == "shared" {
+                    AssignmentKind::Shared
+                } else {
+                    AssignmentKind::Personal
+                },
+                identity: optional_identity(row),
+                shared_agent: row
+                    .get::<Option<String>, _>("agent_name")
+                    .map(|name| SharedAgent {
+                        name,
+                        display_name: row.get("display_name"),
+                    }),
                 name: row.get("name"),
                 source: row.get("source"),
                 path: row.get("path"),
@@ -661,5 +693,25 @@ fn audit(row: &PgRow) -> Result<AuditView, StoreError> {
         },
         request_id: row.get("request_id"),
         change,
+    })
+}
+
+fn optional_identity(row: &sqlx::postgres::PgRow) -> Option<Identity> {
+    Some(Identity {
+        issuer: row.get::<Option<String>, _>("issuer")?,
+        subject: row.get::<Option<String>, _>("subject")?,
+    })
+}
+fn kind(row: &sqlx::postgres::PgRow) -> Result<AssignmentKind, StoreError> {
+    match row.get::<&str, _>("kind") {
+        "personal" => Ok(AssignmentKind::Personal),
+        "shared" => Ok(AssignmentKind::Shared),
+        _ => Err(StoreError::Unavailable),
+    }
+}
+fn shared_agent(row: &sqlx::postgres::PgRow) -> Option<SharedAgent> {
+    Some(SharedAgent {
+        name: row.get::<Option<String>, _>("name")?,
+        display_name: row.get::<Option<String>, _>("display_name")?,
     })
 }
