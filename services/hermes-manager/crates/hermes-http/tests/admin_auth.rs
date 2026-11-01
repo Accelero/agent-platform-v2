@@ -277,6 +277,17 @@ async fn dashboard_pages_need_a_session_and_unknown_paths_stay_json(pool: PgPool
         script.headers()["content-type"],
         "text/javascript; charset=utf-8"
     );
+    // Fonts come from the dashboard itself and from nowhere else.
+    let font = fixture
+        .get("/assets/face.woff2")
+        .header("cookie", &cookies)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(font.status(), 200);
+    assert_eq!(font.headers()["content-type"], "font/woff2");
+    assert!(policy.contains("font-src 'self';"), "{policy}");
+    assert!(!policy.contains("font-src 'self' "), "{policy}");
     for path in [
         "/assignments/not-a-uuid",
         "/unknown",

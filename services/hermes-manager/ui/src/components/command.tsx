@@ -204,7 +204,7 @@ export function Command(props: CommandProps) {
           {open && <CommandBody key={props.path} {...props} />}
           <Dialog.Close asChild>
             <button ref={cancel} className="dialog-cancel">
-              Cancel / close
+              Cancel
             </button>
           </Dialog.Close>
         </Dialog.Content>

@@ -107,13 +107,69 @@ test("keys, strings and numbers are coloured apart, in YAML and JSON", async ({
       .evaluateAll((spans) => [
         ...new Set(spans.map((span) => getComputedStyle(span).color)),
       ]);
-  const key = "rgb(27, 94, 75)";
-  const string = "rgb(154, 52, 18)";
-  const number = "rgb(29, 78, 216)";
+  const key = "rgb(10, 10, 10)";
+  const string = "rgb(138, 75, 8)";
+  const number = "rgb(36, 71, 214)";
   expect(await colours()).toEqual(expect.arrayContaining([key, number]));
   await page.getByRole("tab", { name: "JSON" }).click();
   await expect(page.getByLabel("Configuration JSON editor")).toBeVisible();
   expect(await colours()).toEqual(
     expect.arrayContaining([key, string, number]),
   );
+});
+
+test("the editor shows its caret, frame and findings plainly in both themes", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(page.locator(".cm-lint-marker").first()).toBeVisible();
+  const palette = {
+    dark: {
+      ink: "rgb(245, 245, 245)",
+      accent: "rgb(142, 166, 255)",
+      mark: "rgb(231, 95, 85)",
+    },
+    light: {
+      ink: "rgb(10, 10, 10)",
+      accent: "rgb(36, 71, 214)",
+      mark: "rgb(218, 55, 47)",
+    },
+  } as const;
+  for (const scheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.locator(".cm-content").click({ position: { x: 240, y: 90 } });
+    const look = await page.evaluate(() => {
+      const style = (selector: string) =>
+        getComputedStyle(document.querySelector(selector)!);
+      const marker = style(".cm-lint-marker");
+      return {
+        caret: style(".cm-content").caretColor,
+        frameBorder: style(".raw-editor").borderTopColor,
+        frameRing: style(".raw-editor").boxShadow,
+        innerOutline: style(".cm-editor").outlineStyle,
+        marker: {
+          size: [marker.width, marker.height],
+          border: marker.borderTopWidth,
+          radius: marker.borderTopLeftRadius,
+          colour: marker.backgroundColor,
+        },
+      };
+    });
+    const want = palette[scheme];
+    // The caret takes the text colour, so it can never vanish into the page.
+    expect(look.caret, scheme).toBe(want.ink);
+    // The focus ring is the frame's, so it follows the rounded corners and
+    // reaches round the line numbers; the editor inside draws none.
+    expect(look.frameBorder, scheme).toBe(want.accent);
+    expect(look.frameRing, scheme).toContain("0px 0px 0px 3px");
+    expect(look.innerOutline, scheme).toBe("none");
+    // A finding is a plain, muted dot.
+    expect(look.marker, scheme).toEqual({
+      size: ["8px", "8px"],
+      border: "0px",
+      radius: "50%",
+      colour: want.mark,
+    });
+  }
 });

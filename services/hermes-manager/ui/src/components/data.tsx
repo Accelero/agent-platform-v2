@@ -98,7 +98,6 @@ export function DataTable<T>({
         </div>
       ) : (
         <div className="empty">
-          <span>↳</span>
           <p>{empty}</p>
         </div>
       )}

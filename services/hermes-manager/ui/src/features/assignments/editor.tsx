@@ -438,7 +438,7 @@ function EditorDialog({
           {open && children(() => setOpen(false))}
           <Dialog.Close asChild>
             <button ref={cancel} className="dialog-cancel">
-              Cancel / close
+              Cancel
             </button>
           </Dialog.Close>
         </Dialog.Content>

@@ -14,7 +14,29 @@ Keycloak supplies verified identity. PostgreSQL grants are the only authority
 for administrator access. The dashboard uses only the administration API, and
 every workflow is also available to an API-only client.
 
-## Views
+## Layout and appearance
+
+The console is monochrome: black, white and grey, with one accent for what can
+be acted on or is selected (links, the focus ring, the current page, numbers in
+the editor). Colour otherwise appears only as the state of something: a green,
+amber or red dot beside an instance phase or version state, and error notices.
+Structure comes from hairlines and spacing, not cards or shadows. The brand is
+the platform's own neutral mark and name, not any one product's.
+
+- **Sidebar.** Icon and name for each view, grouped by purpose. The toggle at
+  the top left collapses it to an icon rail (names stay available to assistive
+  technology and as tooltips); on a phone it is a drawer that closes when a page
+  is chosen or on Escape. The choice is kept in the browser.
+- **Top bar.** A breadcrumb, the theme switch and the account menu at the top
+  right. The account menu shows the signed-in identity and its provider and
+  holds Sign out.
+- **Theme.** System, Light or Dark. System, the default, follows the device with
+  no script; an explicit choice is kept in the browser and beats the device
+  setting. Every colour is a token with a light and a dark value, including the
+  editor and its syntax colours.
+- **Type.** Geist for text and Geist Mono for identifiers and the editor,
+  self-hosted from the dashboard's own assets (OFL-licensed; notices are in
+  `THIRD_PARTY_NOTICES.txt`).
 
 Every collection uses server-side search, filters, sorting and bounded pages,
 with the query in the URL. Changing the query returns to the first page.
@@ -23,7 +45,7 @@ failed query never looks like an empty database.
 
 | View | Shows | Actions |
 | --- | --- | --- |
-| Overview | What the platform does and where to start | Open the other views |
+| Overview | The platform's name and mark, then real figures: instances by phase, published templates and terminal backends with their open drafts, cluster leftovers, blocked instances that need attention, and the latest recorded changes | Open the view behind each figure |
 | Users | Known identities (exact issuer/subject, labels, assignment and instance state) and, when configured, a live Keycloak directory tab | Create an assignment for an exact identity, or open the existing one |
 | Assignments | Identity, access, template version, volumes, allowed terminal backends and default, lifetime mode, admin overrides, secret references; the instance's phase, conditions and generations; its terminal environments with state, lease count and a failed worker's reason | Change access, template version, volumes, backends, overrides or secret references after a preview; retry a blocked instance; set a template version for selected assignments |
 | Hermes templates | Template IDs with version count, latest published version, current draft and assignment count; each version's state, revision and definition | Start a draft, or the next version from an existing one; edit drafts as a form, JSON or YAML; validate; publish; withdraw |
@@ -131,7 +153,9 @@ require the current CSRF token and exact Origin as well as version and
 idempotency preconditions. Logout clears in-memory state and opens
 `/auth/signed-out`. UI responses use `no-store`, `nosniff`, `no-referrer` and a
 per-response style nonce; script CSP stays `script-src 'self'` with no inline
-script, CDN, dynamic code compilation or blob worker. Stored text (names,
+script, CDN, dynamic code compilation or blob worker. Fonts load from the
+dashboard only (`font-src 'self'`); the asset server types `.woff2` files and
+refuses any other file type it does not know. Stored text (names,
 labels, template and configuration content) is rendered as text and never as
 markup.
 
@@ -302,7 +326,7 @@ Secret and restart the API role to reload the service credential.
 | Tables and server data | TanStack Table, TanStack Query | Headless table state; Rust performs collection queries; in-memory caching and invalidation |
 | Forms and editors | React Hook Form, CodeMirror 6 (JSON and YAML), pinned `yaml` parser | One canonical draft per editing session; editors are views of it |
 | Validation | Versioned JSON Schema, run by the Rust manager with `jsonschema`; the dashboard reads their descriptions for autocomplete only | The manager alone validates; the dashboard shows its findings |
-| Primitives and style | Radix Dialog, repository CSS tokens | Focus and keyboard behavior; existing visual design |
+| Primitives and style | Radix Dialog, repository CSS tokens with light and dark values, Geist and Geist Mono | Focus and keyboard behavior; one design system for every view |
 | API contract | OpenAPI plus `openapi-typescript` | Generated client types from `contracts/hermes-manager/openapi.yaml` |
 | Tests | Vitest, Playwright, Rust HTTPS/PostgreSQL fixtures | Client, browser and authorization coverage |
 
