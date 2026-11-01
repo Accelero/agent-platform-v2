@@ -176,3 +176,32 @@ are implemented and executed; accelerated timings do not prove production deadli
 | Terminal drain | `draining_waits_for_leases_until_the_deadline_then_deletes_exactly_the_pod`, `workers_start_only_after_ssh_verification_and_drain_when_suspended` | partial |
 | Kubernetes and HTTP calls | `complete_probe_has_one_four_second_deadline_across_all_requests`, `a_stalled_registry_is_unavailable_within_the_deadline` | partial |
 | Administration request bodies | `requests_are_strict_and_refusals_never_echo_input`, `a_sized_body_is_accepted_at_exactly_16_kib_and_refused_one_byte_over`, `a_streamed_body_without_a_length_has_the_same_exact_bound`, `an_oversized_mutation_leaves_no_receipt_audit_or_catalog_change`, `a_request_cancelled_before_its_body_completes_commits_nothing`, `malformed_or_ambiguous_json_is_refused_without_echo_or_effect`, `admin_config_is_limited_to_8_kib_of_serialized_json`, `an_assignments_admin_config_has_the_same_8_kib_bound_and_a_refusal_commits_nothing`, `execution_bodies_are_bounded_at_exactly_16_kib_sized_or_streamed`, `resolver_bodies_are_bounded_at_exactly_16_kib_and_only_the_gateway_is_answered` | pass |
+
+## Shared-agent native prerequisites
+
+These tests exercise the Phase 0 test derivative described in
+[the shared-agent plan](../../doc/shared-hermes-agents.md#phase-0-native-login-for-several-users).
+They do not change the release image or prove platform routing. The collected
+`python-native` profile supplies a real disposable Keycloak, isolated DNS and TLS,
+and non-root native instances with read-only roots and managed configuration.
+
+| Case | Tests | Level | Status |
+| --- | --- | --- | --- |
+| SH-N01 | `test_two_users_log_in_and_hold_native_websockets_on_one_instance` | integration | pass |
+| SH-N02 | `test_upstream_login_keeps_the_terminal_selector_and_home_binding` | integration | pass |
+| SH-N04 | `test_sso_refresh_and_logout_across_two_agent_hosts` | integration | pass |
+| SH-N05 | `test_exact_callbacks_and_native_features_through_the_forwarded_host` | integration | pass |
+
+SH-N04 verifies refresh, cross-host revocation and sign-in after logout under both
+refresh-token policies. Re-entering credentials is allowed when the provider ends
+its session. These tests provide no evidence of implemented shared-agent routing.
+
+The supplemental `test_keycloak_sso_depends_on_remaining_client_sessions` cases
+exercise actual native logout with no gateway client, an active gateway client,
+and a revoked gateway client. The gateway client uses a real PKCE code exchange
+at Keycloak, without creating a platform session. They make the provider-session
+finding independently reproducible and do not replace SH-N04.
+
+| Finding | Tests | Level | Status |
+| --- | --- | --- | --- |
+| SSO depends on a remaining client session | `test_keycloak_sso_depends_on_remaining_client_sessions` | integration | pass |

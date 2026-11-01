@@ -152,6 +152,7 @@
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/e2e/test_worker_loss.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/integration/test_manager_chart.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/integration/test_native_runtime.py]": "unit",
+      "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/integration/test_native_shared.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/integration/test_ownership_docker.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/integration/test_personal_init.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/integration/test_personal_init_inputs.py]": "unit",
@@ -169,6 +170,7 @@
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/contract.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/initializer.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/native.py]": "unit",
+      "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/native_shared.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/ownership.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/people.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/platform.py]": "unit",
@@ -759,7 +761,15 @@
       "tests/integration/test_native_runtime.py::test_the_gateway_and_dashboard_run_and_the_initialization_key_is_not_mounted": "integration",
       "tests/integration/test_native_runtime.py::test_the_native_dashboard_requires_the_owner_login_and_reveals_no_session_token": "integration",
       "tests/integration/test_native_runtime.py::test_the_provider_trust_bundle_contains_the_system_roots_and_the_fixture_ca": "integration",
-      "tests/integration/test_native_runtime.py::test_the_ssh_client_runs_as_the_pods_numeric_user": "integration"
+      "tests/integration/test_native_runtime.py::test_the_ssh_client_runs_as_the_pods_numeric_user": "integration",
+      "tests/integration/test_native_shared.py::test_exact_callbacks_and_native_features_through_the_forwarded_host": "integration",
+      "tests/integration/test_native_shared.py::test_keycloak_sso_depends_on_remaining_client_sessions[both-revoked]": "integration",
+      "tests/integration/test_native_shared.py::test_keycloak_sso_depends_on_remaining_client_sessions[gateway-retained]": "integration",
+      "tests/integration/test_native_shared.py::test_keycloak_sso_depends_on_remaining_client_sessions[native-only]": "integration",
+      "tests/integration/test_native_shared.py::test_sso_refresh_and_logout_across_two_agent_hosts[refresh-reuse]": "integration",
+      "tests/integration/test_native_shared.py::test_sso_refresh_and_logout_across_two_agent_hosts[refresh-rotation]": "integration",
+      "tests/integration/test_native_shared.py::test_two_users_log_in_and_hold_native_websockets_on_one_instance": "integration",
+      "tests/integration/test_native_shared.py::test_upstream_login_keeps_the_terminal_selector_and_home_binding": "integration"
     },
     "python-cluster": {
       "tests/e2e/test_acceptance.py::test_a_cron_job_fires_without_browser_traffic_and_acquires_a_terminal": "e2e",

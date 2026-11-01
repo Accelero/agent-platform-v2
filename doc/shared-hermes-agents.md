@@ -1,8 +1,9 @@
 # Planned: Personal, team and generic Hermes agents
 
-**Status: planned; not implemented.** This document specifies the extension from
-personal instances to shared Hermes agents with explicit access grants and their
-own hostnames. It does not change the built behaviour defined in
+**Status: Phase 0 is verified; shared-agent implementation is in progress.** This document
+specifies the extension from personal instances to shared Hermes agents with
+explicit access grants and their own hostnames. It does not change the built
+behaviour defined in
 [SPEC.md](SPEC.md), [ARCH.md](ARCH.md) or the
 [implementation status](personal-hermes/implementation.md). Until a phase below
 lands, this document is the specification for that phase; when it lands, its text
@@ -53,9 +54,10 @@ Outside the initial feature:
 These facts were established against the source tree, the pinned Hermes image
 (`nousresearch/hermes-agent@sha256:d4da4a40…`, as patched by
 `runtimes/hermes/Dockerfile`) and the pinned Keycloak 26.8.0 image. The design
-depends on them. The native and Keycloak facts come from disposable, networkless
-or loopback-only experiments; those experiments are not checked in, and
-[SH-N01 to SH-N05](#native-runtime) turn the native ones into collected tests.
+depends on them. Facts marked as experiments come from disposable, networkless
+or loopback-only probes that are not checked in. Collected Phase 0 cases cover
+native login, refresh, logout, home binding and callbacks on the project image;
+[SH-N01 to SH-N05](#native-runtime) also include the runtime work in Phase 4.
 
 | ID | Fact | How it was established | Consequence |
 | --- | --- | --- | --- |
@@ -74,11 +76,13 @@ or loopback-only experiments; those experiments are not checked in, and
 | E13 | Native cookie names depend on the scheme Hermes sees. Without a trusted proxy it sees `http`, and so uses bare names such as `hermes_session_at`. A sibling host's script can set bare names with a parent `Domain`. | `hermes_cli/dashboard_auth/cookies.py` | The gateway must forward these names. See the [accepted consequences](#accepted-consequences) |
 | E14 | With no owner pin, one instance serves several users: two Keycloak users logged in natively, each got their own `user_id`, and both had a ticketed WebSocket open at once. | Experiment: unmodified upstream image and real Keycloak | [D2](#planned-design-decisions) works |
 | E15 | One browser can use several agents. Only the first login, gateway or native, showed a form; the rest, on two hostnames and both clients, were silent. Refreshing tokens alternately on each hostname kept all of them working, with "Revoke Refresh Token" off and on. | Same experiment | No Keycloak setting is required, and logging in per host works |
-| E16 | Logout reaches across hosts. Revoking a client's refresh token removes that client from the person's Keycloak session, so that person's refresh for the same client on another hostname failed at once (`Session doesn't have required client`). Another person was unaffected, and logging in again was silent. | Same experiment | [Logout](#logout) |
+| E16 | Logout reaches across hosts. Revoking a client's refresh token removes that client from the person's Keycloak session, so that person's refresh for the same client on another hostname fails. Another person is unaffected. Silent sign-in continues while another client remains active; revoking the last client makes the next sign-in show the login form. | Collected Phase 0 tests on the project image, with native logout and real Keycloak code exchanges for both clients | [Logout](#logout) |
 
-E14 to E16 called the token endpoints and instances directly, with short token lifetimes
-over loopback HTTP. They did not pass through a real gateway or the project's image, and no
-chat ran. [Phase 0](#phase-0-native-login-for-several-users) and SH-E05 cover those.
+The experiments for E14 and E15 called token endpoints and instances directly,
+with short token lifetimes over loopback HTTP. The collected Phase 0 tests use
+the project image, real Keycloak and forwarded hostnames over TLS. They use
+scripted HTTP and WebSocket clients; SH-E05 covers the full gateway and browser
+path, including chat.
 
 ## Planned design decisions
 
@@ -390,8 +394,10 @@ Those revocations remove the gateway and native clients from the person's Keyclo
 (E16). The same person's sessions on their other hosts therefore fail at their next refresh
 and end within the existing identity bound, closing that person's open connections there.
 So logging out of one agent signs the person out of all of them within that bound, and only
-the host they used at once. The provider's own session is not ended, as today, so the next
-page load anywhere signs in again without a form. Other people are never affected.
+the host they used at once. Both clients' refresh tokens are still revoked. The provider
+may end its own session when the last active client is revoked, so the next sign-in may
+require entering credentials again. If a provider session remains, sign-in can be silent.
+Other people are never affected.
 
 ### Cookies and request hygiene
 
@@ -581,10 +587,23 @@ evidence exists.
 
 ### Phase 0: native login for several users
 
+**Verified:** SH-N01, SH-N02, SH-N04 and SH-N05 pass in the collected
+`python-native` profile, together with the supplemental provider-session cases.
+
 Before building anything else, remove the owner pin in a test image and write
 `tests/integration/test_native_shared.py`, with a disposable Keycloak. This turns E14 to E16
 into collected tests on the project's image, for
 [SH-N01, SH-N02, SH-N04 and SH-N05](#native-runtime).
+
+The collected SH-N04 case checks SSO and independent refresh on two hosts,
+revocation on the other host, another person's continued access, and sign-in
+after logout. The supplemental
+`test_keycloak_sso_depends_on_remaining_client_sessions` checks both provider
+outcomes: silent sign-in while another client remains active, and a login form
+after the last client is revoked. It uses real PKCE code exchange at Keycloak for
+the gateway client and the native image's logout, and creates no platform session.
+Revoked refresh chains must be refused with `invalid_grant`. Re-entering
+credentials after logout is allowed; token revocation stays required.
 
 **Gate:** those cases pass. If they contradict E14 to E16, stop and return to the maintainer.
 
@@ -662,7 +681,7 @@ configuration, on an isolated network with a disposable Keycloak.
 | SH-N01 | Two users, one instance | Two Keycloak users complete the native login on one instance and each gets their own `user_id` from `/api/auth/me`; `POST /api/auth/ws-ticket` and a ticketed `/api/ws` work for both at once |
 | SH-N02 | Pin removed, rest kept | A user other than the context's owner can log in to a personal instance directly; the provider source hashes to upstream's; `terminal.runtime_id` is still offered; a foreign home is still refused (SH-I03) |
 | SH-N03 | Only one provider | With `dashboard.basic_auth`, `dashboard.oauth.self_hosted` and Nous settings seeded in the home's `config.yaml`, `/api/auth/providers` is exactly `[self-hosted]`, login still uses the rendered issuer, and `/auth/password-login` signs nobody in |
-| SH-N04 | Several agents, one browser | With two instances on two hostnames and one Keycloak client, the second login shows no form. Token refresh on each, past token expiry, leaves the other working, with "Revoke Refresh Token" off and on. Logging out on one makes that person's refresh on the other fail, while another person continues, and logging in again shows no form |
+| SH-N04 | Several agents, one browser | With two instances on two hostnames and one Keycloak client, the second login shows no form. Token refresh on each, past token expiry, leaves the other working, with "Revoke Refresh Token" off and on. Logging out on one makes that person's refresh on the other fail, while another person continues. Sign-in after logout works, and may require credentials if the provider ended its session; subsequent sign-ins reuse the new provider session |
 | SH-N05 | Callback | The redirect URI is exactly `https://<label>.<agentDomain>/auth/callback` from the public URL; with that URI unregistered, Keycloak refuses and nobody is signed in; sessions, files, cron and config work behind the gateway's forwarded host |
 
 ### Home initialization
@@ -767,7 +786,7 @@ Keycloak realm.
 | SH-E02 | Two members **(S)** | Two Keycloak users reach the same instance UID on one hostname, each as themselves in `/api/auth/me`, each with a WebSocket open at the same time through the gateway |
 | SH-E03 | No personal needed **(S)** | A member with no assignment uses the agent, and no personal instance appears |
 | SH-E04 | Guessing **(S)** | A signed-in non-member gets the denial page on a registered name; an unregistered name stops at Keycloak; no native response or destination is disclosed |
-| SH-E05 | Parallel agents **(S)** | In one browser, with a personal agent and two shared agents in three tabs, requests, redirects, storage, streams and cookies stay with their own origin, for several minutes across provider refreshes, with no login form after the first. After logout on one, the others end within the identity bound and sign in again without a form, and another person's session continues |
+| SH-E05 | Parallel agents **(S)** | In one browser, with a personal agent and two shared agents in three tabs, requests, redirects, storage, streams and cookies stay with their own origin, for several minutes across provider refreshes, with no login form after the first. After logout on one, the others end within the identity bound, and another person's session continues. Signing in again may require credentials if the provider ended its session, after which the other tabs reuse the new provider session |
 | SH-E06 | Personal isolation **(S)** | Distinct owners are routed only to their own instances, and a shared grant exposes no private home. Existing personal acceptance cases pass, apart from those that tested the pin itself |
 | SH-E07 | Direct removal **(S)** | Within the bounds, a removed user is denied and their stream closed, while another member continues, and the Hermes Pod's UID and restart count are unchanged |
 | SH-E08 | Group removal **(S)** | The same when access came through a group; a user who also has a direct grant keeps access |

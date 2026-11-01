@@ -44,12 +44,18 @@ nothing rolls back automatically.
 | `tests/integration/test_manager_chart.py` | The chart's admission policies and RBAC equal the renderer's; generated role configurations are the ones the Rust parsers load; pod security, NetworkPolicy peers, strict values and operator Jobs | A live installation |
 | `tests.personal_hermes.native_runtime --build` | Reviewed runtime image; non-root gateway and dashboard, private API denial, CA handling, init-only key isolation, managed configuration precedence and state after a forced restart | Cluster or provider acceptance |
 | `HERMES_TEST_NATIVE_IMAGE=… tests.support.verification run python-native` | The same installed-image properties as 13 separately collected cases (`tests/integration/test_native_runtime.py`), each with its own result | Cluster or provider acceptance |
+| `tests/integration/test_native_shared.py` (`python-native`) | Eight collected Phase 0 cases on a local test derivative restoring the pinned upstream OIDC provider, with a disposable Keycloak and a TLS relay on an internal Docker network: two users and concurrent native WebSockets; upstream source, terminal selector and home binding; two hosts with SSO, refresh and logout under both refresh-token policies; exact callbacks and native APIs; three provider-session cases exercising native logout with no gateway client, a retained gateway client and both clients revoked | Platform authentication or routing; real browser interaction; the release image still pins the native owner |
 | `hermes-kube/tests/admission.rs` | The real admission and RBAC matrix as the controller's ServiceAccount: a positive control and one-field negatives for Pods, namespaces, volumes, Services and RoleBindings, each refused by the intended policy or Pod Security layer, worker-labelled Pods with another non-zero identity, strict Hermes identity and container override refusals, plus escalation and impersonation refusals | Real traffic, NetworkPolicy enforcement, multi-node scheduling |
 | `tests.personal_hermes.native_owner` | The pinned Hermes provider requires the mounted owner policy and accepts only the exact issuer and subject on login, session and refresh; missing or malformed policy is refused, and environment pins cannot replace it | A real Keycloak exchange |
 | Dashboard (`ui`) | Unit tests, Chromium presentation workflows with mocked APIs, and a separate real-server production-build/CSP browser case | The native UI as a rendered application |
 | `tests/e2e/test_browser.py` | Chromium (Python Playwright) on the installed chart through Keycloak's login form, trusting the fixture CA: cookie scope, owner-only instance and files, dashboard-driven commissioning of a working instance, stale-revision refusal, administrator revocation, foreign-origin requests, logout and session replay, hostile text shown as text | Native chat, history and WebSocket views; template rollout in the browser |
 
 ## Testing strategy and coverage limits
+
+The shared-agent [Phase 0 native prerequisites](../shared-hermes-agents.md#phase-0-native-login-for-several-users)
+pass, including both SH-N04 refresh-token policies and the three provider-session
+cases. Logout keeps token revocation; signing in again may require credentials
+when the provider ends its session. No later shared-agent phase has landed.
 
 The [testing strategy](../TESTING.md) specifies language-native units,
 integration tests at their proving boundary, and independently collected

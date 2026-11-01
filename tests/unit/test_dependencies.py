@@ -15,6 +15,7 @@ LOCAL = {"tests", "agent_platform"}
 IMAGE_SIDE = {
     ROOT / "tests/hermes_execution_smoke.py",
     ROOT / "tests/personal_hermes/native_owner_payload.py",
+    ROOT / "tests/support/native_shared_client.py",
 }
 SOURCES = sorted(
     path

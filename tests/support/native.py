@@ -74,6 +74,8 @@ def openssl_ca(directory: Path, target: Path):
             "/CN=personal-hermes-test-ca",
             "-addext",
             "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
         ],
         capture_output=True,
         check=True,
