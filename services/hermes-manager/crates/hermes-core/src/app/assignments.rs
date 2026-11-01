@@ -24,6 +24,9 @@ use crate::domain::backends::BackendDefinition;
 use crate::domain::catalog::{CatalogKind, CatalogRejected, VersionRef, selectable};
 use crate::domain::identity::Identity;
 use crate::domain::secrets::SecretReference;
+use crate::domain::shared::{
+    AssignmentBinding, Endpoint, NewSharedAgent, SharedAgent, SharedRejected,
+};
 use crate::domain::storage::VolumeSpec;
 use crate::domain::templates::{self, TemplateDefinition};
 use sha2::{Digest, Sha256};
@@ -169,7 +172,9 @@ impl Command for CreateAssignment {
         check(tx, context.settings, None, &spec).await?;
         let record = AssignmentRecord {
             id: Uuid::new_v4(),
-            identity_id: identity.id,
+            binding: AssignmentBinding::Personal {
+                identity_id: identity.id,
+            },
             instance_id: Uuid::new_v4(),
             spec,
             version: 1,
@@ -187,6 +192,100 @@ impl Command for CreateAssignment {
             Applied::new(receipt, "assignment", record.id, &change(&record))
                 .notifying(record.instance_id),
         )
+    }
+}
+
+/// Creates a shared assignment and its endpoint in the same envelope transaction.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSharedAssignment {
+    pub shared_agent: NewSharedAgent,
+    pub spec: AssignmentSpec,
+}
+
+#[async_trait]
+impl Command for CreateSharedAssignment {
+    type Receipt = AssignmentReceipt;
+    const ACTION: &'static str = "assignment.create";
+    fn permission(&self) -> Permission {
+        Permission::Administer
+    }
+    async fn apply<T: Tx>(
+        &self,
+        tx: &mut T,
+        context: &CommandContext<'_>,
+    ) -> Result<Applied<Self::Receipt>, Failure> {
+        let names = context
+            .settings
+            .endpoint_names
+            .as_ref()
+            .ok_or(SharedRejected::EndpointsNotConfigured)?;
+        names.validate_label(&self.shared_agent.label)?;
+        let agent = SharedAgent {
+            name: self.shared_agent.name.clone(),
+            display_name: self.shared_agent.display_name.clone(),
+        };
+        agent.validate()?;
+        if tx.shared_name_owner(&agent.name).await?.is_some() {
+            return Err(SharedRejected::NameTaken.into());
+        }
+        if tx.label_owner(&self.shared_agent.label).await?.is_some() {
+            return Err(SharedRejected::HostnameTaken.into());
+        }
+        let template = tx
+            .catalog_version::<TemplateDefinition>(
+                &self.spec.template.id,
+                self.spec.template.version,
+            )
+            .await?
+            .ok_or(CatalogRejected::Unavailable(CatalogKind::Template))?;
+        let spec = self
+            .spec
+            .clone()
+            .with_template_defaults(&template.definition);
+        check(tx, context.settings, None, &spec).await?;
+        let record = AssignmentRecord {
+            id: Uuid::new_v4(),
+            binding: AssignmentBinding::Shared(agent),
+            instance_id: Uuid::new_v4(),
+            spec,
+            version: 1,
+        };
+        tx.insert_assignment(
+            &record,
+            &context
+                .installation()
+                .instance_namespace(record.instance_id),
+        )
+        .await?;
+        tx.put_endpoint(&Endpoint {
+            assignment_id: record.id,
+            label: self.shared_agent.label.clone(),
+            enabled: self.shared_agent.enabled,
+            version: 1,
+        })
+        .await?;
+        let receipt = AssignmentReceipt {
+            assignment_id: record.id,
+            instance_id: record.instance_id,
+            version: 1,
+        };
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct SharedChange<'a> {
+            configuration: Change<'a>,
+            shared_agent: &'a NewSharedAgent,
+        }
+        Ok(Applied::new(
+            receipt,
+            "assignment",
+            record.id,
+            &SharedChange {
+                configuration: change(&record),
+                shared_agent: &self.shared_agent,
+            },
+        )
+        .notifying(record.instance_id))
     }
 }
 

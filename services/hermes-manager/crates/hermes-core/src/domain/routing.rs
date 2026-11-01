@@ -5,8 +5,37 @@
 use uuid::Uuid;
 
 use super::assignments::Access;
+use super::endpoints::LabelRejected;
 use super::installation::Installation;
 use super::instances::Phase;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+pub enum Target {
+    Personal {},
+    Shared { label: String },
+}
+
+impl Default for Target {
+    fn default() -> Self {
+        Self::Personal {}
+    }
+}
+
+impl Target {
+    pub fn is_personal(&self) -> bool {
+        matches!(self, Self::Personal {})
+    }
+    pub fn validate(&self) -> Result<(), LabelRejected> {
+        if let Self::Shared { label } = self
+            && (super::names::validate_name(label).is_err() || label.contains("--"))
+        {
+            return Err(LabelRejected::Invalid);
+        }
+        Ok(())
+    }
+}
 
 /// The instance Service every route points at.
 pub const SERVICE: &str = "hermes";
@@ -24,6 +53,20 @@ pub struct RouteRow {
     pub desired_generation: i64,
     pub observed_generation: i64,
     pub assignment_version: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedRouteRow {
+    pub endpoint_enabled: bool,
+    pub granted: bool,
+    pub route: RouteRow,
+}
+
+pub fn decide_shared(installation: &Installation, row: Option<&SharedRouteRow>) -> Decision {
+    match row {
+        Some(row) if row.endpoint_enabled && row.granted => decide(installation, Some(&row.route)),
+        _ => Decision::Denied,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +224,51 @@ mod tests {
             decide(&installation, Some(&blocked)),
             Decision::Pending(PendingReason::InstanceBlocked)
         );
+    }
+
+    #[test]
+    fn shared_decisions_check_endpoint_and_grant_before_readiness() {
+        let installation = installation();
+        assert_eq!(decide_shared(&installation, None), Decision::Denied);
+        for endpoint_enabled in [false, true] {
+            for granted in [false, true] {
+                for access in [Access::Enabled, Access::Suspended, Access::Revoked] {
+                    for phase in [
+                        Phase::Ready,
+                        Phase::Provisioning,
+                        Phase::Blocked,
+                        Phase::Stopping,
+                        Phase::Retained,
+                    ] {
+                        let row = SharedRouteRow {
+                            endpoint_enabled,
+                            granted,
+                            route: RouteRow {
+                                access,
+                                phase,
+                                ..ready(&installation)
+                            },
+                        };
+                        let expected = if endpoint_enabled && granted {
+                            decide(&installation, Some(&row.route))
+                        } else {
+                            Decision::Denied
+                        };
+                        assert_eq!(decide_shared(&installation, Some(&row)), expected);
+                        let mut foreign = row.clone();
+                        foreign.route.namespace = "somewhere-else".into();
+                        assert_eq!(
+                            decide_shared(&installation, Some(&foreign)),
+                            if endpoint_enabled && granted && access == Access::Enabled {
+                                Decision::Unavailable(UnavailableReason::RegistryUnavailable)
+                            } else {
+                                Decision::Denied
+                            }
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

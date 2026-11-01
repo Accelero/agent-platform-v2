@@ -74,6 +74,7 @@ impl ResolverClient {
     async fn call(&self, identity: &Identity) -> Option<(u16, Vec<u8>)> {
         let request = ResolveRequest {
             identity: identity.clone(),
+            target: hermes_core::domain::routing::Target::Personal {},
         };
         let mut response = self
             .client

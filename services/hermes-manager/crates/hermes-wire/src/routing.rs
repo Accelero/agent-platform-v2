@@ -14,6 +14,11 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 pub struct ResolveRequest {
     pub identity: Identity,
+    #[serde(
+        default,
+        skip_serializing_if = "hermes_core::domain::routing::Target::is_personal"
+    )]
+    pub target: hermes_core::domain::routing::Target,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

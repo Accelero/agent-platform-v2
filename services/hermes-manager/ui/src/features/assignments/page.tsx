@@ -66,7 +66,7 @@ export function AssignmentsPage() {
                   cell: ({ row }) => (
                     <input
                       type="checkbox"
-                      aria-label={`Select ${row.original.identity.subject}`}
+                      aria-label={`Select ${row.original.identity?.subject ?? row.original.sharedAgent?.displayName}`}
                       checked={selected.has(row.original.id)}
                       onChange={() =>
                         toggle(row.original.id, row.original.version)
@@ -81,8 +81,9 @@ export function AssignmentsPage() {
                       to="/assignments/$id"
                       params={{ id: row.original.id }}
                     >
-                      {row.original.identity.subject}
-                      <small>{row.original.identity.issuer}</small>
+                      {row.original.identity?.subject ??
+                        row.original.sharedAgent?.displayName}
+                      <small>{row.original.identity?.issuer}</small>
                     </Link>
                   ),
                 },
@@ -249,11 +250,14 @@ export function AssignmentDetail() {
           return (
             <>
               <section className="panel detail">
-                <h2>{assignment.identity.subject}</h2>
+                <h2>
+                  {assignment.identity?.subject ??
+                    assignment.sharedAgent?.displayName}
+                </h2>
                 <dl>
                   <dt>Issuer</dt>
                   <dd>
-                    <code>{assignment.identity.issuer}</code>
+                    <code>{assignment.identity?.issuer}</code>
                   </dd>
                   <dt>Assignment</dt>
                   <dd>

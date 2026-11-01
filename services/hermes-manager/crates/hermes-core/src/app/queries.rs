@@ -12,6 +12,7 @@ use crate::domain::assignments::{Access, AssignmentSpec};
 use crate::domain::catalog::{CatalogKind, VersionRef, VersionState};
 use crate::domain::identity::Identity;
 use crate::domain::secrets::SecretKind;
+use crate::domain::shared::{AssignmentKind, SharedAgent};
 
 pub const DEFAULT_LIMIT: u16 = 50;
 pub const MAX_LIMIT: u16 = 100;
@@ -103,7 +104,11 @@ pub struct InstanceView {
 #[serde(rename_all = "camelCase")]
 pub struct AssignmentSummary {
     pub id: Uuid,
-    pub identity: Identity,
+    pub kind: AssignmentKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<Identity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_agent: Option<SharedAgent>,
     pub access: Access,
     pub template: VersionRef,
     pub version: i64,
@@ -115,8 +120,13 @@ pub struct AssignmentSummary {
 #[serde(rename_all = "camelCase")]
 pub struct AssignmentView {
     pub id: Uuid,
-    pub identity_id: Uuid,
-    pub identity: Identity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_id: Option<Uuid>,
+    pub kind: AssignmentKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<Identity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_agent: Option<SharedAgent>,
     pub spec: AssignmentSpec,
     pub version: i64,
     pub instance: InstanceView,
@@ -124,6 +134,7 @@ pub struct AssignmentView {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AssignmentFilter {
+    pub kind: Option<AssignmentKind>,
     pub q: Option<String>,
     pub access: Option<Access>,
     pub template_id: Option<String>,
@@ -166,7 +177,11 @@ pub struct VersionView<D> {
 #[serde(rename_all = "camelCase")]
 pub struct VolumeUse {
     pub assignment_id: Uuid,
-    pub identity: Identity,
+    pub kind: AssignmentKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<Identity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_agent: Option<SharedAgent>,
     pub name: String,
     pub source: String,
     pub path: Option<String>,

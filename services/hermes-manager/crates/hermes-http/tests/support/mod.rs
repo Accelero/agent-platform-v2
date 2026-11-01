@@ -144,21 +144,30 @@ async fn dashboard() -> tempfile::TempDir {
 
 impl Fixture {
     pub async fn new(pool: PgPool) -> Self {
-        Self::build(pool, true, None).await
+        Self::build(pool, true, None, false).await
     }
 
     /// Without a configured identity directory.
     pub async fn without_directory(pool: PgPool) -> Self {
-        Self::build(pool, false, None).await
+        Self::build(pool, false, None, false).await
     }
 
     /// Serves the built dashboard in `assets`, with the listener's own URL as
     /// the public origin so a real browser can sign mutations.
     pub async fn serving(pool: PgPool, assets: &std::path::Path) -> Self {
-        Self::build(pool, true, Some(assets)).await
+        Self::build(pool, true, Some(assets), false).await
     }
 
-    async fn build(pool: PgPool, with_directory: bool, built: Option<&std::path::Path>) -> Self {
+    pub async fn with_endpoints(pool: PgPool) -> Self {
+        Self::build(pool, true, None, true).await
+    }
+
+    async fn build(
+        pool: PgPool,
+        with_directory: bool,
+        built: Option<&std::path::Path>,
+        endpoints: bool,
+    ) -> Self {
         let (listener, address) = bind("127.0.0.1:0").await.unwrap();
         let url = format!("https://{address}");
         let public = if built.is_some() {
@@ -174,6 +183,15 @@ impl Fixture {
         };
         let fixture = testing::settings();
         let settings = Arc::new(Settings {
+            endpoint_names: endpoints.then(|| {
+                hermes_core::domain::endpoints::EndpointNames::new(
+                    "agents.test",
+                    &["ops".into()],
+                    &[],
+                )
+                .unwrap()
+            }),
+            endpoint_port: 443,
             installation: installation.clone(),
             sources: fixture.sources.clone(),
             data_identity: fixture.data_identity,

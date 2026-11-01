@@ -1,6 +1,6 @@
 # Planned: Personal, team and generic Hermes agents
 
-**Status: Phase 0 is verified; shared-agent implementation is in progress.** This document
+**Status: Phases 0–3 are verified; runtime, gateway sessions, deployment and dashboard work remain in progress.** This document
 specifies the extension from personal instances to shared Hermes agents with
 explicit access grants and their own hostnames. It does not change the built
 behaviour defined in
@@ -622,6 +622,11 @@ send the configured authority.
 
 ### Phase 2: domain, persistence and API
 
+**Verified:** SH-D01 to SH-D08 have collected hostname, memory/PostgreSQL,
+real API and database-guard cases. Personal and shared inventories, including
+pagination without a personal assignment, pass. Shared runtime rendering remains
+planned for Phase 4.
+
 Migration, domain rules, port contract cases first, commands, read models and the
 `openapi.yaml` changes.
 
@@ -629,6 +634,11 @@ Migration, domain rules, port contract cases first, commands, read models and th
 the traceability tests.
 
 ### Phase 3: resolver
+
+**Verified:** SH-R01 to SH-R06 have decision-table, memory/PostgreSQL and
+mTLS API cases. The workspace verifier passes all 366 collected cases, including
+doctests in the runner gate; personal-target compatibility and shared first-login
+and revocation behavior are covered. Per-host gateway forwarding remains planned.
 
 `decide_shared`, the store query and `router.openapi.yaml`.
 
@@ -724,7 +734,7 @@ listener.
 | ID | Scenario | Pass when |
 | --- | --- | --- |
 | SH-R01 | Decision table **(S)** | Every combination of endpoint (absent, disabled, enabled), grant (none, direct, group), access and phase gives the specified decision; everything before the grant is `denied` with one identical body |
-| SH-R02 | Snapshot | Revoking a grant while resolving concurrently never gives `ready` after the revoke commits |
+| SH-R02 | Snapshot | Resolves begun after a grant revocation commits are denied; a resolve overlapping the revocation uses one database snapshot, so it can linearize before or after that commit without mixing grant and membership state |
 | SH-R03 | Destination | A `ready` shared decision names only that agent's registered namespace; a wrong namespace is `unavailable`; a personal decision is unchanged |
 | SH-R04 | Compatibility | A request with no `target` resolves as personal; an identity without a personal assignment is denied even if it has shared grants |
 | SH-R05 | Failure | A store failure is `unavailable`, never a route |

@@ -10,6 +10,8 @@ pub struct Settings {
     pub installation: Installation,
     pub sources: StorageSources,
     pub data_identity: DataIdentity,
+    pub endpoint_port: u16,
+    pub endpoint_names: Option<crate::domain::endpoints::EndpointNames>,
 }
 
 impl Settings {
@@ -19,6 +21,8 @@ impl Settings {
             installation,
             sources: StorageSources::default(),
             data_identity: DataIdentity::default(),
+            endpoint_names: None,
+            endpoint_port: 443,
         }
     }
 }

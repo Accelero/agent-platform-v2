@@ -77,7 +77,7 @@ taken from the installation values.
 | --- | --- | --- |
 | `Identity` | `issuer`, `subject`, label cache | Exact validated strings; email is never a key |
 | `AdministratorGrant` | identity, `can_manage_administrators`, active | The last active grant that can manage administrators cannot be removed or demoted; targets need verified login evidence |
-| `Assignment` | identity, `access`, `template: (id, version)`, `volumes`, `backends: {default, allowed versions, lifetime mode}`, `admin_config` overrides, secret references, `version`, `execution_generation` | One per identity. Each change increments `version` and the instance's `desired_generation`. Changes to volumes or backends also increment `execution_generation`. Saving validates mount compatibility (see [Storage](#storage)) |
+| `Assignment` | immutable personal/shared binding, `access`, `template: (id, version)`, `volumes`, `backends: {default, allowed versions, lifetime mode}`, `admin_config` overrides, secret references, `version`, `execution_generation` | One personal assignment per identity; shared assignments have a unique name and no identity. Each configuration change increments `version` and the instance's `desired_generation`. Changes to volumes or backends also increment `execution_generation`. Saving validates mount compatibility (see [Storage](#storage)) |
 | `Instance` | random `id`, assignment, derived `namespace`, `namespace_uid`, `desired_generation`, status | `namespace_uid` is set once, on first observation, and never changes; status is written only by the controller |
 | `TemplateVersion` | `id`, `version`, `state ∈ {Draft, Published, Withdrawn}`, definition | Published definitions are immutable; Withdrawn versions cannot be newly selected; rollout eligibility (no storage-class change, no shrink) |
 | `TerminalBackendVersion` | `id`, `version`, state, definition | Immutable when published; image digest pinned; `managed-ssh-v2`; UID/GID each in 1..=4294967294, chosen by the administrator |
@@ -90,6 +90,45 @@ taken from the installation values.
 
 Storage sources and the data identity are installation configuration, loaded
 at startup. They are not database aggregates.
+
+### Shared-agent administration
+
+`AssignmentBinding` carries either the personal identity ID or a shared name and
+display name. `InstanceBinding` carries either the exact personal identity or the
+shared assignment ID; there is no synthetic owner for a shared instance. Store
+queries use optional identity joins for assignment lists, details, desired state
+and volume inventory. Personal route lookup retains its exact identity join.
+
+Each shared assignment owns one endpoint with its own version. The grants set
+has an independent version on the assignment, and groups have a version covering
+their labels and membership. Endpoint state and audiences are absent from desired
+workload inputs; only the endpoint label participates. Thus a label rename advances
+desired generation without replacing credentials, and access-only commands advance
+neither generation nor the assignment's configuration version.
+
+The command envelope remains the write boundary. PostgreSQL advisory transaction
+locks serialize absent names and labels, and aggregate row locks serialize updates.
+Grant replacement locks referenced groups in ID order, so deletion cannot race a
+new grant into a dangling reference. Membership creates unverified identity rows,
+with no assignment. Guard triggers enforce immutable assignment kind and binding,
+shared-only endpoint/grant references, permanent endpoint rows and independent
+assignment/audience version advances. Read models use bounded keyset pagination;
+multi-table audience reads use one repeatable-read snapshot.
+
+**Planned:** native v2 home binding, per-host gateway
+sessions and deployment configuration are separate phases. Shared rendering is
+refused until its native runtime branch is built.
+
+Shared route resolution uses `Target::{Personal, Shared { label }}`. An omitted
+target decodes as personal, and the gateway still omits its personal target on
+the wire for compatibility. `SharedRouteRow` carries endpoint-enabled and granted
+bits alongside the existing route row. `decide_shared` refuses a missing,
+disabled or ungranted endpoint before calling `decide`. The PostgreSQL adapter
+uses one statement with correlated direct-grant and group-membership existence
+checks, so readiness never comes from a different authorization snapshot. Reads
+begun after a revocation commits see it; overlapping reads linearize at their
+statement snapshot. The resolver retains its mTLS identity check, body bound,
+no-store responses, deadlines and absence of request logging.
 
 ### State machines
 
@@ -621,7 +660,7 @@ against the contract's schema.
 
 | Schema | Tables |
 | --- | --- |
-| `manager` | `installation`, `controller_epoch`, `identities`, `administrator_grants`, `catalog_versions` (template and terminal backend versions), `assignments`, `assignment_volumes`, `assignment_backends`, `instances`, `admin_secrets`, `materials`, `environments`, `leases`, `acquire_requests`, `orphans`, `orphan_scan`, `command_receipts`, `audit_events` |
+| `manager` | `installation`, `controller_epoch`, `identities`, `administrator_grants`, `catalog_versions` (template and terminal backend versions), `assignments`, `assignment_volumes`, `assignment_backends`, `endpoints`, `agent_grants`, `access_groups`, `access_group_members`, `instances`, `admin_secrets`, `materials`, `environments`, `leases`, `acquire_requests`, `orphans`, `orphan_scan`, `command_receipts`, `audit_events` |
 | `admin_sessions` | `browsers`, `flows`, `sessions` |
 | `gateway_sessions` | `browsers`, `flows`, `sessions` |
 

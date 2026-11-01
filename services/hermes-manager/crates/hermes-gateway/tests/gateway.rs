@@ -43,6 +43,13 @@ impl RouteStore for Rows {
     async fn route_row(&self, identity: &Identity) -> Result<Option<RouteRow>, StoreError> {
         Ok(self.0.lock().unwrap().get(identity).cloned())
     }
+    async fn shared_route_row(
+        &self,
+        _: &Identity,
+        _: &str,
+    ) -> Result<Option<hermes_core::domain::routing::SharedRouteRow>, StoreError> {
+        Ok(None)
+    }
 }
 
 fn ready(installation: &Installation) -> RouteRow {

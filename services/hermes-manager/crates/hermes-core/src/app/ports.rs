@@ -7,12 +7,14 @@ use uuid::Uuid;
 use super::actor::Actor;
 use super::catalog::Definition;
 use super::error::StoreError;
+use super::shared_ports::SharedTx;
 use crate::domain::access::Grant;
 use crate::domain::assignments::AssignmentSpec;
 use crate::domain::catalog::{CatalogKind, VersionStatus};
 use crate::domain::identity::Identity;
 use crate::domain::installation::Installation;
 use crate::domain::secrets::SecretKind;
+use crate::domain::shared::AssignmentBinding;
 
 /// Opens short transactions. Implementations must not hold a transaction open
 /// across an external call; the application never asks them to.
@@ -24,9 +26,9 @@ pub trait Store: Send + Sync {
 }
 
 /// Every port a command may use inside one transaction.
-pub trait Tx: KernelTx + AccessTx + CatalogTx + AssignmentTx + SecretTx {}
+pub trait Tx: KernelTx + AccessTx + CatalogTx + AssignmentTx + SecretTx + SharedTx {}
 
-impl<T: KernelTx + AccessTx + CatalogTx + AssignmentTx + SecretTx> Tx for T {}
+impl<T: KernelTx + AccessTx + CatalogTx + AssignmentTx + SecretTx + SharedTx> Tx for T {}
 
 /// Result of reserving an idempotency key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,7 +173,7 @@ pub trait CatalogTx: Send {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentRecord {
     pub id: Uuid,
-    pub identity_id: Uuid,
+    pub binding: AssignmentBinding,
     pub instance_id: Uuid,
     pub spec: AssignmentSpec,
     pub version: i64,

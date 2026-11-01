@@ -17,6 +17,7 @@ pub mod orphans;
 pub mod routing;
 pub mod secrets;
 pub mod settings;
+pub mod shared;
 pub mod storage;
 pub mod templates;
 

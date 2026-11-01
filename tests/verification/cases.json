@@ -721,7 +721,23 @@
       "hermes-proxy/lib:hermes_proxy::hosts::tests::duplicate_conflicting_and_missing_authorities_are_refused": "unit",
       "hermes-proxy/test:gateway::wrong_authorities_are_refused_before_session_lookup_on_http1_and_http2": "integration",
       "hermes-proxy/test:gateway::absolute_targets_and_forwarded_hosts_cannot_select_another_target": "integration",
-      "hermes-proxy/test:gateway::tossed_platform_lookalike_cookies_do_not_disturb_a_valid_session": "integration"
+      "hermes-proxy/test:gateway::tossed_platform_lookalike_cookies_do_not_disturb_a_valid_session": "integration",
+      "hermes-core/lib:hermes_core::app::testing::tests::concurrent_shared_creation_commissions_one_endpoint_and_instance": "unit",
+      "hermes-store/lib:hermes_store::testing::contracts::concurrent_shared_creation_commissions_one_endpoint_and_instance": "integration",
+      "hermes-core/lib:hermes_core::app::testing::tests::shared_endpoint_rename_frees_labels_but_disabled_labels_remain_owned": "unit",
+      "hermes-store/lib:hermes_store::testing::contracts::shared_endpoint_rename_frees_labels_but_disabled_labels_remain_owned": "integration",
+      "hermes-core/lib:hermes_core::app::testing::tests::shared_access_commands_leave_the_assignment_and_workload_unchanged": "unit",
+      "hermes-store/lib:hermes_store::testing::contracts::shared_access_commands_leave_the_assignment_and_workload_unchanged": "integration",
+      "hermes-core/lib:hermes_core::app::testing::tests::shared_kind_boundaries_and_endpoint_configuration_are_enforced": "unit",
+      "hermes-store/lib:hermes_store::testing::contracts::shared_kind_boundaries_and_endpoint_configuration_are_enforced": "integration",
+      "hermes-http/test:admin_api::shared_agent_administration_is_complete_through_the_contract": "integration",
+      "hermes-http/test:admin_api::shared_database_guards_keep_kind_and_endpoint_bindings_immutable": "integration",
+      "hermes-http/test:admin_api::shared_agent_refusals_leave_no_receipt_audit_or_instance": "integration",
+      "hermes-http/test:admin_api::shared_and_personal_inventory_pagination_keeps_unassigned_identities": "integration",
+      "hermes-core/lib:hermes_core::domain::routing::tests::shared_decisions_check_endpoint_and_grant_before_readiness": "unit",
+      "hermes-core/lib:hermes_core::app::testing::tests::shared_routes_read_current_explicit_audiences_without_provisioning": "unit",
+      "hermes-store/lib:hermes_store::testing::contracts::shared_routes_read_current_explicit_audiences_without_provisioning": "integration",
+      "hermes-http/test:resolver_api::shared_targets_require_current_grants_and_keep_personal_compatibility": "integration"
     },
     "rust-browser": {
       "hermes-http/test:dashboard_browser::production_dashboard_browser_csp": "integration"

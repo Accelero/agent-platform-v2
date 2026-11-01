@@ -114,7 +114,8 @@ export function StoragePage() {
                       to="/assignments/$id"
                       params={{ id: row.original.assignmentId }}
                     >
-                      {row.original.identity.subject}
+                      {row.original.identity?.subject ??
+                        row.original.sharedAgent?.displayName}
                     </Link>
                   ),
                 },

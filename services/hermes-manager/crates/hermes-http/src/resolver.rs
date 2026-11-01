@@ -69,7 +69,9 @@ async fn resolve<S: RouteStore>(
     };
     match tokio::time::timeout(
         RESOLVE_DEADLINE,
-        resolver.routing.resolve(&request.identity),
+        resolver
+            .routing
+            .resolve_target(&request.identity, &request.target),
     )
     .await
     {

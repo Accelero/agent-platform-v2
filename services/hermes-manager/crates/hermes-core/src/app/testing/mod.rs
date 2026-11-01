@@ -70,6 +70,8 @@ pub fn settings() -> std::sync::Arc<crate::app::settings::Settings> {
         installation: installation(),
         sources,
         data_identity: DataIdentity::default(),
+        endpoint_names: None,
+        endpoint_port: 443,
     })
 }
 
@@ -158,6 +160,11 @@ pub async fn join<A: Future, B: Future>(a: A, b: B) -> (A::Output, B::Output) {
 macro_rules! contract_tests {
     (#[$attr:meta] $params:tt => $store:expr) => {
         $crate::contract_tests!(@cases #[$attr] $params => $store;
+            concurrent_shared_creation_commissions_one_endpoint_and_instance,
+            shared_routes_read_current_explicit_audiences_without_provisioning,
+            shared_endpoint_rename_frees_labels_but_disabled_labels_remain_owned,
+            shared_access_commands_leave_the_assignment_and_workload_unchanged,
+            shared_kind_boundaries_and_endpoint_configuration_are_enforced,
             bootstrap_creates_one_manager_and_replays_its_receipt,
             changed_body_with_the_same_key_is_an_idempotency_conflict,
             idempotency_keys_are_scoped_to_the_actor,

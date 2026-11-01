@@ -158,11 +158,11 @@ pub fn render(
     workload: Workload,
 ) -> Result<Vec<Object>, RenderError> {
     config.validate()?;
+    let hermes_core::domain::shared::InstanceBinding::Personal(identity) = &desired.binding else {
+        return Err(RenderError::Invalid);
+    };
     if desired.namespace != config.installation.instance_namespace(desired.instance_id)
-        || desired
-            .identity
-            .validate(&config.installation.issuer)
-            .is_err()
+        || identity.validate(&config.installation.issuer).is_err()
     {
         return Err(RenderError::Invalid);
     }
@@ -301,7 +301,7 @@ pub fn render(
         "installationId": config.installation.id.to_string(),
         "instanceId": instance,
         "materialId": materials.initialization_id.to_string(),
-        "owner": {"issuer": desired.identity.issuer, "subject": desired.identity.subject},
+        "owner": {"issuer": identity.issuer, "subject": identity.subject},
         "template": {"id": desired.template.id, "version": desired.template.version},
     });
     builder.push(
