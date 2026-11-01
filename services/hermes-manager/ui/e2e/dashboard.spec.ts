@@ -5,9 +5,15 @@ test("overview, navigation, lists and mobile layout", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "A place for every agent." }),
+    page.getByRole("heading", { name: "Agent Platform", level: 1 }),
   ).toBeVisible();
-  await expect(page.getByText("fixture-admin", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Account" }).click();
+  await expect(
+    page
+      .getByRole("group", { name: "Account" })
+      .getByText("fixture-admin", { exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
   const nav = page.getByRole("navigation");
   await nav.getByRole("link", { name: /Assignments/ }).click();
   await expect(page.getByRole("link", { name: /^bob/ })).toBeVisible();
@@ -58,7 +64,8 @@ test("logout posts CSRF and replaces the document", async ({ page }) => {
     route.fulfill({ contentType: "text/html", body: "<h1>Signed out</h1>" }),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Sign out ↗" }).click();
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
   await expect.poll(() => loggedOut).toBe(true);
   await expect(page.getByRole("heading", { name: "Signed out" })).toBeVisible();
 });

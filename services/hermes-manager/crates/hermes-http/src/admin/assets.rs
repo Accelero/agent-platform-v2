@@ -78,6 +78,7 @@ impl DashboardAssets {
             let mime = match Path::new(&name).extension().and_then(|s| s.to_str()) {
                 Some("js") => "text/javascript; charset=utf-8",
                 Some("css") => "text/css; charset=utf-8",
+                Some("woff2") => "font/woff2",
                 _ => return Err(AppError::invalid()),
             };
             let valid_name = name.len() <= 160
@@ -161,7 +162,7 @@ async fn asset(State(assets): State<DashboardAssets>, request: Request) -> Respo
     };
     let policy = format!(
         "default-src 'none'; script-src 'self'; style-src 'self' 'nonce-{nonce}'; worker-src 'self'; \
-         img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+         img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
     );
     let mut response = content.into_response();
     response

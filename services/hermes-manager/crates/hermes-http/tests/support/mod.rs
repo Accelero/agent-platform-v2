@@ -134,6 +134,11 @@ async fn dashboard() -> tempfile::TempDir {
         "console.log('dashboard')",
     )
     .unwrap();
+    std::fs::write(
+        directory.path().join("assets/face.woff2"),
+        b"wOF2 fixture font",
+    )
+    .unwrap();
     directory
 }
 

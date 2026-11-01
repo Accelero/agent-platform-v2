@@ -51,13 +51,16 @@ const highlighting = syntaxHighlighting(
   HighlightStyle.define([
     {
       tag: [tags.propertyName, tags.definition(tags.propertyName)],
-      color: "#1b5e4b",
+      color: "var(--ink)",
       fontWeight: "600",
     },
-    { tag: tags.string, color: "#9a3412" },
-    { tag: tags.number, color: "#1d4ed8" },
-    { tag: [tags.bool, tags.null, tags.atom, tags.keyword], color: "#6d28d9" },
-    { tag: tags.comment, color: "#66756f", fontStyle: "italic" },
+    { tag: tags.string, color: "var(--syn-string)" },
+    { tag: tags.number, color: "var(--accent)" },
+    {
+      tag: [tags.bool, tags.null, tags.atom, tags.keyword],
+      color: "var(--syn-keyword)",
+    },
+    { tag: tags.comment, color: "var(--muted)", fontStyle: "italic" },
     {
       tag: [
         tags.punctuation,
@@ -66,9 +69,9 @@ const highlighting = syntaxHighlighting(
         tags.operator,
         tags.meta,
       ],
-      color: "#5d7069",
+      color: "var(--graphite)",
     },
-    { tag: tags.invalid, color: "#b42318" },
+    { tag: tags.invalid, color: "var(--bad)" },
   ]),
 );
 
@@ -119,9 +122,9 @@ const yamlScalars = [
     { decorations: (plugin) => plugin.decorations },
   ),
   EditorView.baseTheme({
-    ".cm-scalar-number": { color: "#1d4ed8" },
-    ".cm-scalar-keyword": { color: "#6d28d9" },
-    ".cm-scalar-text": { color: "#9a3412" },
+    ".cm-scalar-number": { color: "var(--accent)" },
+    ".cm-scalar-keyword": { color: "var(--syn-keyword)" },
+    ".cm-scalar-text": { color: "var(--syn-string)" },
   }),
 ];
 

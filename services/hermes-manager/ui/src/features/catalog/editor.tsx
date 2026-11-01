@@ -177,6 +177,7 @@ export default function DraftEditor({
         </button>
         <button
           type="button"
+          className="primary"
           disabled={!parsed.value || save.isPending || !session.data?.csrfToken}
           onClick={() => save.mutate()}
         >

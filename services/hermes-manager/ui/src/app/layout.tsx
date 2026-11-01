@@ -1,4 +1,10 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "../api";
@@ -8,22 +14,61 @@ import {
   useAuthorizationError,
   useSession,
 } from "./state";
+import { themes, useTheme, type ThemePreference } from "./theme";
 import { ErrorNotice } from "../components/data";
+import {
+  ActivityIcon,
+  AdministratorsIcon,
+  AssignmentsIcon,
+  BackendsIcon,
+  BrandMark,
+  ChevronDownIcon,
+  OverviewIcon,
+  PersonIcon,
+  RefreshIcon,
+  SecretsIcon,
+  SidebarIcon,
+  SignOutIcon,
+  StorageIcon,
+  SunIcon,
+  SystemIcon,
+  TemplatesIcon,
+  UsersIcon,
+  MoonIcon,
+} from "../components/icons";
+
 const navigation = [
-  ["/", "Overview"],
-  ["/users", "Users"],
-  ["/assignments", "Assignments"],
-  ["/templates", "Hermes templates"],
-  ["/terminal-backends", "Terminal backends"],
-  ["/storage", "Storage"],
-  ["/secrets", "Secrets"],
-  ["/activity", "Activity"],
-  ["/administrators", "Administrators"],
+  [{ to: "/", label: "Overview", icon: <OverviewIcon /> }],
+  [
+    { to: "/users", label: "Users", icon: <UsersIcon /> },
+    { to: "/assignments", label: "Assignments", icon: <AssignmentsIcon /> },
+  ],
+  [
+    { to: "/templates", label: "Hermes templates", icon: <TemplatesIcon /> },
+    {
+      to: "/terminal-backends",
+      label: "Terminal backends",
+      icon: <BackendsIcon />,
+    },
+  ],
+  [
+    { to: "/storage", label: "Storage", icon: <StorageIcon /> },
+    { to: "/secrets", label: "Secrets", icon: <SecretsIcon /> },
+  ],
+  [
+    { to: "/activity", label: "Activity", icon: <ActivityIcon /> },
+    {
+      to: "/administrators",
+      label: "Administrators",
+      icon: <AdministratorsIcon />,
+    },
+  ],
 ] as const;
+
 const titles: Record<string, [string, string]> = {
   "/": [
-    "A place for every agent.",
-    "Manage personal Hermes instances and the terminal backends they may use.",
+    "Agent Platform",
+    "Manage users, the instances they get, and the definitions those run on.",
   ],
   "/users": [
     "Users",
@@ -31,7 +76,7 @@ const titles: Record<string, [string, string]> = {
   ],
   "/assignments": [
     "Assignments",
-    "Who gets a Hermes instance: template version, volumes, terminal backends and admin settings.",
+    "Who gets an instance: template version, volumes, terminal backends and admin settings.",
   ],
   "/templates": [
     "Hermes templates",
@@ -55,11 +100,153 @@ const titles: Record<string, [string, string]> = {
     "PostgreSQL grants for exact Keycloak identities.",
   ],
 };
+
+const SIDEBAR_KEY = "sidebar";
+const narrow = "(max-width: 879px)";
+
+function useMediaQuery(query: string) {
+  return useSyncExternalStore(
+    (notify) => {
+      const list = window.matchMedia(query);
+      list.addEventListener("change", notify);
+      return () => list.removeEventListener("change", notify);
+    },
+    () => window.matchMedia(query).matches,
+  );
+}
+
+function usePersistedCollapse() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+    } catch {
+      return false;
+    }
+  });
+  const set = (value: boolean) => {
+    setCollapsed(value);
+    try {
+      if (value) localStorage.setItem(SIDEBAR_KEY, "collapsed");
+      else localStorage.removeItem(SIDEBAR_KEY);
+    } catch {
+      /* The sidebar still collapses until the page is closed. */
+    }
+  };
+  return [collapsed, set] as const;
+}
+
+const themeChoices: Record<
+  ThemePreference,
+  { label: string; icon: ReactNode }
+> = {
+  system: { label: "System", icon: <SystemIcon /> },
+  light: { label: "Light", icon: <SunIcon /> },
+  dark: { label: "Dark", icon: <MoonIcon /> },
+};
+
+function ThemeSwitch() {
+  const [theme, setTheme] = useTheme();
+  return (
+    <div className="segmented" role="group" aria-label="Colour theme">
+      {themes.map((choice) => (
+        <button
+          key={choice}
+          type="button"
+          aria-pressed={theme === choice}
+          aria-label={themeChoices[choice].label}
+          title={`${themeChoices[choice].label}${choice === "system" ? " (follows your device)" : ""}`}
+          onClick={() => setTheme(choice)}
+        >
+          {themeChoices[choice].icon}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AccountMenu({
+  subject,
+  issuer,
+  disabled,
+  onSignOut,
+}: {
+  subject: string;
+  issuer: string;
+  disabled: boolean;
+  onSignOut: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  return (
+    <div className="account" ref={root}>
+      <button
+        ref={trigger}
+        type="button"
+        className="account-trigger"
+        aria-expanded={open}
+        aria-controls="account-panel"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="avatar">
+          <PersonIcon />
+        </span>
+        <span className="account-name">Account</span>
+        <ChevronDownIcon />
+      </button>
+      {open && (
+        <div
+          className="popover"
+          id="account-panel"
+          role="group"
+          aria-label="Account"
+        >
+          <dl className="identity">
+            <dt>Signed in as</dt>
+            <dd className="mono">{subject}</dd>
+            <dt>Identity provider</dt>
+            <dd className="mono">{issuer}</dd>
+          </dl>
+          <button
+            type="button"
+            className="menu-item"
+            disabled={disabled}
+            onClick={onSignOut}
+          >
+            <SignOutIcon />
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Layout() {
   const path = useLocation({ select: (location) => location.pathname });
   const session = useSession();
   const denied = useAuthorizationError();
   const [signingOut, setSigningOut] = useState(false);
+  const [collapsed, setCollapsed] = usePersistedCollapse();
+  const [drawer, setDrawer] = useState(false);
+  const small = useMediaQuery(narrow);
   const logout = useMutation({
     mutationFn: async () => {
       const csrf = session.data?.csrfToken;
@@ -71,60 +258,130 @@ export function Layout() {
     },
     onError: () => setSigningOut(false),
   });
-  const [title, description] = titles[`/${path.split("/")[1]}`] ?? titles["/"];
+  useEffect(() => setDrawer(false), [path]);
+  useEffect(() => {
+    if (!drawer) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawer(false);
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [drawer]);
+
+  const section = `/${path.split("/")[1]}`;
+  const [title, description] = titles[section] ?? titles["/"];
+  const detail = path.split("/")[2];
+  const home = section === "/";
   const error = denied ?? session.error;
+  const expanded = small ? drawer : !collapsed;
+  const rail = !small && collapsed;
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <Link className="brand" to="/" aria-label="Hermes Manager home">
-          <span className="brand-icon">h.</span>
-          <span>
-            hermes<span className="brand-caption">MANAGER</span>
-          </span>
+    <div className="shell" data-collapsed={rail} data-drawer={small && drawer}>
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+      <aside className="sidebar" id="sidebar">
+        <Link className="brand" to="/" aria-label="Agent Platform home">
+          <BrandMark size={28} />
+          <span className="brand-name">Agent Platform</span>
         </Link>
-        <div className="nav-caption">WORKSPACE</div>
         <nav aria-label="Main navigation">
-          {navigation.map(([url, label], i) => (
-            <Link
-              key={url}
-              to={url}
-              aria-current={
-                path === url || (url !== "/" && path.startsWith(`${url}/`))
-                  ? "page"
-                  : undefined
-              }
-            >
-              <span>{String(i + 1).padStart(2, "0")}</span>
-              {label}
-              <span className="nav-arrow">↗</span>
-            </Link>
+          {navigation.map((group, index) => (
+            <ul key={index}>
+              {group.map(({ to, label, icon }) => (
+                <li key={to}>
+                  <Link
+                    to={to}
+                    title={rail ? label : undefined}
+                    aria-current={
+                      path === to || (to !== "/" && path.startsWith(`${to}/`))
+                        ? "page"
+                        : undefined
+                    }
+                  >
+                    {icon}
+                    <span className="nav-label">{label}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <span className="small-dot" />
-          Administration<span>Personal agent infrastructure</span>
-        </div>
       </aside>
-      <div className="workspace">
-        <header>
-          <span>
-            Agent platform <span className="slash">/</span>{" "}
-            <strong>Administration</strong>
-          </span>
-          <span className="admin-badge">ADMIN ACCESS</span>
+      {small && drawer && (
+        <button
+          type="button"
+          className="scrim"
+          aria-label="Close navigation"
+          onClick={() => setDrawer(false)}
+        />
+      )}
+      <div className="workspace" inert={small && drawer}>
+        <header className="topbar">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={
+              small
+                ? drawer
+                  ? "Close navigation"
+                  : "Open navigation"
+                : collapsed
+                  ? "Expand sidebar"
+                  : "Collapse sidebar"
+            }
+            aria-expanded={expanded}
+            aria-controls="sidebar"
+            onClick={() =>
+              small ? setDrawer(!drawer) : setCollapsed(!collapsed)
+            }
+          >
+            <SidebarIcon />
+          </button>
+          <ol className="crumbs" aria-label="Breadcrumb">
+            <li>Administration</li>
+            {home ? (
+              <li aria-current="page">Overview</li>
+            ) : detail ? (
+              <>
+                <li>
+                  <Link to={section as "/users"}>{title}</Link>
+                </li>
+                <li aria-current="page" className="mono">
+                  {decodeURIComponent(detail)}
+                </li>
+              </>
+            ) : (
+              <li aria-current="page">{title}</li>
+            )}
+          </ol>
+          <div className="topbar-end">
+            <ThemeSwitch />
+            {session.data && (
+              <AccountMenu
+                subject={session.data.actor.subject}
+                issuer={session.data.actor.issuer}
+                disabled={!session.data.csrfToken || logout.isPending}
+                onSignOut={() => logout.mutate()}
+              />
+            )}
+          </div>
         </header>
-        <main id="main">
-          <div className="eyebrow">HERMES CONTROL PLANE</div>
-          <div className="page-heading">
-            <div>
+        <main id="main" tabIndex={-1}>
+          <div className={home ? "page-heading home" : "page-heading"}>
+            {home && <BrandMark size={44} />}
+            <div className="page-title">
               <h1>{title}</h1>
               <p>{description}</p>
             </div>
             <button
+              type="button"
+              className="quiet"
               disabled={signingOut}
               onClick={() => void queryClient.invalidateQueries()}
             >
-              ↻ Refresh
+              <RefreshIcon />
+              Refresh
             </button>
           </div>
           {error ? (
@@ -134,31 +391,9 @@ export function Layout() {
               Connecting to the manager…
             </p>
           ) : (
-            !signingOut &&
-            session.data && (
-              <>
-                <Outlet />
-                <section className="identity">
-                  <div>
-                    <span className="label">SIGNED IN WITH KEYCLOAK</span>
-                    <strong>{session.data.actor.subject}</strong>
-                    <span>{session.data.actor.issuer}</span>
-                  </div>
-                  <button
-                    disabled={!session.data.csrfToken || logout.isPending}
-                    onClick={() => logout.mutate()}
-                  >
-                    Sign out ↗
-                  </button>
-                </section>
-              </>
-            )
+            !signingOut && session.data && <Outlet />
           )}
           {logout.error && <ErrorNotice error={logout.error} />}
-          <footer>
-            <span>HERMES MANAGER</span>
-            <span>Private instances. Explicit permissions.</span>
-          </footer>
         </main>
       </div>
     </div>
