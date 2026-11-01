@@ -11,7 +11,9 @@ mutable application state or deployment-specific backup scripts.
 - `containers/docker-bake.hcl`: the three release image targets (`hermes`,
   `agent-runtime`, `hermes-manager`).
 - `services/hermes-manager/`: Rust manager (`api` and `controller` roles),
-  `hermes-gateway` and the React dashboard.
+  `hermes-gateway` and the React dashboard; `dev/` is the Docker Compose
+  development stack (dashboard with hot reload, manager, PostgreSQL and a
+  Keycloak with fixed local-only test users).
 - `contracts/hermes-manager/`: OpenAPI contracts (administration, execution,
   route resolution, gateway) and template schemas.
 - `runtimes/hermes/`: per-user Hermes image and the `managed_execution` plugin.

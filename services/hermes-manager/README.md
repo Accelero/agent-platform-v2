@@ -54,6 +54,13 @@ contracts are under [`contracts/hermes-manager/`](../../contracts/hermes-manager
 [chart guide](../../charts/agent-platform/README.md) lists every role's
 configuration and Secret keys.
 
+## Local development
+
+`dev/compose.yaml` starts the dashboard with hot reload, the manager, PostgreSQL
+and an identity provider with a ready test identity (`test` / `test`) in one
+command, using only Docker; see the
+[dashboard guide](../../doc/personal-hermes/dashboard.md#local-development-stack).
+
 ## Checks
 
 ```bash

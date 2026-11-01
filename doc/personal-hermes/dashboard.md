@@ -359,6 +359,56 @@ Installed versions are recorded in `ui/package.json`, `ui/package-lock.json`,
   hand), `components/`, `features/` and `schemas/`. Every UI input is listed in
   `release-policy.json`, and a check rejects tracked UI files missing from it.
 
+## Local development stack
+
+`services/hermes-manager/dev/compose.yaml` runs everything the dashboard needs
+on one machine, with Docker as the only requirement; nothing is installed on
+the host. From the repository root:
+
+```bash
+docker compose -f services/hermes-manager/dev/compose.yaml up
+```
+
+When the log says the manager is ready, open `https://hermes-admin.localhost:5173`
+and sign in as `test` with the password `test`. Type the `https://` yourself, and
+accept the browser's certificate warning for `hermes-admin.localhost:5173` and
+for `keycloak.localhost:8443` (the sign-in page), or import the generated CA with
+`docker compose -f services/hermes-manager/dev/compose.yaml cp certs:/pki/ca.crt .`.
+
+| Service | What it is | On the host |
+| --- | --- | --- |
+| `dashboard` | The Vite dev server with hot module reloading. `ui/src` is mounted from the checkout, so saving a file updates the open page; dependencies live in a volume. | `https://hermes-admin.localhost:5173` |
+| `manager` | The manager's `api` role, compiled in the container from the mounted source with the release build's pinned Rust image. It prepares an empty database, records the installation and grants the first administrator. | not published; the dashboard proxies `/api` and `/auth` to it |
+| `postgres` | The registry, on the image the tests use. | not published; `docker compose … exec postgres psql -U hermes hermes` |
+| `keycloak` | The identity provider, with the realm `agents` and its test users imported on first start. | `https://keycloak.localhost:8443` |
+| `certs` | Runs once: a throwaway CA and the two server certificates, written to a volume. | none |
+
+The test identities are fixed for local use: `test` is the administrator, `bob`
+and `carol` are ordinary users for assignments and the users view, all with the
+password `test`. The realm is `services/hermes-manager/dev/keycloak/agents.json`.
+These credentials and certificates exist only for this stack and must never be
+reused anywhere else.
+
+Names are the same inside and outside Docker, so the issuer the manager checks
+is the one the browser uses: the browser resolves `*.localhost` to the machine,
+and the containers get the same names as network aliases.
+
+- **First start.** The manager is compiled in its container, which takes several
+  minutes; the build, the package downloads and the database are kept in volumes,
+  so later starts take seconds.
+- **Frontend changes** apply live. After a change to `package.json`,
+  `package-lock.json` or `vite.config.ts`, run `docker compose … restart dashboard`.
+- **Rust changes** need `docker compose … restart manager`, which rebuilds
+  incrementally.
+- **Reset.** `docker compose … down` keeps the data; `down -v` removes the
+  volumes, so the next start has an empty database, new certificates and a fresh
+  build.
+
+The stack has no controller or cluster: assignments and their instances are
+recorded but nothing is commissioned, and the installation is recorded directly
+instead of by `initialize`, which needs a cluster. It serves no built dashboard;
+the release image serves `ui/dist`, built as described above.
+
 ## Frontend development and checks
 
 The dashboard lives in `services/hermes-manager/ui`. Node and npm versions are
@@ -398,7 +448,8 @@ requires Python/pytest browser E2E on k3d while preserving these frontend
 unit/integration tests. See [G13 in the gap register](../testing/gaps.md#g13--real-browser-and-native-workflow-coverage)
 for the missing browser scenarios.
 
-`npm run dev` starts the Vite development server. For authenticated hot reload,
+`npm run dev` starts the Vite development server. The local development stack
+above does everything below for you. By hand, for authenticated hot reload,
 serve it over HTTPS with `MANAGER_DEV_TLS_CERT_FILE` and `MANAGER_DEV_TLS_KEY_FILE`
 from outside the checkout. Set `MANAGER_DEV_ORIGIN` to the Rust administration
 listener and `NODE_EXTRA_CA_CERTS` for a private CA. Set the manager browser
