@@ -34,3 +34,28 @@ it("addresses YAML values with escaped JSON pointers", () => {
   const range = configurationRange(text, "/adminConfig/a~1b", "yaml");
   expect(text.slice(range.from, range.to)).toBe("false");
 });
+it("marks the nearest group that exists for a setting that is missing", () => {
+  const yaml = "image: x\nlimits:\n  maxLeaseSeconds: 60\n";
+  const group = configurationRange(yaml, "/limits/idleSeconds", "yaml");
+  expect(yaml.slice(group.from, group.to)).toBe("maxLeaseSeconds: 60");
+  const root = configurationRange(yaml, "/resources", "yaml");
+  expect(yaml.slice(root.from, root.to)).toBe("image: x");
+  expect(configurationRange(yaml, "/image", "yaml")).toEqual({
+    from: 7,
+    to: 8,
+  });
+
+  const json =
+    '{\n  "image": "x",\n  "limits": {\n    "maxLeaseSeconds": 60\n  }\n}';
+  const nested = configurationRange(json, "/limits/idleSeconds", "json");
+  expect(json.slice(nested.from, nested.to)).toBe("{");
+  expect(json.slice(nested.from - 10, nested.from)).toBe('"limits": ');
+  const top = configurationRange(json, "/resources", "json");
+  expect(json.slice(top.from, top.to)).toBe("{");
+  expect(
+    json.slice(
+      configurationRange(json, "/image", "json").from,
+      configurationRange(json, "/image", "json").to,
+    ),
+  ).toBe('"x"');
+});

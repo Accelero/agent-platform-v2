@@ -6,7 +6,7 @@ import {
   isScalar,
   isAlias,
 } from "yaml";
-import { parseDraft, pointerRange, type Draft } from "./model";
+import { findRange, parseDraft, type Draft } from "./model";
 export type ConfigurationFormat = "json" | "yaml";
 export function parseConfiguration(
   text: string,
@@ -91,21 +91,39 @@ export function serializeConfiguration(
         aliasDuplicateObjects: false,
       });
 }
+function yamlRange(text: string, path: string[]) {
+  try {
+    const node = parseDocument(text).getIn(path, true) as
+      { range?: number[] } | undefined;
+    return node?.range ? { from: node.range[0], to: node.range[1] } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/**
+ * The text a finding points at. A setting that is not in the text has none, so
+ * the nearest group that is stands in for it, on its first line; at the very
+ * least that is the first line of the document.
+ */
 export function configurationRange(
   text: string,
   pointer: string,
   format: ConfigurationFormat,
 ) {
-  if (format === "json") return pointerRange(text, pointer);
-  try {
-    const doc = parseDocument(text);
-    const path = pointer
-      .split("/")
-      .slice(1)
-      .map((k) => k.replace(/~1/g, "/").replace(/~0/g, "~"));
-    const node = doc.getIn(path, true) as { range?: number[] } | undefined;
-    return { from: node?.range?.[0] ?? 0, to: node?.range?.[1] ?? 0 };
-  } catch {
-    return { from: 0, to: 0 };
+  const path = pointer
+    .split("/")
+    .slice(1)
+    .map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const firstLine = (from: number) => {
+    const end = text.indexOf("\n", from);
+    return { from, to: end < 0 ? text.length : end };
+  };
+  for (let depth = path.length; depth >= 0; depth--) {
+    const found = (format === "json" ? findRange : yamlRange)(
+      text,
+      path.slice(0, depth),
+    );
+    if (found) return depth === path.length ? found : firstLine(found.from);
   }
+  return firstLine(0);
 }

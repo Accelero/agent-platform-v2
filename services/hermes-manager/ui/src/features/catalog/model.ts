@@ -65,21 +65,26 @@ export function parseDraft(text: string): {
     return { error: "The template must be a JSON object.", offset: 0 };
   return { value: getNodeValue(tree) as Draft };
 }
-export function pointerRange(text: string, pointer: string) {
+/** The text of the value at `path` in JSON, or nothing when it is not there. */
+export function findRange(text: string, path: string[]) {
   const tree = parseTree(text);
-  if (!tree) return { from: 0, to: 0 };
-  const path = pointer
+  if (!tree) return undefined;
+  let node: Node | undefined = tree;
+  for (const segment of path) {
+    node = findNodeAtLocation(node, [
+      node.type === "array" ? Number(segment) : segment,
+    ]);
+    if (!node) return undefined;
+  }
+  return { from: node.offset, to: node.offset + node.length };
+}
+const pointerPath = (pointer: string) =>
+  pointer
     .split("/")
     .slice(1)
     .map((key) => key.replace(/~1/g, "/").replace(/~0/g, "~"));
-  let node: Node | undefined = tree;
-  for (const segment of path) {
-    node = findNodeAtLocation(node!, [
-      node?.type === "array" ? Number(segment) : segment,
-    ]);
-    if (!node) return { from: 0, to: 0 };
-  }
-  return { from: node.offset, to: node.offset + node.length };
+export function pointerRange(text: string, pointer: string) {
+  return findRange(text, pointerPath(pointer)) ?? { from: 0, to: 0 };
 }
 export function setPath(
   value: Draft,
