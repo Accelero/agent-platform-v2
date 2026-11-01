@@ -146,7 +146,10 @@ of token expiry. Already running requests can finish. The UI rechecks its sessio
 every 60 seconds and clears queries and unsaved forms on permission loss.
 
 Anonymous navigation (a `GET` or `HEAD` of a page) redirects to `/auth/login` with
-the page's path; an anonymous request for an asset or the API is `401`, and a
+the page's path, and so does a page request whose session has ended: the cookie
+outlives an idle session, so returning to a stale tab asks to sign in again
+instead of showing an error. An anonymous or ended-session request for an asset
+or the API is `401`, and a
 path that exists nowhere is a JSON `404` with or without a session. Provider tokens stay encrypted
 server-side; browser cookies are opaque, Secure, HttpOnly and host-only. Mutations
 require the current CSRF token and exact Origin as well as version and
