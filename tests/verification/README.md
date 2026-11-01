@@ -42,6 +42,18 @@ The browser profile also needs the production UI build, installed UI dependencie
 and Playwright Chromium, as described in the
 [dashboard guide](../../doc/personal-hermes/dashboard.md).
 
+The native profile also collects the shared-agent Phase 0 prerequisites in
+`tests/integration/test_native_shared.py`. It builds a local derivative of the
+supplied image that restores only the digest-pinned upstream OIDC provider, and
+starts the pinned Keycloak on an internal Docker network with throwaway TLS.
+It publishes no ports and removes its labelled containers, network and test
+image. The release image's native owner policy is unchanged. These are scripted
+HTTP and WebSocket clients, not browser or platform-routing acceptance.
+The supplemental provider-session cases exchange real PKCE codes for the gateway
+client at Keycloak and check native logout with no other client, a retained
+gateway client and both clients revoked. They create no platform session and do
+not replace SH-N04's refresh, cross-host revocation and sign-in requirements.
+
 The existing `tests.personal_hermes.kubernetes` driver supplies disposable
 cluster prerequisites and runs `rust-cluster` and `rust-controller`. Invoking
 either profile directly requires its fixture environment; absent prerequisites
