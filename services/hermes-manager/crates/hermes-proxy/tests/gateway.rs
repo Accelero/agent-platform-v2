@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use hermes_core::app::testing::{identity, installation};
@@ -29,7 +29,8 @@ use hermes_proxy::supervise::{Checks, Timing};
 use hermes_testkit::contract::Contract;
 use hermes_wire::routing::PendingCode;
 use hyper::body::Frame;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::service::TowerToHyperService;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -307,7 +308,20 @@ impl Fixture {
         let app = router(gateway.clone(), platform(gateway));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        tokio::spawn(async move {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let app = app.clone();
+                tokio::spawn(async move {
+                    let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(
+                            TokioIo::new(socket),
+                            TowerToHyperService::new(app),
+                        )
+                        .await;
+                });
+            }
+        });
         Self {
             url: format!("http://{address}"),
             address,
@@ -316,6 +330,10 @@ impl Fixture {
             hits,
             routes,
             client: reqwest::Client::builder()
+                .default_headers(HeaderMap::from_iter([(
+                    header::HOST,
+                    HeaderValue::from_static("hermes.example.org"),
+                )]))
                 .redirect(reqwest::redirect::Policy::none())
                 .no_proxy()
                 .build()
@@ -374,6 +392,153 @@ impl Fixture {
             Err(head)
         }
     }
+}
+
+async fn raw_request(fixture: &Fixture, target: &str, headers: &str) -> (u16, String) {
+    let mut stream = TcpStream::connect(fixture.address).await.unwrap();
+    stream
+        .write_all(
+            format!(
+                "GET {target} HTTP/1.1\r\nConnection: close\r\nCookie: {}\r\n{headers}\r\n",
+                Fixture::cookies("bob")
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    let status = response.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, response)
+}
+
+#[tokio::test]
+async fn wrong_authorities_are_refused_before_session_lookup_on_http1_and_http2() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let contract = Contract::load("gateway.openapi.yaml");
+    for authority in [
+        "foreign.test",
+        "hermes.example.org.",
+        "hermes.example.org:444",
+        "user@hermes.example.org",
+        "admin.hermes.example.org",
+    ] {
+        let (status, response) =
+            raw_request(&fixture, "/_platform/me", &format!("Host: {authority}\r\n")).await;
+        assert_eq!(status, 421, "{authority}: {response}");
+        assert!(response.contains("misdirected_request"));
+        assert!(response.contains("cache-control: no-store"));
+        let body: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+        contract.check("getPlatformSession", 421, &body);
+    }
+    for headers in [
+        "",
+        "Host: hermes.example.org\r\nHost: hermes.example.org\r\n",
+    ] {
+        assert_eq!(raw_request(&fixture, "/_platform/me", headers).await.0, 421);
+    }
+    let stream = TcpStream::connect(fixture.address).await.unwrap();
+    let (mut h2, connection) =
+        hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+            .await
+            .unwrap();
+    let connection = tokio::spawn(async move { connection.await.unwrap() });
+    for (authority, host) in [
+        ("foreign.test", None),
+        ("hermes.example.org:444", None),
+        ("hermes.example.org.", None),
+        ("hermes.example.org", Some("foreign.test")),
+        ("foreign.test", Some("hermes.example.org")),
+    ] {
+        let mut request = Request::builder()
+            .uri(format!("https://{authority}/_platform/me"))
+            .header("cookie", Fixture::cookies("bob"));
+        if let Some(host) = host {
+            request = request.header("host", host);
+        }
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            h2.send_request(request.body(Body::empty()).unwrap()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(response.status(), 421, "{authority} {host:?}");
+        let bytes = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        contract.check(
+            "getPlatformSession",
+            421,
+            &serde_json::from_slice::<Value>(&bytes).unwrap(),
+        );
+    }
+    assert_eq!(fixture.sessions.authentications.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.resolver.calls.load(Ordering::SeqCst), 0);
+    assert!(fixture.hits().is_empty());
+    let request = Request::builder()
+        .uri("https://HERMES.EXAMPLE.ORG:443/api/chat")
+        .header("cookie", Fixture::cookies("bob"))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(h2.send_request(request).await.unwrap().status(), 200);
+    let request = Request::builder()
+        .uri("https://foreign.test/_platform/healthz")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(h2.send_request(request).await.unwrap().status(), 200);
+    connection.abort();
+    assert_eq!(
+        raw_request(&fixture, "/_platform/healthz", "Host: foreign.test\r\n")
+            .await
+            .0,
+        200
+    );
+}
+
+#[tokio::test]
+async fn absolute_targets_and_forwarded_hosts_cannot_select_another_target() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let headers = "Host: hermes.example.org\r\nX-Forwarded-Host: foreign.test\r\nForwarded: host=foreign.test\r\n";
+    assert_eq!(
+        raw_request(&fixture, "https://foreign.test/api/chat", headers)
+            .await
+            .0,
+        421
+    );
+    assert_eq!(fixture.sessions.authentications.load(Ordering::SeqCst), 0);
+    assert!(fixture.hits().is_empty());
+    let (status, response) =
+        raw_request(&fixture, "https://hermes.example.org/api/chat", headers).await;
+    assert_eq!(status, 200);
+    assert!(response.contains("\"instance\":\"bob\""));
+    assert!(!response.contains("foreign.test"));
+}
+
+#[tokio::test]
+async fn tossed_platform_lookalike_cookies_do_not_disturb_a_valid_session() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let response = fixture
+        .get(None, "/api/chat")
+        .header(
+            "cookie",
+            format!(
+                "{}; hermes-platform=x; __host-hermes-platform=t; hermes_session_at=native",
+                Fixture::cookies("bob")
+            ),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let response = json(response).await;
+    assert_eq!(response["instance"], "bob");
+    assert_eq!(response["headers"]["cookie"], "hermes_session_at=native");
 }
 
 fn fast() -> Timing {

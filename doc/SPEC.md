@@ -414,6 +414,14 @@ The OpenAPI files are the authority for each interface.
 Error semantics: `401` unauthenticated, `403` not permitted, `404` not
 found, `409` idempotency or state conflict, `412` stale `If-Match`, `422`
 invalid or unapproved input, `503` dependency unavailable or maintenance.
+The gateway also answers `421 misdirected_request` before authentication when
+the request authority is not its configured public host and port. Hostname case
+is normalized; default HTTPS port 443 may be explicit. Userinfo, a trailing dot,
+missing or duplicate HTTP/1 `Host` headers, and a disagreement between `Host`
+and a URI authority (including HTTP/2 `:authority`) are refused. An absolute-form
+target must use HTTPS and agree with `Host`. Forwarded headers and TLS SNI do not
+select a target; classification is per request. `/_platform/healthz` answers on
+any authority for infrastructure probes.
 An update without a well-formed `If-Match` is `422` (incomplete, not stale);
 one whose version is not the current one is `412`. A refused request changes
 nothing. Responses never reveal another owner's data.
@@ -429,6 +437,11 @@ themselves, errors, redirects and pages included, is `no-store`, `nosniff` and
 nothing: `default-src 'none'`, no framing. Stored text, such as names, labels,
 template content and configuration, is shown as text, never as markup or
 script.
+
+Only the exact `__Host-hermes-platform` and `__Host-hermes-platform-browser`
+cookie names count as gateway credentials. Duplicate exact names are refused.
+Other names containing `hermes-platform` are ignored and removed before forwarding,
+including case variants and cookies set by a sibling on the parent domain.
 
 ## Operational bounds
 
@@ -527,6 +540,9 @@ restorable:
 | Concurrent enable, retry and controller kill | One stable instance; credentials generated once |
 | Email change or new subject with an old email | Ownership unchanged; the new subject gets nothing |
 | Forged headers, foreign cookie or ticket, callback race | No cross-owner access |
+| SH-G01: Gateway authority classification | HTTP/1.1 and HTTP/2 authorities outside the configured public host and port are `421` before session lookup or forwarding; health probes work on any authority |
+| SH-G02: Forged host and absolute target | Forwarded headers never choose a target, and a URI authority that differs from Host is refused |
+| SH-G04: Tossed platform cookies | Lookalike cookies do not disturb a valid session and are stripped; duplicate exact platform-cookie names remain refused |
 | Native HTTP, upload and WebSocket through the gateway | Login, mutations, upload, ticketed WebSocket and logout work |
 | Manager, database or Keycloak outage | Fail closed within the bounds; no fallback |
 | Suspend during an open chat and during provisioning | New access denied within 5 s, connection closed within 10 s, terminal work drained, data retained |

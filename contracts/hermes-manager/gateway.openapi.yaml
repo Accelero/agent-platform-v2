@@ -21,6 +21,16 @@ info:
 servers:
   - url: https://hermes.example.org
 x-proxy:
+  authority: >-
+    Except for /_platform/healthz, every request must name the configured public
+    origin's host and port. ASCII hostname case is normalized, and an explicit
+    default port 443 is equivalent to its omission. Another authority, userinfo,
+    a trailing dot, missing or duplicate HTTP/1 Host headers, or disagreement
+    between Host and the URI authority (including HTTP/2 :authority) is refused
+    with 421 {"error": "misdirected_request"}, before any session lookup or
+    instance request. An absolute-form target must use HTTPS and agree with Host.
+    Forwarded and X-Forwarded-Host never select a target. Classification is per
+    request and does not use TLS SNI. Health probes answer on any authority.
   session: >-
     Every proxied request needs a valid platform session (both platform
     cookies). Without one, a safe HTML navigation (`GET` or `HEAD` that accepts
@@ -48,7 +58,10 @@ x-proxy:
   requestHygiene: >-
     Removed before forwarding: hop-by-hop headers, `Forwarded`, `X-Forwarded-*`,
     `X-Real-IP`, `X-Hermes-*`, `X-Auth-Request-*`, `X-Remote-*`, `Remote-User`
-    and both platform cookies. The gateway then sets `X-Forwarded-Proto: https`
+    and every cookie whose name contains hermes-platform (case-insensitive).
+    Only the exact __Host-hermes-platform and __Host-hermes-platform-browser
+    names count as platform credentials; duplicates of either are refused, while
+    lookalike names are ignored. The gateway then sets `X-Forwarded-Proto: https`
     and `X-Forwarded-Host`. `Host`, `Authorization` and native cookies pass
     through. Request bodies are limited to 64 MiB.
   responseHygiene: >-
@@ -70,6 +83,7 @@ paths:
           schema: { type: string, default: '/', maxLength: 2048 }
           description: Local path to return to; `/_platform`, `/auth` and `/api/` paths are refused
       responses:
+        '421': { $ref: '#/components/responses/Misdirected' }
         '303':
           description: >-
             Single-use state, nonce and S256 PKCE stored before the provider
@@ -96,6 +110,7 @@ paths:
         - { name: error, in: query, schema: { type: string } }
         - { name: error_description, in: query, schema: { type: string } }
       responses:
+        '421': { $ref: '#/components/responses/Misdirected' }
         '303':
           description: Opaque platform session stored before the redirect to the return path
           headers:
@@ -108,6 +123,7 @@ paths:
       operationId: getPlatformSession
       security: [{ PlatformSession: [] }]
       responses:
+        '421': { $ref: '#/components/responses/Misdirected' }
         '200':
           description: The verified owner and the session's CSRF token, without provider credentials
           content:
@@ -137,6 +153,7 @@ paths:
         - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
         - { name: X-CSRF-Token, in: header, required: true, schema: { $ref: '#/components/schemas/Handle' } }
       responses:
+        '421': { $ref: '#/components/responses/Misdirected' }
         '204':
           description: Session ended; platform and native cookies expired
           headers:
@@ -159,6 +176,7 @@ paths:
       parameters:
         - { name: Origin, in: header, required: true, schema: { type: string, format: uri } }
       responses:
+        '421': { $ref: '#/components/responses/Misdirected' }
         '303':
           description: Signed out; platform and native cookies expired
           headers:
@@ -169,6 +187,7 @@ paths:
     get:
       operationId: platformSignedOut
       responses:
+        '421': { $ref: '#/components/responses/Misdirected' }
         '200':
           description: Static page with a link to sign in again
           content:
@@ -205,7 +224,13 @@ components:
             - access_denied
             - invalid_request
             - dependency_unavailable
+            - misdirected_request
   responses:
+    Misdirected:
+      description: Request authority refused before session lookup or forwarding
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     Unauthenticated:
       description: Absent, ambiguous, expired or revoked session
       content:

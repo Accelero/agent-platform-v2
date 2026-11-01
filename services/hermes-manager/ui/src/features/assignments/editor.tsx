@@ -129,7 +129,10 @@ export function SpecEditor({
                   required
                   value={volume.source}
                   onChange={(event) =>
-                    update([name, { source: event.target.value }])
+                    update([
+                      name,
+                      { source: event.target.value, readOnly: volume.readOnly },
+                    ])
                   }
                 >
                   <option value="">Choose a source</option>
@@ -205,7 +208,9 @@ export function SpecEditor({
         <button
           type="button"
           disabled={volumes.length >= 16}
-          onClick={() => setVolumes([...volumes, ["", { source: "" }]])}
+          onClick={() =>
+            setVolumes([...volumes, ["", { source: "", readOnly: false }]])
+          }
         >
           Add volume
         </button>

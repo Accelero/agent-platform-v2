@@ -25,7 +25,7 @@ test("create an assignment for a directory user", async ({ page }) => {
       access: "enabled",
       template: { id: "standard", version: 1 },
       volumes: {
-        workspace: { source: "host-data", path: "carol/work" },
+        workspace: { source: "host-data", path: "carol/work", readOnly: false },
       },
     },
   });

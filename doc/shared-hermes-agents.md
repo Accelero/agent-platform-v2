@@ -69,8 +69,8 @@ native login, refresh, logout, home binding and callbacks on the project image;
 | E6 | The pinned image does not separate users: with two identities, one read the other's sessions, a stored `.env` value and test copies of the instance's credential files, and deleted the other's cron job. | Experiment | Hermes's part; see [Responsibility boundary](#planned-responsibility-boundary). Recorded for whoever chooses the image, and not a platform obligation |
 | E7 | A member can register another auth provider by writing `dashboard.basic_auth` to the home's `config.yaml`. A blank `dashboard.basic_auth` in the managed configuration prevents this. | Experiment | [Managed configuration](#managed-configuration) |
 | E8 | The auth-gate probe requires exactly one provider named `self-hosted` and a redirect to it. | `hermes-native/src/probe.rs` | Stays valid for both kinds, so it needs no variant |
-| E9 | The gateway ignores the request's `Host`, serves HTTP/2 and reads its certificate once at startup. | `hermes-proxy/src/gateway.rs`, `hermes-http/src/server.rs`, `hermes-gateway/src/lib.rs` | [Host classification](#host-classification) and [certificate reload](#planned-deployment-configuration) are new work |
-| E10 | Any cookie whose name merely contains `hermes-platform` makes the gateway refuse the request as ambiguous. Script on a sibling host can set `hermes-platform=x; Domain=hermes.example.org`, which would lock the user out of every host beneath that domain. | `hermes-proxy/src/hygiene.rs` | [Cookie rules](#cookies-and-request-hygiene) |
+| E9 | The gateway classifies each request's authority before session lookup, serves HTTP/2 and reads its certificate once at startup. The configured endpoint remains personal until shared routing and per-host sessions are wired. | `hermes-proxy/src/hosts.rs`, `hermes-proxy/src/gateway.rs`, `hermes-http/src/server.rs`, `hermes-gateway/src/lib.rs` | Certificate reload remains planned |
+| E10 | The gateway reads only exact platform-cookie names and refuses duplicates of those names. Other names containing `hermes-platform` are ignored and stripped, so a sibling's parent-domain lookalike does not deny access. | `hermes-proxy/src/hygiene.rs`, collected gateway tests | The cookie-name rules apply to the personal endpoint too |
 | E11 | Open connections end when the resolver's answer differs from their `Route`. The route contains the assignment's version and desired generation, not any grant data. | `hermes-proxy/src/supervise.rs`, `hermes-core/src/domain/routing.rs` | Grant changes need no revision counter. See [D5](#planned-design-decisions) |
 | E12 | Tailscale's documented layer 3 ingress is a `LoadBalancer` Service with `loadBalancerClass: tailscale`, optionally with `tailscale.com/proxy-group`; the operator creates one Tailscale Service per HA-exposed Service. Its advertisement needs tailnet `autoApprovers`, and grants decide who reaches it. | Provider documentation | The shared exposure design holds. The chart's gateway Service supports only `type` and `port` today |
 | E13 | Native cookie names depend on the scheme Hermes sees. Without a trusted proxy it sees `http`, and so uses bare names such as `hermes_session_at`. A sibling host's script can set bare names with a parent `Domain`. | `hermes_cli/dashboard_auth/cookies.py` | The gateway must forward these names. See the [accepted consequences](#accepted-consequences) |
@@ -608,6 +608,12 @@ credentials after logout is allowed; token revocation stays required.
 **Gate:** those cases pass. If they contradict E14 to E16, stop and return to the maintainer.
 
 ### Phase 1: gateway foundations
+
+**Verified:** SH-G01, SH-G02 and SH-G04, all existing gateway tests, the
+disposable k3s adapter/controller suites and the native end-to-end run pass.
+The configured gateway endpoint remains personal. Shared-host classification
+policy is tested as a pure foundation; the remaining phases wire shared routing
+and per-host sessions.
 
 Host classification and the cookie change, which also apply with no shared agents.
 

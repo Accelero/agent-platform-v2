@@ -70,8 +70,6 @@ pub fn platform_cookies(headers: &HeaderMap) -> Result<Option<(String, String)>,
                 &mut session
             } else if name == browser_name {
                 &mut browser
-            } else if platform_name(name) {
-                return Err(Ambiguous);
             } else {
                 continue;
             };
@@ -313,13 +311,17 @@ mod tests {
                 ("cookie", &format!("{SESSION}=s; {BROWSER}=b")),
                 ("cookie", &format!("{BROWSER}=c")),
             ]),
-            headers(&[(
-                "cookie",
-                &format!("{SESSION}=s; {BROWSER}=b; __host-hermes-platform=t"),
-            )]),
         ] {
             assert_eq!(platform_cookies(&ambiguous), Err(Ambiguous));
         }
+        let tossed = headers(&[(
+            "cookie",
+            &format!("{SESSION}=s; {BROWSER}=b; hermes-platform=x; __host-hermes-platform=t"),
+        )]);
+        assert_eq!(
+            platform_cookies(&tossed),
+            Ok(Some(("s".into(), "b".into())))
+        );
     }
 
     #[test]

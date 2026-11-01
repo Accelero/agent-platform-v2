@@ -51,13 +51,21 @@ test("the built dashboard works under the production CSP", async ({
     page.getByRole("cell", { name: "browser-key", exact: true }),
   ).toBeVisible();
   expect(await page.content()).not.toContain("sk-browser-fixture");
+  expect(violations, "secret workflow CSP").toEqual([]);
 
   // A template: draft in the lazy-loaded editor, then publish.
   await page.goto("/templates");
   await page.getByLabel("ID", { exact: true }).fill("browser-template");
   await page.getByRole("button", { name: "Start draft" }).click();
   await page.getByRole("tab", { name: "JSON" }).click();
-  await page.getByRole("textbox", { name: "Configuration JSON editor" }).fill(
+  const editor = page.getByRole("textbox", {
+    name: "Configuration JSON editor",
+  });
+  // Delete through the editor's command before inserting replacement text.
+  // Chromium otherwise carries rich-text styling from highlighted spans.
+  await editor.press("ControlOrMeta+A");
+  await editor.press("Backspace");
+  await editor.fill(
     JSON.stringify({
       schemaVersion: 2,
       image: `ghcr.io/example/hermes@sha256:${"a".repeat(64)}`,
@@ -79,6 +87,7 @@ test("the built dashboard works under the production CSP", async ({
   await expect(page.getByText("Change accepted.")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByText("published", { exact: true })).toBeVisible();
+  expect(violations, "template workflow CSP").toEqual([]);
 
   // Every page renders against the real contract.
   for (const [path, text] of [

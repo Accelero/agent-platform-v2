@@ -4,6 +4,7 @@
 
 pub mod cache;
 pub mod gateway;
+pub mod hosts;
 pub mod hygiene;
 pub mod pages;
 pub mod resolver;

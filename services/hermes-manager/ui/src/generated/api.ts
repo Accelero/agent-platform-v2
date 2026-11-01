@@ -1015,36 +1015,75 @@ export interface components {
       nextCursor: string | null;
     };
     name: string;
+    /** @description One volume an assignment gets unless it defines its own. The key is the volume's name and must also appear under mounts. */
     volume: {
+      /** @description The storage source the volume comes from. A storage class creates a volume of sizeGib; a static source (a local path or an NFS export) needs a path. */
       source: components["schemas"]["name"];
+      /**
+       * @description Static sources only: the folder under the source's root, relative and without '..' segments.
+       * @example team/shared
+       */
       path?: string;
+      /** @description Storage classes only: the size of the volume in GiB. */
       sizeGib?: number;
-      readOnly?: boolean;
+      /**
+       * @description Mount the volume read-only everywhere it appears.
+       * @default false
+       */
+      readOnly: boolean;
     };
+    /** @description One admin secret delivered to the instance, as an environment variable (env) or a read-only file (file). */
     secretReference: {
+      /** @description The admin secret to deliver. It must exist, with a kind that fits the delivery, when the version is published. */
       name: components["schemas"]["name"];
+      /**
+       * @description Deliver the secret as this environment variable. Use env or file, not both.
+       * @example OPENAI_API_KEY
+       */
       env?: string;
+      /** @description Deliver the secret as a read-only file with this name under /run/hermes/admin-secrets/. Use env or file, not both. */
       file?: components["schemas"]["name"];
     } & (unknown | unknown);
+    /** @description One volume as Hermes sees it. The key is the volume's name; an assignment, or defaultVolumes, says where the volume comes from. */
     mount: {
+      /**
+       * @description Absolute path where the volume appears in Hermes. It must not overlap another mount or a path the platform reserves.
+       * @example /workspace
+       */
       mountPath: string;
-      readOnly?: boolean;
+      /**
+       * @description Mount the volume read-only in Hermes.
+       * @default false
+       */
+      readOnly: boolean;
     };
     /**
      * TemplateDefinition
      * @description A Hermes template version. Storage sources and admin settings are checked by the manager against installation settings; this schema covers the shape.
      */
     "template-v2": {
-      /** @constant */
+      /**
+       * @description The version of this definition format.
+       * @constant
+       */
       schemaVersion: 2;
+      /**
+       * @description The Hermes image every instance of this version runs, pinned by digest. A tag is not accepted.
+       * @example ghcr.io/example/hermes@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+       */
       image: string;
+      /** @description What each Hermes instance of this version may use. */
       resources: {
+        /** @description CPU limit in millicores: 1000 is one core. */
         cpuMillis: number;
+        /** @description Memory limit in MiB. */
         memoryMib: number;
       };
       /** @description The private Hermes home at /opt/data. Always a dynamic volume; never mounted in a terminal backend. */
       home: {
+        /** @description The storage source the home is created on. It must be a storage class, a source that provisions volumes on demand. */
         source: components["schemas"]["name"];
+        /** @description Size of each user's home in GiB. A later version may grow it, but shrinking it or moving it to another source needs an explicit storage migration. */
         sizeGib: number;
       };
       /** @description Volumes mounted into Hermes, by volume name. */
@@ -1055,24 +1094,52 @@ export interface components {
       defaultVolumes?: {
         [key: string]: components["schemas"]["volume"];
       };
-      /** @description Hermes settings enforced over the user's own. Never secret values. */
+      /** @description Hermes settings (config.yaml keys) enforced over the user's own, kept as given. Never secret values: deliver them under secrets and refer to them as ${NAME}. */
       adminConfig?: Record<string, never>;
+      /** @description Admin secrets delivered to every instance of this version, each as an environment variable or a read-only file. */
       secrets?: components["schemas"]["secretReference"][];
       $defs: {
         name: string;
+        /** @description One volume as Hermes sees it. The key is the volume's name; an assignment, or defaultVolumes, says where the volume comes from. */
         mount: {
+          /**
+           * @description Absolute path where the volume appears in Hermes. It must not overlap another mount or a path the platform reserves.
+           * @example /workspace
+           */
           mountPath: string;
-          readOnly?: boolean;
+          /**
+           * @description Mount the volume read-only in Hermes.
+           * @default false
+           */
+          readOnly: boolean;
         };
+        /** @description One volume an assignment gets unless it defines its own. The key is the volume's name and must also appear under mounts. */
         volume: {
+          /** @description The storage source the volume comes from. A storage class creates a volume of sizeGib; a static source (a local path or an NFS export) needs a path. */
           source: components["schemas"]["name"];
+          /**
+           * @description Static sources only: the folder under the source's root, relative and without '..' segments.
+           * @example team/shared
+           */
           path?: string;
+          /** @description Storage classes only: the size of the volume in GiB. */
           sizeGib?: number;
-          readOnly?: boolean;
+          /**
+           * @description Mount the volume read-only everywhere it appears.
+           * @default false
+           */
+          readOnly: boolean;
         };
+        /** @description One admin secret delivered to the instance, as an environment variable (env) or a read-only file (file). */
         secretReference: {
+          /** @description The admin secret to deliver. It must exist, with a kind that fits the delivery, when the version is published. */
           name: components["schemas"]["name"];
+          /**
+           * @description Deliver the secret as this environment variable. Use env or file, not both.
+           * @example OPENAI_API_KEY
+           */
           env?: string;
+          /** @description Deliver the secret as a read-only file with this name under /run/hermes/admin-secrets/. Use env or file, not both. */
           file?: components["schemas"]["name"];
         } & (unknown | unknown);
       };
@@ -1082,29 +1149,59 @@ export interface components {
      * @description A terminal backend version: an SSH worker image implementing managed-ssh-v2, its resources, limits and mount slots.
      */
     "terminal-backend-v1": {
+      /**
+       * @description The SSH worker image terminal environments run, pinned by digest. A tag is not accepted.
+       * @example ghcr.io/example/agent-runtime@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+       */
       image: string;
-      /** @constant */
+      /**
+       * @description The contract the image implements. Only managed-ssh-v2 is supported.
+       * @constant
+       */
       sshContract: "managed-ssh-v2";
+      /** @description The user ID the worker runs as. Never root: 1 or higher. */
       uid: number;
+      /** @description The group ID the worker runs as. Never root: 1 or higher. */
       gid: number;
+      /** @description What each worker environment may use. */
       resources: {
+        /** @description CPU limit in millicores: 1000 is one core. */
         cpuMillis: number;
+        /** @description Memory limit in MiB. */
         memoryMib: number;
+        /** @description Limit in GiB for the worker's local scratch storage. It does not outlive the environment. */
         ephemeralGib: number;
       };
+      /** @description How long environments live and how many an instance may have. */
       limits: {
+        /** @description How long an environment with no live lease may sit idle before it is retired. */
         idleSeconds: number;
+        /** @description The longest a single lease on an environment may last. A lease never outlives it. */
         maxLeaseSeconds: number;
+        /** @description How many live environments of this backend one instance may have at the same time. */
         maxEnvironments: number;
       };
       /** @description Mount slots by volume name. The assignment decides which volume fills each slot. */
       mounts?: {
         [key: string]: {
+          /**
+           * @description Absolute path where the volume appears in the worker. A volume shared with Hermes must use the same path as in the template.
+           * @example /workspace
+           */
           mountPath: string;
-          readOnly?: boolean;
-          optional?: boolean;
+          /**
+           * @description Mount the volume read-only in the worker.
+           * @default false
+           */
+          readOnly: boolean;
+          /**
+           * @description An optional slot is skipped when the assignment binds no volume to it. An unbound required slot makes the backend unusable for that instance.
+           * @default false
+           */
+          optional: boolean;
         };
       };
+      /** @description The registry admin secret that holds the credentials to pull a private image. */
       registrySecret?: components["schemas"]["name"];
       $defs: {
         name: string;

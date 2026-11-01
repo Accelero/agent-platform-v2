@@ -23,6 +23,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use serde_json::json;
 
 use crate::cache::TtlCache;
+use crate::hosts::Hosts;
 use crate::hygiene::{
     expire_cookies, filter_response, forward_request, is_websocket, platform_cookies,
 };
@@ -60,6 +61,7 @@ pub struct Gateway {
     public_origin: String,
     public_host: String,
     max_upload: u64,
+    hosts: Hosts,
 }
 
 impl Gateway {
@@ -100,6 +102,7 @@ impl Gateway {
             public_origin: public_origin.to_owned(),
             public_host,
             max_upload,
+            hosts: Hosts::new(public_origin, None)?,
         })
     }
 
@@ -203,7 +206,27 @@ pub fn router(gateway: Arc<Gateway>, platform: Router) -> Router {
             "/_platform/{*rest}",
             axum::routing::any(unknown_platform_path),
         )
-        .fallback_service(axum::routing::any(proxy).with_state(gateway))
+        .fallback_service(axum::routing::any(proxy).with_state(gateway.clone()))
+        .layer(axum::middleware::from_fn_with_state(gateway, classify_host))
+}
+
+async fn classify_host(
+    State(gateway): State<Arc<Gateway>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    if request.uri().path() != "/_platform/healthz" {
+        let class =
+            match gateway
+                .hosts
+                .classify(request.version(), request.uri(), request.headers())
+            {
+                Ok(class) => class,
+                Err(_) => return error(StatusCode::MISDIRECTED_REQUEST, "misdirected_request"),
+            };
+        request.extensions_mut().insert(class);
+    }
+    next.run(request).await
 }
 
 async fn unknown_platform_path() -> Response {

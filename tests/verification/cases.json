@@ -714,7 +714,14 @@
       "hermes-wire/test:contract::terminal_backend_schema_and_rust_validation_agree": "unit",
       "hermes-wire/test:contract::the_gateway_accepts_only_the_instance_service_in_its_own_namespace": "unit",
       "hermes-core/lib:hermes_core::domain::assignments::tests::static_paths_can_be_equal_or_nested_within_and_across_assignments": "unit",
-      "hermes-render/test:render::shared_static_paths_render_distinct_claims_and_independent_read_only_mounts": "unit"
+      "hermes-render/test:render::shared_static_paths_render_distinct_claims_and_independent_read_only_mounts": "unit",
+      "hermes-core/lib:hermes_core::domain::endpoints::tests::hostname_labels_and_reserved_names_follow_endpoint_rules": "unit",
+      "hermes-core/lib:hermes_core::domain::endpoints::tests::agent_domains_are_canonical_bounded_dns_names": "unit",
+      "hermes-proxy/lib:hermes_proxy::hosts::tests::authorities_classify_identically_for_http1_and_http2": "unit",
+      "hermes-proxy/lib:hermes_proxy::hosts::tests::duplicate_conflicting_and_missing_authorities_are_refused": "unit",
+      "hermes-proxy/test:gateway::wrong_authorities_are_refused_before_session_lookup_on_http1_and_http2": "integration",
+      "hermes-proxy/test:gateway::absolute_targets_and_forwarded_hosts_cannot_select_another_target": "integration",
+      "hermes-proxy/test:gateway::tossed_platform_lookalike_cookies_do_not_disturb_a_valid_session": "integration"
     },
     "rust-browser": {
       "hermes-http/test:dashboard_browser::production_dashboard_browser_csp": "integration"

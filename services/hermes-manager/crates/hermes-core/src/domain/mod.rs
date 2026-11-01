@@ -5,6 +5,7 @@ pub mod access;
 pub mod assignments;
 pub mod backends;
 pub mod catalog;
+pub mod endpoints;
 pub mod error;
 pub mod execution;
 pub mod identity;
