@@ -430,6 +430,15 @@ new value.
 `hermes-gateway` handles every request on the Hermes hostname
 (`gateway.openapi.yaml`):
 
+Before session lookup, a pure authority classifier compares each request with the
+configured public origin. It normalizes ASCII hostname case and default HTTPS
+port 443, refuses missing or duplicate HTTP/1 `Host`, userinfo, trailing dots,
+foreign hosts or ports, and `Host`/URI-authority disagreements with
+`421 misdirected_request`. HTTP/2 uses `:authority`; any `Host` must agree.
+Absolute-form targets must use HTTPS and agree with `Host`. Classification runs
+on every request, independent of TLS SNI and forwarded headers. The health route
+is exempt so infrastructure probes can address the Service directly.
+
 1. Remove hop-by-hop and reserved headers (`Forwarded`, `X-Forwarded-*`,
    `X-Hermes-*` and similar) and the platform cookies from the request. Set
    `Host`, `X-Forwarded-Host` and `X-Forwarded-Proto` itself.
@@ -446,6 +455,10 @@ new value.
    from the resolver response, and must be exactly the instance's own
    namespace in this installation.
 5. Filter `Set-Cookie` so no backend can set the reserved platform cookies.
+
+Only exact platform cookie names are read as credentials, with duplicate exact
+names refused. Every other name containing `hermes-platform` is ignored and
+stripped, preventing a sibling's parent-domain cookie from denying access.
 
 WebSockets are spliced after the upgrade: the gateway passes bytes unchanged,
 so native heartbeats and extensions work, and it requires the exact public

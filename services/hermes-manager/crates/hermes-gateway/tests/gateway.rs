@@ -212,7 +212,20 @@ impl Fixture {
         });
         Self {
             url: format!("https://{address}"),
-            client: secrets.client(None),
+            client: reqwest::Client::builder()
+                .https_only(true)
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(5))
+                .add_root_certificate(
+                    reqwest::Certificate::from_pem(&secrets.read("ca.crt")).unwrap(),
+                )
+                .default_headers(reqwest::header::HeaderMap::from_iter([(
+                    reqwest::header::HOST,
+                    "hermes.localhost".parse().unwrap(),
+                )]))
+                .build()
+                .unwrap(),
             secrets,
             provider,
             rows,

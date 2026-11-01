@@ -55,7 +55,10 @@ nothing rolls back automatically.
 The shared-agent [Phase 0 native prerequisites](../shared-hermes-agents.md#phase-0-native-login-for-several-users)
 pass, including both SH-N04 refresh-token policies and the three provider-session
 cases. Logout keeps token revocation; signing in again may require credentials
-when the provider ends its session. No later shared-agent phase has landed.
+when the provider ends its session. The gateway foundation classifies HTTP/1.1
+and HTTP/2 authorities before session lookup and ignores tossed platform-cookie
+lookalikes. Its configured endpoint remains personal; shared assignments,
+endpoints, grants and per-host sessions are planned in the remaining phases.
 
 The [testing strategy](../TESTING.md) specifies language-native units,
 integration tests at their proving boundary, and independently collected
