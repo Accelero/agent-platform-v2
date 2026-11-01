@@ -1,0 +1,123 @@
+# The local development stack: the dashboard with hot reload, the manager, the
+# database and an identity provider with a ready test identity. Start it with
+#
+#   docker compose -f services/hermes-manager/dev/compose.yaml up
+#
+# and open https://hermes-admin.localhost:5173 (sign in as test / test). Only
+# Docker is needed on the host. Nothing here is for any other use: the
+# credentials are fixed and the certificates are throwaway.
+name: agent-platform-dev
+
+services:
+  # One-shot: a throwaway CA and the two server certificates.
+  certs:
+    build: .
+    image: agent-platform-dev-tools
+    entrypoint: ["/dev/scripts/certs.sh"]
+    volumes:
+      - ./scripts:/dev/scripts:ro
+      - pki:/pki
+    restart: "no"
+
+  postgres:
+    image: postgres@sha256:2a0d0fe14825b0939f78a8cad5cd4e6aa68bf94d0e5dd96e24b6d23af4315545
+    environment:
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: hermes
+      POSTGRES_DB: hermes
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The identity provider, with the realm and the test users imported on first
+  # start. The name and port are the ones the browser uses too, so the issuer
+  # is the same on both sides.
+  keycloak:
+    image: quay.io/keycloak/keycloak@sha256:27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741
+    command:
+      - start-dev
+      - --import-realm
+      - --http-enabled=false
+      - --https-port=8443
+      - --https-certificate-file=/pki/keycloak.crt
+      - --https-certificate-key-file=/pki/keycloak.key
+      - --hostname=https://keycloak.localhost:8443
+    volumes:
+      - pki:/pki:ro
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:8443:8443"
+    networks:
+      default:
+        aliases: [keycloak.localhost]
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+
+  # The manager's API and sign-in, built from the mounted source. The dashboard
+  # server below proxies to it; Rust changes need `docker compose restart manager`.
+  manager:
+    build: .
+    image: agent-platform-dev-tools
+    entrypoint: ["/dev/scripts/manager.sh"]
+    volumes:
+      - ../../..:/src:ro
+      - ./scripts:/dev/scripts:ro
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - target:/cache/target
+      - state:/state
+      - pki:/pki:ro
+    networks:
+      default:
+        aliases: [hermes-admin.localhost]
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  # The Vite dev server with hot module reloading. The sources are mounted from
+  # the checkout, so saving a file in ui/src updates the open page.
+  dashboard:
+    image: node@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567
+    working_dir: /app
+    environment:
+      MANAGER_DEV_TLS_CERT_FILE: /pki/admin.crt
+      MANAGER_DEV_TLS_KEY_FILE: /pki/admin.key
+      MANAGER_DEV_ORIGIN: https://hermes-admin.localhost:8446
+      NODE_EXTRA_CA_CERTS: /pki/ca.crt
+    command:
+      - sh
+      - -c
+      - '[ node_modules/.package-lock.json -nt package-lock.json ] || npm ci; exec npx vite --host 0.0.0.0'
+    volumes:
+      - ../ui/src:/app/src
+      - ../ui/index.html:/app/index.html:ro
+      - ../ui/package.json:/app/package.json:ro
+      - ../ui/package-lock.json:/app/package-lock.json:ro
+      - ../ui/.npmrc:/app/.npmrc:ro
+      - ../ui/vite.config.ts:/app/vite.config.ts:ro
+      - ../ui/tsconfig.json:/app/tsconfig.json:ro
+      - node-modules:/app/node_modules
+      - pki:/pki:ro
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+
+volumes:
+  pki:
+  pgdata:
+  state:
+  target:
+  cargo-registry:
+  cargo-git:
+  node-modules:

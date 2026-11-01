@@ -1,0 +1,104 @@
+{
+  "realm": "agents",
+  "enabled": true,
+  "sslRequired": "all",
+  "users": [
+    {
+      "id": "00000000-0000-4000-8000-0000000000a0",
+      "username": "test",
+      "enabled": true,
+      "email": "test@example.org",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000b0",
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.org",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000c0",
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@example.org",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "service-account-manager-directory-reader",
+      "enabled": true,
+      "serviceAccountClientId": "manager-directory-reader",
+      "clientRoles": {
+        "realm-management": [
+          "view-users"
+        ]
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "manager-directory-reader",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "dev-directory-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    },
+    {
+      "clientId": "manager-admin",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "webOrigins": [
+        "+"
+      ],
+      "redirectUris": [
+        "https://hermes-admin.localhost:5173/auth/oidc/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-hermes-manager",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "hermes-manager",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ]
+}
