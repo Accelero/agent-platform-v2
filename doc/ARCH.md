@@ -115,8 +115,10 @@ shared-only endpoint/grant references, permanent endpoint rows and independent
 assignment/audience version advances. Read models use bounded keyset pagination;
 multi-table audience reads use one repeatable-read snapshot.
 
-**Planned:** per-host gateway sessions and deployment configuration must be
-wired before shared instances can serve users.
+The gateway classifies each request by its public host. Browser flows and
+sessions are bound to that host, and shared hosts resolve their endpoint label
+through the manager. The chart configures the shared domain, reserved labels,
+gateway exposure and TLS alongside the personal host.
 
 Shared route resolution uses `Target::{Personal, Shared { label }}`. An omitted
 target decodes as personal, and the gateway still omits its personal target on
@@ -465,11 +467,12 @@ new value.
 
 ### Routing
 
-`hermes-gateway` handles every request on the Hermes hostname
+`hermes-gateway` handles requests on the personal and shared-agent hostnames
 (`gateway.openapi.yaml`):
 
 Before session lookup, a pure authority classifier compares each request with the
-configured public origin. It normalizes ASCII hostname case and default HTTPS
+configured public origin and the permitted labels under the agent domain. It
+normalizes ASCII hostname case and default HTTPS
 port 443, refuses missing or duplicate HTTP/1 `Host`, userinfo, trailing dots,
 foreign hosts or ports, and `Host`/URI-authority disagreements with
 `421 misdirected_request`. HTTP/2 uses `:authority`; any `Host` must agree.
@@ -482,9 +485,10 @@ is exempt so infrastructure probes can address the Service directly.
    `Host`, `X-Forwarded-Host` and `X-Forwarded-Proto` itself.
 2. Require a valid server-side session. The gateway uses OIDC authorization
    code with S256 PKCE, state and nonce; the session record holds encrypted
-   provider tokens, and provider state is refreshed at most every 60 s. A
-   valid session may be reused for 5 s per cookie pair.
-3. Resolve `(issuer, subject)` via `POST /internal/v1/routes/resolve` over
+   provider tokens, and provider state is refreshed at most every 60 s. Flows,
+   browser proofs and sessions are bound to their classified host; the OIDC
+   callback uses that host. A valid session may be reused for 5 s per cookie pair.
+3. Resolve `(issuer, subject, target)` via `POST /internal/v1/routes/resolve` over
    mTLS, with a 2 s deadline. A ready decision may be cached for 5 s per
    session; no other decision is cached. The resolver reads the registry on
    every call: a route needs an enabled assignment and a ready instance whose
@@ -492,14 +496,15 @@ is exempt so infrastructure probes can address the Service directly.
 4. Proxy to `hermes.<namespace>.svc:8080`. That destination is built only
    from the resolver response, and must be exactly the instance's own
    namespace in this installation.
-5. Filter `Set-Cookie` so no backend can set the reserved platform cookies.
+5. Filter `Set-Cookie` so no backend can set the reserved platform cookies;
+   shared hosts also reject cookies with a `Domain` attribute.
 
 Only exact platform cookie names are read as credentials, with duplicate exact
 names refused. Every other name containing `hermes-platform` is ignored and
 stripped, preventing a sibling's parent-domain cookie from denying access.
 
 WebSockets are spliced after the upgrade: the gateway passes bytes unchanged,
-so native heartbeats and extensions work, and it requires the exact public
+so native heartbeats and extensions work, and it requires the exact classified
 `Origin` on the handshake. WebSockets and streamed responses without a length
 are re-checked every 5 s against the session and the resolver. They end when
 the session ends, when the decision is no longer the same route (instance,
@@ -507,10 +512,16 @@ route generation and authorization version), or after two consecutive failed
 checks; the second check follows the first failure after 1 s, so a failure
 ends them within 10 s.
 
-`pending` responses become an owner-only status page, `denied` a `403` page and
+`pending` responses become an authorized-user-only status page, `denied` a `403` page and
 `unavailable` a `503` page; requests that are not page loads get the same
 statuses as JSON. Native callbacks are forwarded only with a valid platform
-session that resolves to the same owner.
+session that resolves to the selected instance. Shared hosts use distinct
+host-only platform cookies and clear native cookies on a new platform session.
+
+The gateway validates certificate coverage for the personal host and the
+shared wildcard at startup. It checks for replacements every 60 seconds;
+valid replacements apply to new connections, while an invalid replacement
+leaves the current certificate and existing connections in place.
 
 Platform sessions are sealed in PostgreSQL under the gateway's session keyring.
 New sessions use the active key; every key still listed opens the sessions
@@ -554,7 +565,7 @@ network peers are untrusted.
 
 | Threat | Controls |
 | --- | --- |
-| A user reaches another owner's instance | Gateway routes only by verified identity to a registered namespace; NetworkPolicy admits only the gateway to native ports |
+| A user reaches an unauthorized instance | Gateway resolves the verified identity and personal or shared target to a registered namespace; NetworkPolicy admits only the gateway to native ports |
 | Forged identity or routing headers | Stripped by the gateway; instances reachable only from the gateway |
 | Compromised Hermes instance | No Kubernetes token; execution credential scoped server-side to that instance; NetworkPolicy allows only the execution API, its own workers and approved egress |
 | Compromised terminal backend | No credentials beyond its mounts and keys; SSH ingress only from its Hermes and the controller |
@@ -567,7 +578,7 @@ network peers are untrusted.
 | Stale authorization after revoke | 5 s freshness bound; execution credential revoked in the same transaction |
 | Secret leakage | Sealed at rest; write-only API; no values in responses, audit, logs or errors. A delivered admin secret is readable by its owner's agent; give each person their own provider key, or use a model gateway that issues per-person keys, rather than sharing one |
 | Admin CSRF or cross-origin attacks | Separate admin hostname; host-only `SameSite` cookies; `Origin` check and CSRF token on mutations |
-| A page of a sibling host acting with an owner's cookies | The gateway refuses requests that can change state, and WebSocket upgrades, whose `Origin` is not the public origin; a refused logout expires no cookie |
+| A page of a sibling host acting with another host's cookies | The gateway binds sessions to hosts and refuses state-changing requests and WebSocket upgrades whose `Origin` differs from the classified host; a refused logout expires no cookie |
 
 ### Static admission policies
 
