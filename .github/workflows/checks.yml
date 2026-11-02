@@ -177,8 +177,6 @@ jobs:
         run: rustup toolchain install 1.99.1 --profile minimal
       - name: Build reviewed context and verify non-root native startup and crash recovery
         run: uv run python -m tests.personal_hermes.native_runtime --build
-      - name: Verify native owner pin against the real Hermes provider
-        run: uv run python tests/personal_hermes/native_owner.py
       - name: Verify the installed image as collected cases
         run: HERMES_TEST_NATIVE_IMAGE=personal-hermes-native-test:local uv run python -m tests.support.verification run python-native --output .local/verification/python-native.json
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4

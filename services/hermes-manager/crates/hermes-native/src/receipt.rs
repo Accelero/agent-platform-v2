@@ -37,13 +37,22 @@ pub fn canonical(value: &Value) -> String {
 
 /// What `personal-init.py` binds the home to.
 pub fn binding_record(binding: &InitBinding) -> Value {
-    let owner = json!({"issuer": binding.owner.issuer, "subject": binding.owner.subject});
+    let (version, key, principal) = match &binding.binding {
+        hermes_core::domain::shared::InstanceBinding::Personal(owner) => (
+            1,
+            "ownerDigest",
+            json!({"issuer": owner.issuer, "subject": owner.subject}),
+        ),
+        hermes_core::domain::shared::InstanceBinding::Shared { agent_id } => {
+            (2, "agentDigest", json!({"agentId": agent_id}))
+        }
+    };
     json!({
-        "schemaVersion": 1,
+        "schemaVersion": version,
         "installationId": binding.installation_id.to_string(),
         "instanceId": binding.instance_id.to_string(),
         "materialId": binding.material_id.to_string(),
-        "ownerDigest": hex(&Sha256::digest(canonical(&owner).as_bytes())),
+        key: hex(&Sha256::digest(canonical(&principal).as_bytes())),
     })
 }
 
@@ -124,10 +133,10 @@ mod tests {
             installation_id: Uuid::new_v4(),
             instance_id: Uuid::new_v4(),
             material_id: Uuid::new_v4(),
-            owner: Identity {
+            binding: hermes_core::domain::shared::InstanceBinding::Personal(Identity {
                 issuer: "https://sso.example.org/realms/agents".into(),
                 subject: "Owner-A".into(),
-            },
+            }),
         }
     }
 
@@ -136,14 +145,22 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("home");
         std::fs::create_dir(&root).unwrap();
-        let context = json!({
+        let mut context = json!({
             "schemaVersion": 1,
             "installationId": binding.installation_id.to_string(),
             "instanceId": binding.instance_id.to_string(),
             "materialId": binding.material_id.to_string(),
-            "owner": {"issuer": binding.owner.issuer, "subject": binding.owner.subject},
             "template": {"id": "personal-default", "version": 1},
         });
+        match &binding.binding {
+            hermes_core::domain::shared::InstanceBinding::Personal(owner) => {
+                context["owner"] = json!({"issuer": owner.issuer, "subject": owner.subject})
+            }
+            hermes_core::domain::shared::InstanceBinding::Shared { agent_id } => {
+                context["schemaVersion"] = json!(2);
+                context["agent"] = json!({"id": agent_id});
+            }
+        }
         let files = [
             ("context.json", context.to_string()),
             (
@@ -198,7 +215,11 @@ mod tests {
         assert!(verify(key.as_bytes(), &binding, &receipt));
 
         let mut other_owner = binding.clone();
-        other_owner.owner.subject = "owner-a".into();
+        if let hermes_core::domain::shared::InstanceBinding::Personal(owner) =
+            &mut other_owner.binding
+        {
+            owner.subject = "owner-a".into();
+        }
         assert!(
             !verify(key.as_bytes(), &other_owner, &receipt),
             "subjects are case-sensitive"
@@ -218,5 +239,25 @@ mod tests {
             &binding,
             &"x".repeat(MAX_RECEIPT + 1)
         ));
+    }
+    #[test]
+    fn a_shared_initializer_receipt_is_bound_to_the_agent_and_kind() {
+        let mut shared = binding();
+        shared.binding = hermes_core::domain::shared::InstanceBinding::Shared {
+            agent_id: Uuid::new_v4(),
+        };
+        let key = "ab".repeat(32);
+        let receipt = initialize(&shared, &key);
+        assert!(verify(key.as_bytes(), &shared, &receipt));
+        let mut other = shared.clone();
+        other.binding = hermes_core::domain::shared::InstanceBinding::Shared {
+            agent_id: Uuid::new_v4(),
+        };
+        assert!(!verify(key.as_bytes(), &other, &receipt));
+        other.binding = binding().binding;
+        assert!(!verify(key.as_bytes(), &other, &receipt));
+        let mut other_material = shared.clone();
+        other_material.material_id = Uuid::new_v4();
+        assert!(!verify(key.as_bytes(), &other_material, &receipt));
     }
 }

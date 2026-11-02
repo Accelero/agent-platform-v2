@@ -54,7 +54,7 @@ def instance(tmp_path_factory):
 
 
 @pytest.mark.security
-def test_an_image_without_the_mounted_policies_refuses_unowned_login_and_execution():
+def test_an_image_without_the_mounted_policies_refuses_startup_and_execution():
     docker(
         [
             "run",
@@ -83,20 +83,23 @@ def test_an_image_without_the_mounted_policies_refuses_unowned_login_and_executi
                 import os
                 from hermes_cli._platform_terminal_policy import (
                     enforce_backend, managed_directory)
-                from plugins.dashboard_auth.self_hosted import SelfHostedOIDCProvider
-                # Environment pins cannot stand in for the mounted owner policy.
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(
+                    "personal_run", "/usr/local/lib/personal-run.py")
+                supervisor = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(supervisor)
+                # Startup and terminal execution require the instance mounts.
                 os.environ['HERMES_DASHBOARD_EXPECTED_ISSUER'] = '{ISSUER}'
                 os.environ['HERMES_DASHBOARD_EXPECTED_SUBJECT'] = 'owner-a'
                 for operation in [
                     lambda: enforce_backend('local'),
                     lambda: enforce_backend('managed_execution'),
                     managed_directory,
-                    lambda: SelfHostedOIDCProvider(
-                        issuer='{ISSUER}', client_id='native-hermes'),
+                    supervisor.environment,
                 ]:
                     try:
                         operation()
-                    except (RuntimeError, ValueError):
+                    except (RuntimeError, ValueError, OSError):
                         pass
                     else:
                         raise AssertionError('Missing instance policy was accepted')
@@ -295,7 +298,7 @@ def test_a_profile_cannot_choose_another_backend_or_redirect_the_connection(inst
 
 
 @pytest.mark.security
-def test_the_native_dashboard_requires_the_owner_login_and_reveals_no_session_token(
+def test_the_native_dashboard_requires_native_login_and_reveals_no_session_token(
     instance,
 ):
     instance.check(
@@ -415,3 +418,37 @@ def test_an_instance_whose_supervisor_exits_is_reported_not_waited_for(layout):
         docker(["kill", running.name], timeout=15)
         with pytest.raises(CommandFailed, match="exited before readiness"):
             running.wait_ready(HEALTH, seconds=5)
+
+
+@pytest.mark.security
+def test_user_dotenv_cannot_override_native_authentication(instance):
+    """A retained home cannot change the rendered issuer or add providers."""
+    instance.check(
+        script(
+            """
+            import os, pathlib
+            from hermes_cli.env_loader import load_hermes_dotenv
+            path = pathlib.Path('/opt/data/.env')
+            previous = path.read_bytes() if path.exists() else None
+            try:
+                path.write_text('HERMES_DASHBOARD_OIDC_ISSUER=https://foreign.example/realm\\n'
+                    'HERMES_DASHBOARD_OAUTH_CLIENT_ID=agent:foreign\\n'
+                    'HERMES_DASHBOARD_BASIC_AUTH_USERNAME=foreign\\n'
+                    'HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=foreign\\n')
+                os.environ['HERMES_MANAGED_DIR'] = '/run/hermes/execution-ca'
+                os.environ['HERMES_DASHBOARD_OIDC_ISSUER'] = 'https://sso.example.org/realms/agents'
+                os.environ.pop('HERMES_DASHBOARD_OAUTH_CLIENT_ID', None)
+                os.environ.pop('HERMES_DASHBOARD_BASIC_AUTH_USERNAME', None)
+                load_hermes_dotenv(hermes_home='/opt/data', load_external_secrets=False)
+                assert os.environ['HERMES_DASHBOARD_OIDC_ISSUER'] == 'https://sso.example.org/realms/agents'
+                assert not os.environ.get('HERMES_DASHBOARD_OAUTH_CLIENT_ID')
+                assert not os.environ.get('HERMES_DASHBOARD_BASIC_AUTH_USERNAME')
+            finally:
+                if previous is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(previous)
+            """
+        ),
+        timeout=30,
+    )

@@ -14,8 +14,8 @@ export const registry = [
   },
   {
     id: "urn:hermes-manager:hermes-managed:1",
-    revision: 1,
-    digest: "81fb2d4375fa38c746cc90a73aa8938f61217fffdf60572fda7f9ed9c2a418b7",
+    revision: 2,
+    digest: "840bf84721906f19e634a890e077fdbaf0f654af9bb639a46d3acfa37d1cfb63",
     compatibleImageDigests: [
       "sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db",
     ],
@@ -369,14 +369,36 @@ export const schemas = {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "urn:hermes-manager:hermes-managed:1",
     title: "Reviewed personal Hermes managed settings",
-    "x-revision": 1,
+    "x-revision": 2,
     "x-compatibleImageDigests": [
       "sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db",
     ],
     description:
-      "Reviewed terminal and plugin policy from the pinned personal runtime. Other keys are preserved and explicitly unvalidated.",
+      "Reviewed terminal, plugin and dashboard authentication policy from the pinned personal runtime. Other keys are preserved and explicitly unvalidated.",
     type: "object",
     properties: {
+      dashboard: {
+        description:
+          "Native authentication and the public URL are platform-owned; other dashboard settings are retained.",
+        type: "object",
+        properties: {
+          basic_auth: {
+            description:
+              "Native basic authentication is managed by the platform.",
+            not: {},
+          },
+          public_url: {
+            description: "The public URL is managed by the platform.",
+            not: {},
+          },
+          oauth: {
+            description:
+              "Native OIDC configuration is managed by the platform.",
+            not: {},
+          },
+        },
+        additionalProperties: true,
+      },
       terminal: {
         description:
           "Hermes terminal settings. The platform owns backend and the connection settings (manager_url, token_file, ca_file, ssh_key); other terminal keys are kept as given.",

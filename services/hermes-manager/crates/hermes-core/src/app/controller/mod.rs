@@ -28,13 +28,13 @@ use crate::domain::execution::{
     EnvironmentContext, EnvironmentState, EnvironmentView, Invocation, ObservedWorker, SshCheck,
     WorkerFailure, WorkerStep, plan_environment,
 };
-use crate::domain::identity::Identity;
 use crate::domain::instances::{
     self, Apply, BlockedReason, InstanceStatus, NativeCheck, Observed, Plan, Precondition, Wanted,
 };
 use crate::domain::materials::MaterialPurpose;
 use crate::domain::orphans::{self, Orphan, OwnedObject};
 use crate::domain::secrets::{SecretKind, SecretReference};
+use crate::domain::shared::InstanceBinding;
 use crate::domain::storage::VolumeSpec;
 use crate::domain::templates::TemplateDefinition;
 
@@ -167,7 +167,7 @@ pub struct InitBinding {
     pub installation_id: Uuid,
     pub instance_id: Uuid,
     pub material_id: Uuid,
-    pub owner: Identity,
+    pub binding: InstanceBinding,
 }
 
 /// One environment the controller manages: not retired.
@@ -777,12 +777,7 @@ impl<S: InstanceStore, C: Cluster, V: Vault, N: Native> Controller<S, C, V, N> {
             installation_id: self.settings.installation.id,
             instance_id: desired.instance_id,
             material_id: row.id,
-            owner: match &desired.binding {
-                crate::domain::shared::InstanceBinding::Personal(owner) => owner.clone(),
-                crate::domain::shared::InstanceBinding::Shared { .. } => {
-                    return Ok(NativeCheck::ReceiptInvalid);
-                }
-            },
+            binding: desired.binding.clone(),
         };
         if !self.native.receipt_valid(&key, &binding, receipt) {
             return Ok(NativeCheck::ReceiptInvalid);

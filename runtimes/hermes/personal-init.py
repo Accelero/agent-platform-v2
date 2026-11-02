@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-SCHEMA = 1
 META = ".agent-platform"
 # The refusals of a home that carries no proof of being this owner's. The
 # initializer never changes such a home; it leaves one of these codes, and only
@@ -45,44 +44,56 @@ def canonical(value):
 
 
 def checked_context(value):
-    if (
-        not isinstance(value, dict)
-        or set(value)
-        != {
-            "schemaVersion",
-            "installationId",
-            "instanceId",
-            "materialId",
-            "owner",
-            "template",
-        }
-        or type(value["schemaVersion"]) is not int
-        or value["schemaVersion"] != SCHEMA
-    ):
+    if not isinstance(value, dict) or type(value.get("schemaVersion")) is not int:
+        raise ValueError("invalid_initialization_context")
+    version = value["schemaVersion"]
+    if version not in (1, 2):
+        raise ValueError("invalid_initialization_context")
+    principal = "owner" if version == 1 else "agent"
+    if set(value) != {
+        "schemaVersion",
+        "installationId",
+        "instanceId",
+        "materialId",
+        principal,
+        "template",
+    }:
         raise ValueError("invalid_initialization_context")
     for key in ("installationId", "instanceId", "materialId"):
         parsed = uuid.UUID(value[key])
         if parsed.int == 0 or str(parsed) != value[key]:
             raise ValueError("invalid_initialization_context")
-    owner = value["owner"]
-    if not isinstance(owner, dict) or set(owner) != {"issuer", "subject"}:
-        raise ValueError("invalid_initialization_context")
-    issuer, subject = owner["issuer"], owner["subject"]
-    parsed = urlsplit(issuer)
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-        or len(issuer) > 2048
-        or issuer != issuer.strip()
-        or any(ord(c) < 33 for c in issuer)
-        or not 1 <= len(subject) <= 255
-        or not all(33 <= ord(c) <= 126 for c in subject)
-    ):
-        raise ValueError("invalid_initialization_context")
+    if version == 1:
+        owner = value["owner"]
+        if not isinstance(owner, dict) or set(owner) != {"issuer", "subject"}:
+            raise ValueError("invalid_initialization_context")
+        issuer, subject = owner["issuer"], owner["subject"]
+        if not isinstance(issuer, str) or not isinstance(subject, str):
+            raise ValueError("invalid_initialization_context")
+        parsed = urlsplit(issuer)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or len(issuer) > 2048
+            or issuer != issuer.strip()
+            or any(ord(c) < 33 for c in issuer)
+            or not 1 <= len(subject) <= 255
+            or not all(33 <= ord(c) <= 126 for c in subject)
+        ):
+            raise ValueError("invalid_initialization_context")
+        digest_key, digest_input = "ownerDigest", owner
+    else:
+        agent = value["agent"]
+        if not isinstance(agent, dict) or set(agent) != {"id"}:
+            raise ValueError("invalid_initialization_context")
+        parsed = uuid.UUID(agent["id"])
+        if parsed.int == 0 or str(parsed) != agent["id"]:
+            raise ValueError("invalid_initialization_context")
+        digest_key, digest_input = "agentDigest", {"agentId": agent["id"]}
     template = value["template"]
     if (
         not isinstance(template, dict)
@@ -93,11 +104,11 @@ def checked_context(value):
     ):
         raise ValueError("invalid_initialization_context")
     return {
-        "schemaVersion": SCHEMA,
+        "schemaVersion": version,
         "installationId": value["installationId"],
         "instanceId": value["instanceId"],
         "materialId": value["materialId"],
-        "ownerDigest": hashlib.sha256(canonical(owner)).hexdigest(),
+        digest_key: hashlib.sha256(canonical(digest_input)).hexdigest(),
     }
 
 

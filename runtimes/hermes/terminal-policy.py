@@ -40,6 +40,30 @@ def managed_directory():
     return MANAGED_DIR
 
 
+def filter_dashboard_auth(assignments):
+    """Keep user dotenv files from replacing the rendered native auth policy."""
+    try:
+        load_policy()
+    except RuntimeError:
+        # Outside a managed instance, preserve the upstream dotenv behavior.
+        return assignments
+    prefixes = (
+        "HERMES_DASHBOARD_BASIC_AUTH_",
+        "HERMES_DASHBOARD_OAUTH_",
+        "HERMES_DASHBOARD_OIDC_",
+    )
+    names = {
+        "HERMES_DASHBOARD_PUBLIC_URL",
+        "HERMES_DASHBOARD_PORTAL_URL",
+        "HERMES_DASHBOARD_SESSION_TOKEN",
+    }
+    return [
+        (name, value)
+        for name, value in assignments
+        if name not in names and not name.startswith(prefixes)
+    ]
+
+
 def terminal_override(name):
     policy = load_policy()
     from hermes_cli.config import TERMINAL_CONFIG_ENV_MAP, _terminal_env_value

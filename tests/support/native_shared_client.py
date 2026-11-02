@@ -265,6 +265,25 @@ def two_users():
             assert connection.ping(b"shared-native").wait(timeout=10), "no native pong"
 
 
+def providers():
+    with ExitStack() as stack:
+        browser = Browser()
+        stack.callback(browser.close)
+        response = browser.request("GET", HOSTS[0], "/api/auth/providers")
+        assert [p["name"] for p in response.json()["providers"]] == ["self-hosted"]
+        refused = browser.request(
+            "POST",
+            HOSTS[0],
+            "/auth/password-login",
+            json={"username": "local-fixture", "password": "local-fixture-password"},
+            allow_redirects=False,
+        )
+        assert not 200 <= refused.status_code < 300
+        assert browser.request("GET", HOSTS[0], "/api/auth/me").status_code == 401
+        browser.login(HOSTS[0], "bob")
+        browser.me(HOSTS[0], BOB)
+
+
 def source():
     import plugins.dashboard_auth.self_hosted as provider
 
@@ -435,6 +454,7 @@ if __name__ == "__main__":
                 "ready_unregistered": lambda: ready(unregistered=True),
                 "two_users": two_users,
                 "source": source,
+                "providers": providers,
                 "selector": selector,
                 "parallel": parallel,
                 "provider_native_only": lambda: provider_sessions("native-only"),

@@ -118,3 +118,20 @@ def test_image_plugin_cannot_be_shadowed_or_disabled(policy):
             policy.required_manifest(shadow)
     with pytest.raises(RuntimeError, match="unavailable"):
         policy.trusted_manifests(shadows)
+
+
+def test_managed_dotenv_preserves_user_settings_but_not_native_auth(policy):
+    entries = [
+        ("HERMES_DASHBOARD_OIDC_ISSUER", "foreign"),
+        ("HERMES_DASHBOARD_OIDC_CLIENT_SECRET", "foreign"),
+        ("HERMES_DASHBOARD_OAUTH_CLIENT_ID", "foreign"),
+        ("HERMES_DASHBOARD_BASIC_AUTH_USERNAME", "foreign"),
+        ("HERMES_DASHBOARD_PUBLIC_URL", "foreign"),
+        ("HERMES_DASHBOARD_PORTAL_URL", "foreign"),
+        ("HERMES_DASHBOARD_SESSION_TOKEN", "foreign"),
+        ("HERMES_DASHBOARD_THEME", "dark"),
+        ("MODEL_NAME", "retained"),
+    ]
+    assert policy.filter_dashboard_auth(entries) == entries
+    enable(policy)
+    assert policy.filter_dashboard_auth(entries) == entries[-2:]

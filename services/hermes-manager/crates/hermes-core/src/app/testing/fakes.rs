@@ -462,7 +462,14 @@ impl Native for FakeNative {
                 key.expose(),
                 binding.material_id,
                 binding.instance_id,
-                &binding.owner.subject,
+                &match &binding.binding {
+                    crate::domain::shared::InstanceBinding::Personal(identity) => {
+                        identity.subject.clone()
+                    }
+                    crate::domain::shared::InstanceBinding::Shared { agent_id } => {
+                        agent_id.to_string()
+                    }
+                },
             )
     }
 

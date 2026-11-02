@@ -1,8 +1,8 @@
-"""Disposable native multi-user proof, before changing the release image.
+"""Disposable multi-user proof on the project image, with real v2 shared homes.
 
-The test derivative restores only the pinned upstream OIDC provider. Everything
-else comes from HERMES_TEST_NATIVE_IMAGE, including initialization, the home
-binding, the managed terminal and the non-root supervisor. No port is published.
+The production native provider, initializer, terminal policy and non-root
+supervisor run on an isolated network. The controller's real probe reaches
+the instance's private fixture address; no port is published.
 """
 
 from __future__ import annotations
@@ -37,52 +37,11 @@ UPSTREAM = (
 PROVIDER_SHA256 = "31b46690fb333fffa1524a63a54225ecc6c8731dcbfdfac95ea7647816cdbf5e"
 
 
-def test_image(cleanup: Cleanup):
-    """A local test image; never tag or publish it as a release."""
+def test_image(_cleanup: Cleanup):
+    """Use the project image directly; its native provider must hash to upstream."""
     dockerfile = Path(__file__).resolve().parents[2] / "runtimes/hermes/Dockerfile"
-    assert f"ARG HERMES_IMAGE={UPSTREAM}\n" in dockerfile.read_text(), (
-        "review the native shared fixture when the pinned upstream image changes"
-    )
-    run = new_run()
-    name = f"shared-hermes-native:{run}"
-    docker(
-        [
-            "build",
-            "--quiet",
-            "--label",
-            f"{FIXTURE}={FIXTURE_KIND}",
-            "--label",
-            f"{RUN}={run}",
-            "--build-arg",
-            f"BASE={image()}",
-            "--build-arg",
-            f"UPSTREAM={UPSTREAM}",
-            "--tag",
-            name,
-            "-",
-        ],
-        data=b"""ARG UPSTREAM
-ARG BASE
-FROM ${UPSTREAM} AS upstream
-FROM ${BASE}
-USER root
-COPY --from=upstream /opt/hermes/plugins/dashboard_auth/self_hosted/__init__.py \\
-    /opt/hermes/plugins/dashboard_auth/self_hosted/__init__.py
-RUN rm -f /opt/hermes/plugins/dashboard_auth/self_hosted/_platform_owner.py
-USER 1000:1000
-""",
-        timeout=300,
-    )
-    identifier = (
-        docker(["image", "inspect", "--format", "{{.Id}}", name]).decode().strip()
-    )
-
-    def remove():
-        require_fixture(name, FIXTURE_KIND, run)
-        docker(["image", "rm", name], timeout=60)
-
-    cleanup.add(name, remove)
-    return identifier
+    assert f"ARG HERMES_IMAGE={UPSTREAM}\n" in dockerfile.read_text()
+    return image()
 
 
 def tls(directory: Path):
@@ -146,6 +105,9 @@ class SharedNative:
         *,
         rotate=False,
         unregistered=False,
+        personal=False,
+        seed_providers=False,
+        expose_probe=False,
     ):
         self.run = new_run()
         self.cleanup = cleanup
@@ -215,15 +177,56 @@ class SharedNative:
             directory = root / f"instance-{index}"
             directory.mkdir()
             layout = Layout(directory)
-            layout.context["owner"] = {"issuer": ISSUER, "subject": SUBJECTS["bob"]}
+            if personal:
+                layout.context["owner"] = {"issuer": ISSUER, "subject": SUBJECTS["bob"]}
+            else:
+                layout.context.pop("owner")
+                layout.context["schemaVersion"] = 2
+                layout.context["agent"] = {"id": layout.context["instanceId"]}
+            layout.managed["dashboard"] = {
+                "basic_auth": {
+                    "username": "",
+                    "password": "",
+                    "password_hash": "",
+                    "secret": "",
+                },
+                "oauth": {"client_id": "", "portal_url": ""},
+            }
+            layout.write_managed()
             (directory / "owner/context.json").write_text(json.dumps(layout.context))
             shutil.copyfile(root / "tls/ca.crt", directory / "trust/oidc-ca.crt")
             # Use the installed initializer, with precisely the production mounts.
             layout.initialize()
+            if seed_providers:
+                configuration = dict(layout.config)
+                configuration["dashboard"] = {
+                    "basic_auth": {
+                        "username": "local-fixture",
+                        "password": "local-fixture-password",
+                        "secret": "ab" * 32,
+                    },
+                    "oauth": {
+                        "client_id": "agent:fixture",
+                        "portal_url": "https://unreachable.shared.test",
+                        "self_hosted": {
+                            "issuer": "https://unreachable.shared.test/realm",
+                            "client_id": "wrong-fixture-client",
+                            "client_secret": "wrong-fixture-secret",
+                        },
+                    },
+                }
+                (directory / "home/config.yaml").write_text(json.dumps(configuration))
+                (directory / "home/.env").write_text(
+                    "HERMES_DASHBOARD_OIDC_ISSUER=https://unreachable.shared.test/realm\n"
+                    "HERMES_DASHBOARD_OIDC_CLIENT_ID=wrong-fixture-client\n"
+                    "HERMES_DASHBOARD_OAUTH_CLIENT_ID=agent:fixture\n"
+                    "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=local-fixture\n"
+                    "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=local-fixture-password\n"
+                )
             common = layout.common()
             # Replace the networkless default with this isolated network.
             del common[:2]
-            self.start(
+            name = self.start(
                 f"native-{index}",
                 derivative,
                 [
@@ -232,6 +235,8 @@ class SharedNative:
                     f"native-{index}",
                     "--env",
                     f"HERMES_DASHBOARD_OIDC_ISSUER={ISSUER}",
+                    "--env",
+                    f"HERMES_PLATFORM_OIDC_ISSUER={ISSUER}",
                     "--env",
                     "HERMES_DASHBOARD_OIDC_CLIENT_ID=hermes-native",
                     "--env",
@@ -243,6 +248,8 @@ class SharedNative:
                 ],
                 ["/usr/local/lib/personal-run.py"],
             )
+            if expose_probe and index == 0:
+                self.probe_container = name
             self.layouts.append(layout)
         self.driver = self.start(
             "driver",
@@ -273,6 +280,18 @@ class SharedNative:
             ["/client.py", "proxy"],
         )
         self.wait_ready()
+        if expose_probe:
+            networks = json.loads(
+                docker(
+                    [
+                        "inspect",
+                        "--format",
+                        "{{json .NetworkSettings.Networks}}",
+                        self.probe_container,
+                    ]
+                )
+            )
+            self.probe_address = networks[self.network]["IPAddress"]
 
     def remove_network(self):
         labels = json.loads(
@@ -307,6 +326,28 @@ class SharedNative:
 
         self.cleanup.add(name, remove)
         return name
+
+    def check_probe(self):
+        """Run the controller's unmodified probe against the real instance."""
+        manager = Path(__file__).resolve().parents[2] / "services/hermes-manager"
+        subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--quiet",
+                "--locked",
+                "-p",
+                "hermes-native",
+                "--example",
+                "probe_fixture",
+                "--",
+                f"http://{self.probe_address}:9119/",
+            ],
+            cwd=manager,
+            capture_output=True,
+            check=True,
+            timeout=180,
+        )
 
     def check(self, case, *, timeout=90):
         result = subprocess.run(

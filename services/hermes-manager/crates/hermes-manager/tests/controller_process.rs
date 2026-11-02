@@ -195,6 +195,7 @@ impl Fixture {
             oidc_ca_pem: None,
             native_client_id: "hermes-native".into(),
             public_origin: "https://hermes.example.org/".into(),
+            agent_domain: None,
             service_egress: Vec::new(),
             public_https: false,
         }

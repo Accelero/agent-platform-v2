@@ -17,23 +17,37 @@ pytestmark = [pytest.mark.integration, pytest.mark.native]
 
 
 @pytest.fixture(scope="module")
-def derivative():
+def runtime_image():
     with Cleanup() as cleanup:
         yield build_test_image(cleanup)
 
 
 @pytest.fixture
-def shared(tmp_path, derivative, request):
+def shared(tmp_path, runtime_image, request):
     with Cleanup() as cleanup:
         yield SharedNative(
-            tmp_path, derivative, cleanup, rotate=getattr(request, "param", False)
+            tmp_path, runtime_image, cleanup, rotate=getattr(request, "param", False)
         )
 
 
 @pytest.fixture
-def callbacks(tmp_path, derivative):
+def callbacks(tmp_path, runtime_image):
     with Cleanup() as cleanup:
-        yield SharedNative(tmp_path, derivative, cleanup, unregistered=True)
+        yield SharedNative(tmp_path, runtime_image, cleanup, unregistered=True)
+
+
+@pytest.fixture
+def personal_native(tmp_path, runtime_image):
+    with Cleanup() as cleanup:
+        yield SharedNative(tmp_path, runtime_image, cleanup, personal=True)
+
+
+@pytest.fixture
+def retained_providers(tmp_path, runtime_image):
+    with Cleanup() as cleanup:
+        yield SharedNative(
+            tmp_path, runtime_image, cleanup, seed_providers=True, expose_probe=True
+        )
 
 
 def test_two_users_log_in_and_hold_native_websockets_on_one_instance(shared):
@@ -41,8 +55,9 @@ def test_two_users_log_in_and_hold_native_websockets_on_one_instance(shared):
     shared.check("two_users")
 
 
-def test_upstream_login_keeps_the_terminal_selector_and_home_binding(shared):
+def test_upstream_login_keeps_the_terminal_selector_and_home_binding(personal_native):
     """SH-N02: non-owner login; exact upstream provider; foreign data refused."""
+    shared = personal_native
     assert shared.check("source").decode().strip() == PROVIDER_SHA256
     shared.check("selector")
     shared.check("two_users")
@@ -83,3 +98,9 @@ def test_keycloak_sso_depends_on_remaining_client_sessions(shared, mode):
 def test_exact_callbacks_and_native_features_through_the_forwarded_host(callbacks):
     """SH-N05: exact callback, unregistered refusal and native API functionality."""
     callbacks.check("callback")
+
+
+def test_retained_configuration_cannot_add_native_login_providers(retained_providers):
+    """SH-N03: only rendered self-hosted login survives the managed layer."""
+    retained_providers.check("providers")
+    retained_providers.check_probe()

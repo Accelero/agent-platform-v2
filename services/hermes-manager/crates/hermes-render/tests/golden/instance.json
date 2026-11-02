@@ -582,7 +582,7 @@
     "data": {
       ".env": "TERMINAL_ENV=managed_execution\n",
       "ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBfixture\n-----END CERTIFICATE-----\n",
-      "config.yaml": "{\"model\":{\"provider\":\"custom\"},\"plugins\":{\"disabled\":[],\"enabled\":[\"managed_execution\"],\"entries\":{\"managed_execution\":{\"settings\":{\"acquire_timeout_seconds\":180,\"ca_file\":\"/run/hermes/execution-ca/ca.crt\",\"manager_url\":\"https://hermes-manager-api.hermes-system.svc:8443/execution\",\"mode\":\"per_profile_on_demand\",\"runtime_id\":\"python-tools\",\"ssh_key\":\"/run/hermes/credentials/id_ed25519\",\"token_file\":\"/run/hermes/credentials/execution-client-token\"}}}},\"terminal\":{\"backend\":\"managed_execution\",\"ssh_key\":\"/run/hermes/credentials/id_ed25519\"}}"
+      "config.yaml": "{\"dashboard\":{\"basic_auth\":{\"password\":\"\",\"password_hash\":\"\",\"secret\":\"\",\"username\":\"\"},\"oauth\":{\"client_id\":\"\",\"portal_url\":\"\",\"self_hosted\":{\"client_secret\":\"\"}}},\"model\":{\"provider\":\"custom\"},\"plugins\":{\"disabled\":[],\"enabled\":[\"managed_execution\"],\"entries\":{\"managed_execution\":{\"settings\":{\"acquire_timeout_seconds\":180,\"ca_file\":\"/run/hermes/execution-ca/ca.crt\",\"manager_url\":\"https://hermes-manager-api.hermes-system.svc:8443/execution\",\"mode\":\"per_profile_on_demand\",\"runtime_id\":\"python-tools\",\"ssh_key\":\"/run/hermes/credentials/id_ed25519\",\"token_file\":\"/run/hermes/credentials/execution-client-token\"}}}},\"terminal\":{\"backend\":\"managed_execution\",\"ssh_key\":\"/run/hermes/credentials/id_ed25519\"}}"
     },
     "kind": "ConfigMap",
     "metadata": {
@@ -652,7 +652,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "agent-platform.io/config-digest": "9b153cb6a8753df0536eab6e1661c338987e6641a6914cefe75e4c47440027fb"
+            "agent-platform.io/config-digest": "e91fe5201a8ef314b6b47bcd0e96909ca1876e8f6074448defed5c9b5588a227"
           },
           "labels": {
             "agent-platform.io/installation": "7d6c0e1a-0000-4000-8000-000000000001",

@@ -14,8 +14,6 @@
       "root": ".",
       "files": [
         "runtimes/hermes/Dockerfile",
-        "runtimes/hermes/dashboard-owner.py",
-        "runtimes/hermes/patch-dashboard-owner.py",
         "runtimes/hermes/terminal-policy.py",
         "runtimes/hermes/patch-terminal-policy.py",
         "runtimes/hermes/managed-exec",

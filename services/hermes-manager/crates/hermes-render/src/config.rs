@@ -26,6 +26,15 @@ fn object<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String,
 /// Layers 1–3: platform-enforced settings over the merged admin settings.
 pub fn managed(config: &RenderConfig, desired: &DesiredInstance) -> Value {
     let mut managed = desired.admin_config.clone();
+    let dashboard = object(&mut managed, "dashboard");
+    dashboard.insert(
+        "basic_auth".into(),
+        json!({"username":"", "password":"", "password_hash":"", "secret":""}),
+    );
+    let oauth = object(dashboard, "oauth");
+    oauth.insert("client_id".into(), json!(""));
+    oauth.insert("portal_url".into(), json!(""));
+    oauth.insert("self_hosted".into(), json!({"client_secret": ""}));
     let terminal = object(&mut managed, "terminal");
     terminal.insert("backend".into(), json!(MANAGED_BACKEND));
     terminal.insert("ssh_key".into(), json!(SSH_KEY));

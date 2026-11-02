@@ -57,6 +57,7 @@ fn config() -> RenderConfig {
         oidc_ca_pem: None,
         native_client_id: "hermes-native".into(),
         public_origin: "https://hermes.example.org/".into(),
+        agent_domain: None,
         service_egress: Vec::new(),
         public_https: true,
     }
@@ -684,4 +685,102 @@ fn workers_refuse_backends_outside_the_contract() {
         worker::render(&config(), &desired, &environment, &backend).is_err(),
         "required slots must be bound"
     );
+}
+
+#[test]
+fn shared_instances_render_agent_binding_origin_and_enforced_login() {
+    use hermes_core::domain::shared::InstanceBinding;
+    let mut config = config();
+    config.agent_domain = Some("agents.example.org".into());
+    config.public_origin = "https://hermes.example.org:8443".into();
+    let mut desired = desired();
+    desired.binding = InstanceBinding::Shared {
+        agent_id: desired.assignment_id,
+    };
+    desired.endpoint_label = Some("engineering".into());
+    let objects = instance::render(
+        &config,
+        &desired,
+        &materials(),
+        &secrets("sk-fixture"),
+        Workload::Run,
+    )
+    .unwrap();
+    golden("shared-instance", &objects);
+    let context: Value = serde_json::from_str(
+        find(&objects, "ConfigMap", "hermes-owner")["data"]["context.json"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(context["schemaVersion"], 2);
+    assert_eq!(context["agent"]["id"], desired.assignment_id.to_string());
+    assert!(context.get("owner").is_none());
+    let deployment = find(&objects, "Deployment", "hermes");
+    let _: Deployment = typed(deployment);
+    let env = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        .as_array()
+        .unwrap();
+    let value = |name| {
+        env.iter().find(|e| e["name"] == name).unwrap()["value"]
+            .as_str()
+            .unwrap()
+    };
+    assert_eq!(
+        value("HERMES_DASHBOARD_PUBLIC_URL"),
+        "https://engineering.agents.example.org:8443"
+    );
+    assert_eq!(
+        value("HERMES_PLATFORM_OIDC_ISSUER"),
+        config.installation.issuer
+    );
+    let managed = hermes_render::config::managed(&config, &desired);
+    for name in ["username", "password", "password_hash", "secret"] {
+        assert_eq!(managed["dashboard"]["basic_auth"][name], "");
+    }
+    assert_eq!(managed["dashboard"]["oauth"]["client_id"], "");
+    let mut renamed = desired.clone();
+    renamed.endpoint_label = Some("engineers".into());
+    renamed.desired_generation += 1;
+    let after = instance::render(
+        &config,
+        &renamed,
+        &materials(),
+        &secrets("sk-fixture"),
+        Workload::Run,
+    )
+    .unwrap();
+    assert_eq!(
+        find(&after, "ConfigMap", "hermes-owner"),
+        find(&objects, "ConfigMap", "hermes-owner"),
+        "the home binding is independent of the hostname"
+    );
+    assert_ne!(
+        find(&after, "Deployment", "hermes")["spec"]["template"],
+        deployment["spec"]["template"]
+    );
+    let normalize_rename = |mut rendered: Vec<Object>| {
+        let deployment = rendered
+            .iter_mut()
+            .find(|object| object.kind == "Deployment" && object.name == "hermes")
+            .unwrap();
+        let body = &mut deployment.body;
+        body["metadata"]["annotations"]["agent-platform.io/desired-generation"] = Value::Null;
+        body["spec"]["template"]["metadata"]["annotations"]["agent-platform.io/config-digest"] =
+            Value::Null;
+        let env = body["spec"]["template"]["spec"]["containers"][0]["env"]
+            .as_array_mut()
+            .unwrap();
+        env.iter_mut()
+            .find(|entry| entry["name"] == "HERMES_DASHBOARD_PUBLIC_URL")
+            .unwrap()["value"] = Value::Null;
+        rendered
+    };
+    assert_eq!(
+        normalize_rename(objects),
+        normalize_rename(after),
+        "a hostname change affects only its URL, restart digest and generation"
+    );
+    config.agent_domain = None;
+    assert!(instance::render(&config, &desired, &materials(), &[], Workload::Run).is_err());
 }

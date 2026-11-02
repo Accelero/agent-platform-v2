@@ -160,7 +160,6 @@
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/personal_hermes/fake_model.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/personal_hermes/kubernetes.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/personal_hermes/native_e2e.py]": "unit",
-      "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/personal_hermes/native_owner.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/personal_hermes/native_runtime.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/personal_hermes/registry_proxy.py]": "unit",
       "tests/unit/test_dependencies.py::test_third_party_imports_are_declared_direct_dependencies[tests/support/__init__.py]": "unit",
@@ -369,7 +368,13 @@
       "tests/unit/test_verification.py::test_new_cases_and_changed_proving_levels_need_ledger_review": "unit",
       "tests/unit/test_verification.py::test_reports_do_not_follow_an_existing_symlink": "unit",
       "tests/unit/test_verification.py::test_reviewed_ledger_accounts_for_every_cited_helper": "unit",
-      "tests/unit/test_verification.py::test_unreviewed_parameter_values_are_not_written_to_reports": "unit"
+      "tests/unit/test_verification.py::test_unreviewed_parameter_values_are_not_written_to_reports": "unit",
+      "tests/integration/test_personal_init.py::test_a_shared_home_initializes_once_and_ignores_hostname_state": "integration",
+      "tests/integration/test_personal_init.py::test_shared_supervisor_checks_the_receipt_and_rendered_issuer": "integration",
+      "tests/integration/test_personal_init.py::test_shared_home_kind_and_agent_conflicts_leave_all_data_untouched[personal-to-shared]": "integration",
+      "tests/integration/test_personal_init.py::test_shared_home_kind_and_agent_conflicts_leave_all_data_untouched[shared-to-personal]": "integration",
+      "tests/integration/test_personal_init.py::test_shared_home_kind_and_agent_conflicts_leave_all_data_untouched[other-agent]": "integration",
+      "tests/unit/test_terminal_policy.py::test_managed_dotenv_preserves_user_settings_but_not_native_auth": "unit"
     },
     "rust": {
       "hermes-architecture/test:architecture::core_uses_only_reviewed_external_crates": "unit",
@@ -737,7 +742,9 @@
       "hermes-core/lib:hermes_core::domain::routing::tests::shared_decisions_check_endpoint_and_grant_before_readiness": "unit",
       "hermes-core/lib:hermes_core::app::testing::tests::shared_routes_read_current_explicit_audiences_without_provisioning": "unit",
       "hermes-store/lib:hermes_store::testing::contracts::shared_routes_read_current_explicit_audiences_without_provisioning": "integration",
-      "hermes-http/test:resolver_api::shared_targets_require_current_grants_and_keep_personal_compatibility": "integration"
+      "hermes-http/test:resolver_api::shared_targets_require_current_grants_and_keep_personal_compatibility": "integration",
+      "hermes-native/lib:hermes_native::receipt::tests::a_shared_initializer_receipt_is_bound_to_the_agent_and_kind": "unit",
+      "hermes-render/test:render::shared_instances_render_agent_binding_origin_and_enforced_login": "unit"
     },
     "rust-browser": {
       "hermes-http/test:dashboard_browser::production_dashboard_browser_csp": "integration"
@@ -774,7 +781,7 @@
     "python-native": {
       "tests/integration/test_native_runtime.py::test_a_profile_cannot_choose_another_backend_or_redirect_the_connection": "integration",
       "tests/integration/test_native_runtime.py::test_a_second_initialization_keeps_the_home_and_reports_the_same_receipt": "integration",
-      "tests/integration/test_native_runtime.py::test_an_image_without_the_mounted_policies_refuses_unowned_login_and_execution": "integration",
+      "tests/integration/test_native_runtime.py::test_an_image_without_the_mounted_policies_refuses_startup_and_execution": "integration",
       "tests/integration/test_native_runtime.py::test_an_infrastructure_update_and_an_abrupt_kill_keep_the_owners_state": "integration",
       "tests/integration/test_native_runtime.py::test_an_instance_whose_supervisor_exits_is_reported_not_waited_for": "integration",
       "tests/integration/test_native_runtime.py::test_an_owner_plugin_directory_cannot_shadow_the_bundled_terminal_plugin": "integration",
@@ -782,7 +789,7 @@
       "tests/integration/test_native_runtime.py::test_initialization_leaves_a_complete_receipt_in_the_kubelet_result_file": "integration",
       "tests/integration/test_native_runtime.py::test_managed_values_win_and_the_owner_cannot_redirect_the_policy_directory": "integration",
       "tests/integration/test_native_runtime.py::test_the_gateway_and_dashboard_run_and_the_initialization_key_is_not_mounted": "integration",
-      "tests/integration/test_native_runtime.py::test_the_native_dashboard_requires_the_owner_login_and_reveals_no_session_token": "integration",
+      "tests/integration/test_native_runtime.py::test_the_native_dashboard_requires_native_login_and_reveals_no_session_token": "integration",
       "tests/integration/test_native_runtime.py::test_the_provider_trust_bundle_contains_the_system_roots_and_the_fixture_ca": "integration",
       "tests/integration/test_native_runtime.py::test_the_ssh_client_runs_as_the_pods_numeric_user": "integration",
       "tests/integration/test_native_shared.py::test_exact_callbacks_and_native_features_through_the_forwarded_host": "integration",
@@ -792,7 +799,9 @@
       "tests/integration/test_native_shared.py::test_sso_refresh_and_logout_across_two_agent_hosts[refresh-reuse]": "integration",
       "tests/integration/test_native_shared.py::test_sso_refresh_and_logout_across_two_agent_hosts[refresh-rotation]": "integration",
       "tests/integration/test_native_shared.py::test_two_users_log_in_and_hold_native_websockets_on_one_instance": "integration",
-      "tests/integration/test_native_shared.py::test_upstream_login_keeps_the_terminal_selector_and_home_binding": "integration"
+      "tests/integration/test_native_shared.py::test_upstream_login_keeps_the_terminal_selector_and_home_binding": "integration",
+      "tests/integration/test_native_shared.py::test_retained_configuration_cannot_add_native_login_providers": "integration",
+      "tests/integration/test_native_runtime.py::test_user_dotenv_cannot_override_native_authentication": "integration"
     },
     "python-cluster": {
       "tests/e2e/test_acceptance.py::test_a_cron_job_fires_without_browser_traffic_and_acquires_a_terminal": "e2e",
@@ -802,7 +811,7 @@
       "tests/e2e/test_acceptance.py::test_owners_share_a_static_folder": "e2e",
       "tests/e2e/test_acceptance.py::test_bobs_backends_share_the_workspace_and_idle_workers_retire": "e2e",
       "tests/e2e/test_acceptance.py::test_chat_settings_and_the_admin_secret_reach_only_the_referencing_instance": "e2e",
-      "tests/e2e/test_acceptance.py::test_foreign_cookies_tickets_and_forged_headers_reach_nothing": "e2e",
+      "tests/e2e/test_acceptance.py::test_platform_routing_ignores_native_identity_and_refuses_foreign_tickets": "e2e",
       "tests/e2e/test_acceptance.py::test_only_the_controller_holds_kubernetes_credentials_and_logs_hold_no_secrets": "e2e",
       "tests/e2e/test_acceptance.py::test_published_versions_commission_ready_instances_from_the_api": "e2e",
       "tests/e2e/test_acceptance.py::test_two_owners_reach_their_own_native_instances_through_the_gateway": "e2e",

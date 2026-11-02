@@ -14,11 +14,11 @@ personal Hermes instance:
 
 Terminal backends have their own [guide](terminal-backends.md).
 
-Every Hermes instance requires the manager's read-only owner policy at
+Every Hermes instance requires the manager's read-only home binding at
 `/run/hermes/owner/context.json` and terminal policy at
-`/run/hermes/execution-ca/config.yaml`. Missing or invalid policies prevent
-authentication and terminal execution. Environment variables and user settings
-cannot substitute for these policies.
+`/run/hermes/execution-ca/config.yaml`. The supervisor refuses missing or
+inconsistent home bindings, and terminal execution requires the managed policy.
+The gateway authorizes access; native OIDC verifies the realm login.
 
 ## Installation inputs (operator)
 

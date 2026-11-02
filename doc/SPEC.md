@@ -70,7 +70,7 @@ Not in scope:
 | R3 | Enabling an assignment converges to exactly one instance for that identity, including under concurrent commands and restarts. |
 | R4 | Every instance has a private home, native session keys, model authentication and execution credentials. A new instance inherits no private state from another owner; administrators may explicitly share static folders. |
 | R5 | One hostname routes by verified `(issuer, subject)`. A missing, disabled, unknown or foreign assignment is denied, with no fallback to any other backend. |
-| R6 | Native Hermes chat, settings, history, uploads, HTTP mutations and WebSockets work through the gateway. Native authentication stays enabled and verifies the exact owner. |
+| R6 | Native Hermes chat, settings, history, uploads, HTTP mutations and WebSockets work through the gateway. Native authentication stays enabled and verifies the configured realm; the gateway decides which instance a platform identity may reach. |
 | R7 | The dashboard uses only the administration API. The API without the dashboard supports every administration workflow. |
 | R8 | Reconciliation never overwrites the user's settings, profiles, memory, sessions or files, and never reseeds an initialized home. |
 | R9 | Suspension or revocation denies new access within 5 s, closes open connections within 10 s and stops the instance's terminal work within the drain bound. All volumes and credentials are retained until a separate purge decision. |
@@ -178,11 +178,10 @@ only its recorded, converged instance can be returned. Reads begun after a
 revocation commits are denied; a read overlapping that commit uses its single
 snapshot. Resolving neither provisions an identity nor creates an instance.
 
-**Planned connection support:** runtime home binding,
-per-host browser sessions, chart configuration and administration dashboard
-workflows must land before shared agents can serve users. The controller reads
-shared instances explicitly; rendering currently refuses them while the runtime
-branch remains planned.
+**Planned connection support:** per-host browser sessions, chart configuration
+and administration dashboard workflows must land before shared agents can serve
+users. The controller renders shared instances with a home bound to the shared
+agent ID and the endpoint URL.
 
 ## User experience
 
@@ -532,6 +531,13 @@ including case variants and cookies set by a sibling on the parent domain.
 
 ## Hermes image and plugin
 
+The native OIDC provider accepts valid realm identities. The gateway is the
+access-control boundary; native cookies do not select an instance and may be
+accepted by another instance using the same realm and client. A compromised
+gateway can therefore connect any valid realm identity to any instance. Home
+receipts bind personal homes to their exact owner and shared homes to their
+agent ID, independently of native login.
+
 - **Image.** This repository builds the Hermes image from pinned upstream
   Hermes plus reviewed platform changes, and bundles the `managed_execution`
   plugin. It downloads no code at startup, and contains no personal profiles,
@@ -578,12 +584,12 @@ restorable:
 
 | Scenario | Required result |
 | --- | --- |
-| Two assigned identities, one URL | Distinct instances, settings, sessions, uploads and native owner checks |
+| Two assigned identities, one URL | Distinct instances, settings, sessions and uploads selected by the platform identity |
 | Same path, different verified subjects | Each reaches only its own instance; forged headers, email or unverified token claims change nothing |
 | Valid but unassigned identity | Denial page; no commissioning side effect |
 | Concurrent enable, retry and controller kill | One stable instance; credentials generated once |
 | Email change or new subject with an old email | Ownership unchanged; the new subject gets nothing |
-| Forged headers, foreign cookie or ticket, callback race | No cross-owner access |
+| Forged headers, foreign platform cookie or native ticket, callback race | No cross-owner access |
 | SH-D01: Shared hostname labels | Valid, malformed, reserved and over-long labels follow the configured domain policy |
 | SH-D02: Concurrent shared creation | Concurrent retries create one assignment, endpoint and instance; a contested label has one winner |
 | SH-D03: Endpoint rename and reuse | Renaming frees the old label; disabled labels remain owned; concurrent renames have one winner; endpoint binding is immutable |

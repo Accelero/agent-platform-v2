@@ -202,6 +202,7 @@ describe("suggestions while typing", () => {
       expect.arrayContaining(["schemaVersion", "image", "resources", "home"]),
     );
     expect(labels("adminConfig:\n  |", "yaml")).toEqual([
+      "dashboard",
       "terminal",
       "plugins",
     ]);
