@@ -1501,6 +1501,31 @@ def shared_agent_direct_and_group_members_reach_one_workspace(platform):
         "shared instance never became ready",
         interval=5,
     )
+    namespace = admin.phase(created["instanceId"])["namespace"]
+
+    def pod_state():
+        pods = json.loads(
+            kubectl(
+                platform.identifier,
+                "get",
+                "pods",
+                "-n",
+                namespace,
+                "-l",
+                f"agent-platform.io/instance={created['instanceId']},app.kubernetes.io/component=hermes",
+                "-o",
+                "json",
+            )
+        )["items"]
+        assert len(pods) == 1
+        container = next(
+            item
+            for item in pods[0]["status"]["containerStatuses"]
+            if item["name"] == "hermes"
+        )
+        return pods[0]["metadata"]["uid"], container["restartCount"]
+
+    original_pod = pod_state()
     before_namespaces = namespaces(platform.identifier)
 
     host = platform.shared_hosts[0]
@@ -1520,34 +1545,98 @@ def shared_agent_direct_and_group_members_reach_one_workspace(platform):
         _, first_reply = converse(first, "first shared fixture turn", 240)
         _, second_reply = converse(second, "second shared fixture turn", 240)
         assert first_reply == second_reply == "hello from e2e"
+        assignments = admin.call("GET", "/api/v1/assignments?limit=100").json()["items"]
+        assert not any(
+            (item.get("identity") or {}).get("subject") == SUBJECTS["frank"]
+            for item in assignments
+        )
+        assert namespaces(platform.identifier) == before_namespaces
+        outsider = Browser(
+            platform.ca, "mallory", platform.passwords["mallory"], host=host
+        )
+        assert outsider.sign_in().status_code == 403
+
+        grants_etag = admin.call("GET", grants_path).headers["ETag"]
+        admin.call(
+            "PUT",
+            grants_path,
+            {"grants": [{"groupId": group["groupId"]}]},
+            etag=grants_etag,
+        )
+        revoked_at = time.monotonic()
+        wait(
+            lambda: (
+                members[0].get("/api/sessions", allow_redirects=False).status_code
+                == 403
+            ),
+            5.2,
+            "revoked member retained access",
+            interval=0.1,
+        )
+        remaining = max(0.1, 10 - (time.monotonic() - revoked_at))
+        closed_within(first, remaining)
+        assert not first.connected, "the revoked member's WebSocket stayed open"
+        assert time.monotonic() - revoked_at <= 10.2
+        _, continued = converse(second, "still connected after direct removal", 240)
+        assert continued == "hello from e2e"
+        assert members[1].get("/api/sessions").status_code == 200
+        assert pod_state() == original_pod
+
+        # Restore Bob's direct grant and give him a group grant too. Removing
+        # either group membership must respect the remaining direct grant.
+        grants_etag = admin.call("GET", grants_path).headers["ETag"]
+        direct_bob = {"identity": {"issuer": ISSUER, "subject": SUBJECTS["bob"]}}
+        admin.call(
+            "PUT",
+            grants_path,
+            {"grants": [direct_bob, {"groupId": group["groupId"]}]},
+            etag=grants_etag,
+        )
+        wait(
+            lambda: (
+                members[0].get("/api/sessions", allow_redirects=False).status_code
+                == 200
+            ),
+            10,
+            "direct grant did not restore access",
+            interval=0.2,
+        )
+        group_etag = admin.call("GET", group_path).headers["ETag"]
+        admin.call("POST", f"{group_path}/members", direct_bob, etag=group_etag)
+        items = admin.call("GET", f"{group_path}/members?limit=100").json()["items"]
+        identities = {item["identity"]["subject"]: item["identityId"] for item in items}
+        group_etag = admin.call("GET", group_path).headers["ETag"]
+        admin.call(
+            "DELETE",
+            f"{group_path}/members/{identities[SUBJECTS['bob']]}",
+            etag=group_etag,
+        )
+        assert members[0].get("/api/sessions", allow_redirects=False).status_code == 200
+        group_etag = admin.call("GET", group_path).headers["ETag"]
+        admin.call(
+            "DELETE",
+            f"{group_path}/members/{identities[SUBJECTS['frank']]}",
+            etag=group_etag,
+        )
+        revoked_at = time.monotonic()
+        wait(
+            lambda: (
+                members[1].get("/api/sessions", allow_redirects=False).status_code
+                == 403
+            ),
+            5.2,
+            "removed group member retained access",
+            interval=0.1,
+        )
+        remaining = max(0.1, 10 - (time.monotonic() - revoked_at))
+        closed_within(second, remaining)
+        assert not second.connected, "the removed group member's WebSocket stayed open"
+        assert time.monotonic() - revoked_at <= 10.2
+        assert members[0].get("/api/sessions", allow_redirects=False).status_code == 200
+        assert pod_state() == original_pod
     finally:
         first.close()
         second.close()
-    assignments = admin.call("GET", "/api/v1/assignments?limit=100").json()["items"]
-    assert not any(
-        (item.get("identity") or {}).get("subject") == SUBJECTS["frank"]
-        for item in assignments
-    )
-    assert namespaces(platform.identifier) == before_namespaces
-    outsider = Browser(platform.ca, "mallory", platform.passwords["mallory"], host=host)
-    assert outsider.sign_in().status_code == 403
-
-    grants_etag = admin.call("GET", grants_path).headers["ETag"]
-    admin.call(
-        "PUT",
-        grants_path,
-        {"grants": [{"groupId": group["groupId"]}]},
-        etag=grants_etag,
-    )
-    wait(
-        lambda: (
-            members[0].get("/api/sessions", allow_redirects=False).status_code == 403
-        ),
-        15,
-        "revoked member retained access",
-        interval=1,
-    )
-    assert members[1].get("/api/sessions").status_code == 200
 
     return created
 

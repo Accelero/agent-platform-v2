@@ -3,8 +3,8 @@
 The requirements are in the [specification](../SPEC.md), and the
 mechanisms are in the [architecture](../ARCH.md).
 
-This guide covers what an administrator and an operator configure for a
-personal Hermes instance:
+This guide covers what an administrator and an operator configure for
+personal and shared Hermes instances:
 
 - Hermes templates;
 - admin settings and admin secrets;
@@ -119,6 +119,30 @@ lists the keys of each role's Secret.
   `hermes.<namespace>.svc.<clusterDomain>:8080`, with the namespace taken from
   the resolver's answer. The gateway has no registry or Kubernetes access.
 - `gateway.maxUploadMib` can only lower the 64 MiB upload bound.
+
+### Shared agent hostnames
+
+Set `hermesManager.agentDomain` to enable shared endpoints and optionally set
+`reservedAgentLabels`. Each shared agent receives one hostname of the form
+`<label>.<agentDomain>`; all such hosts reach the same gateway Service. The
+chart also supports a gateway Service `loadBalancerClass` and annotations.
+Configure DNS for the personal host and wildcard agent domain, and install a
+gateway certificate covering both. The gateway checks coverage on startup and
+reloads valid replacement certificates without dropping existing connections.
+
+Before enabling an endpoint or changing its label, register its exact callback
+URIs with the identity provider: `https://<label>.<agentDomain>/_platform/oidc/callback`
+for the gateway client and `https://<label>.<agentDomain>/auth/callback` for
+the native client. The manager does not configure DNS, certificates or provider
+clients. Creating a shared agent does not create a separate ingress or load
+balancer. Use the dashboard to create the agent and grant access directly to
+identities or through manager-owned groups; an administrator has no implicit
+grant and members need no personal assignment.
+
+After configuring an endpoint, sign in as a granted member and verify the
+agent's native identity and a chat connection. Sign in as an ungranted user
+and verify that the gateway denies access. Removing a grant should deny new
+requests and close existing connections within the documented gateway bounds.
 
 ## Hermes templates
 

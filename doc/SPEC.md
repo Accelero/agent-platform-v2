@@ -178,10 +178,11 @@ only its recorded, converged instance can be returned. Reads begun after a
 revocation commits are denied; a read overlapping that commit uses its single
 snapshot. Resolving neither provisions an identity nor creates an instance.
 
-**Planned connection support:** per-host browser sessions, chart configuration
-and administration dashboard workflows must land before shared agents can serve
-users. The controller renders shared instances with a home bound to the shared
-agent ID and the endpoint URL.
+The gateway binds browser sessions to their host and routes an agent hostname
+through the shared resolver. The chart supplies the shared domain and gateway
+exposure; the dashboard manages shared agents, grants and groups. The controller
+renders each shared instance with a home bound to the shared agent ID and the
+endpoint URL.
 
 ## User experience
 

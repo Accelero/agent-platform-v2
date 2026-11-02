@@ -58,8 +58,9 @@ pass, including both SH-N04 refresh-token policies and the three provider-sessio
 cases. Logout keeps token revocation; signing in again may require credentials
 when the provider ends its session. The gateway foundation classifies HTTP/1.1
 and HTTP/2 authorities before session lookup and ignores tossed platform-cookie
-lookalikes. Its configured endpoint remains personal; shared assignments,
-endpoints, grants and per-host sessions are planned in the remaining phases.
+lookalikes. Shared assignments, endpoints, grants and host-bound gateway sessions
+are implemented. The shared-agent plan records the remaining acceptance and
+deployment verification; its unchecked cases are not implied by implementation.
 
 The [testing strategy](../TESTING.md) specifies language-native units,
 integration tests at their proving boundary, and independently collected

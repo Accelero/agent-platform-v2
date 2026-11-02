@@ -90,6 +90,18 @@ impl Sessions for FakeSessions {
                 signed.handle = format!("research-{}", signed.handle);
                 Ok(signed)
             }
+            (
+                Some(
+                    host @ ("disabled.agents.example.org"
+                    | "ungranted.agents.example.org"
+                    | "unknown.agents.example.org"),
+                ),
+                "agent-proof",
+            ) => {
+                let mut signed = self.authenticate(session, "proof").await?;
+                signed.handle = format!("{host}-{}", signed.handle);
+                Ok(signed)
+            }
             _ => Err(AuthError::Evidence),
         }
     }
@@ -149,6 +161,7 @@ impl Sessions for FakeSessions {
 #[derive(Default)]
 struct FakeResolver {
     verdicts: Mutex<HashMap<String, Verdict>>,
+    denied_shared: Mutex<HashSet<String>>,
     calls: AtomicUsize,
     /// The next this many resolutions fail.
     failures: AtomicUsize,
@@ -157,6 +170,15 @@ struct FakeResolver {
 #[async_trait]
 impl Resolve for FakeResolver {
     async fn resolve_target(&self, identity: &Identity, target: &Target) -> Verdict {
+        if matches!(target, Target::Shared { .. })
+            && self
+                .denied_shared
+                .lock()
+                .unwrap()
+                .contains(&identity.subject)
+        {
+            return Verdict::Denied;
+        }
         match target {
             Target::Personal {} => self.resolve(identity).await,
             Target::Shared { label } if label == "engineering" => {
@@ -243,6 +265,12 @@ async fn echo(State(upstream): State<Upstream>, request: Request) -> Response {
             .headers_mut()
             .append(header::SET_COOKIE, HeaderValue::from_static(cookie));
     }
+    if path == "/auth/login" {
+        response.headers_mut().append(
+            header::SET_COOKIE,
+            HeaderValue::from_static("native_domain=forged; Domain=.agents.example.org; Path=/"),
+        );
+    }
     response
 }
 
@@ -307,6 +335,8 @@ struct Fixture {
     hits: Arc<Mutex<Vec<String>>>,
     routes: HashMap<&'static str, Route>,
     client: reqwest::Client,
+    dial: Dial,
+    timing: Timing,
 }
 
 fn route() -> Route {
@@ -370,7 +400,7 @@ impl Fixture {
         };
         let names = EndpointNames::new("agents.example.org", &[], &[ORIGIN]).unwrap();
         let gateway = Arc::new(
-            Gateway::new(checks, dial, ORIGIN, max_upload)
+            Gateway::new(checks, dial.clone(), ORIGIN, max_upload)
                 .unwrap()
                 .with_agents(names),
         );
@@ -407,6 +437,8 @@ impl Fixture {
                 .no_proxy()
                 .build()
                 .unwrap(),
+            dial,
+            timing,
         }
     }
 
@@ -461,6 +493,62 @@ impl Fixture {
             Err(head)
         }
     }
+
+    async fn shared_websocket(&self, subject: &str) -> TcpStream {
+        self.shared_websocket_at(self.address, subject).await
+    }
+
+    async fn shared_websocket_at(&self, address: SocketAddr, subject: &str) -> TcpStream {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let cookie = format!("{SESSION}={}; {BROWSER}=agent-proof", handle(subject));
+        let request = format!(
+            "GET /api/ws?ticket=t HTTP/1.1\r\nHost: engineering.agents.example.org\r\n\
+             Origin: https://engineering.agents.example.org\r\nConnection: Upgrade\r\n\
+             Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nCookie: {cookie}\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            assert_ne!(stream.read(&mut byte).await.unwrap(), 0);
+            head.push(byte[0]);
+        }
+        assert!(head.starts_with(b"HTTP/1.1 101"));
+        stream
+    }
+
+    async fn replica(&self) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let checks = Checks {
+            sessions: self.sessions.clone(),
+            resolver: self.resolver.clone(),
+            timing: self.timing,
+        };
+        let names = EndpointNames::new("agents.example.org", &[], &[ORIGIN]).unwrap();
+        let gateway = Arc::new(
+            Gateway::new(checks, self.dial.clone(), ORIGIN, 1024 * 1024)
+                .unwrap()
+                .with_agents(names),
+        );
+        let app = router(gateway.clone(), platform(gateway));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let app = app.clone();
+                tokio::spawn(async move {
+                    let _ = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                        .serve_connection_with_upgrades(
+                            TokioIo::new(socket),
+                            TowerToHyperService::new(app),
+                        )
+                        .await;
+                });
+            }
+        });
+        (address, task)
+    }
 }
 
 async fn raw_request(fixture: &Fixture, target: &str, headers: &str) -> (u16, String) {
@@ -483,6 +571,327 @@ async fn raw_request(fixture: &Fixture, target: &str, headers: &str) -> (u16, St
     let response = String::from_utf8(bytes).unwrap();
     let status = response.split_whitespace().nth(1).unwrap().parse().unwrap();
     (status, response)
+}
+
+#[tokio::test]
+async fn shared_revocation_closes_only_the_denied_members_exchanges_within_bounds() {
+    let timing = Timing::default();
+    let fixture = Fixture::new(timing).await;
+    let (replica, replica_task) = fixture.replica().await;
+    let replica_url = format!("http://{replica}");
+    let bob = fixture.shared_websocket("bob").await;
+    let bob_replica = fixture.shared_websocket_at(replica, "bob").await;
+    let mut carol = fixture.shared_websocket("carol").await;
+    let cookie = format!("{SESSION}={}; {BROWSER}=agent-proof", handle("bob"));
+    let mut streamed = fixture
+        .client
+        .get(format!("{}/events", fixture.url))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(streamed.status(), StatusCode::OK);
+    assert!(streamed.chunk().await.unwrap().is_some());
+    let mut streamed_replica = fixture
+        .client
+        .get(format!("{replica_url}/events"))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(streamed_replica.status(), StatusCode::OK);
+    assert!(streamed_replica.chunk().await.unwrap().is_some());
+    // Warm caches and arrange the denial just after a successful recheck.
+    tokio::time::sleep(timing.recheck + Duration::from_millis(400)).await;
+    let warm = fixture
+        .client
+        .get(format!("{}/api/chat", fixture.url))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(warm.status(), StatusCode::OK);
+    let warm_replica = fixture
+        .client
+        .get(format!("{replica_url}/api/chat"))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(warm_replica.status(), StatusCode::OK);
+    fixture
+        .resolver
+        .denied_shared
+        .lock()
+        .unwrap()
+        .insert("bob".into());
+    let denied_at = Instant::now();
+    let requests = async {
+        for url in [&fixture.url, &replica_url] {
+            loop {
+                let status = fixture
+                    .client
+                    .get(format!("{url}/api/chat"))
+                    .header("host", "engineering.agents.example.org")
+                    .header("cookie", &cookie)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status();
+                if status == StatusCode::FORBIDDEN {
+                    assert!(denied_at.elapsed() <= Duration::from_millis(5200));
+                    break;
+                }
+                assert!(denied_at.elapsed() <= Duration::from_millis(5200));
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    };
+    let websocket = async {
+        tokio::join!(
+            closed_within(bob, Duration::from_secs(10)),
+            closed_within(bob_replica, Duration::from_secs(10))
+        )
+    };
+    let body = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(
+                async { while let Ok(Some(_)) = streamed.chunk().await {} },
+                async { while let Ok(Some(_)) = streamed_replica.chunk().await {} }
+            );
+        })
+        .await
+        .expect("denied stream did not close");
+    };
+    let unaffected = async {
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        carol.write_all(b"\x81\x05hello").await.unwrap();
+        let mut echo = [0u8; 7];
+        tokio::time::timeout(Duration::from_secs(2), carol.read_exact(&mut echo))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&echo, b"\x81\x05hello");
+    };
+    let (_, (elapsed, replica_elapsed), _, _) = tokio::join!(requests, websocket, body, unaffected);
+    assert!(elapsed < Duration::from_secs(10) && replica_elapsed < Duration::from_secs(10));
+    replica_task.abort();
+    let (restarted, task) = fixture.replica().await;
+    for (subject, expected) in [("bob", StatusCode::FORBIDDEN), ("carol", StatusCode::OK)] {
+        let cookie = format!("{SESSION}={}; {BROWSER}=agent-proof", handle(subject));
+        let status = fixture
+            .client
+            .get(format!("http://{restarted}/api/chat"))
+            .header("host", "engineering.agents.example.org")
+            .header("cookie", cookie)
+            .send()
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, expected);
+    }
+    // A fresh replica must enforce the same bounds for a later revocation.
+    fixture.resolver.denied_shared.lock().unwrap().remove("bob");
+    let bob_restarted = fixture.shared_websocket_at(restarted, "bob").await;
+    let mut stream_restarted = fixture
+        .client
+        .get(format!("http://{restarted}/events"))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stream_restarted.status(), StatusCode::OK);
+    assert!(stream_restarted.chunk().await.unwrap().is_some());
+    tokio::time::sleep(timing.recheck + Duration::from_millis(400)).await;
+    let warm = fixture
+        .client
+        .get(format!("http://{restarted}/api/chat"))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(warm.status(), StatusCode::OK);
+    fixture
+        .resolver
+        .denied_shared
+        .lock()
+        .unwrap()
+        .insert("bob".into());
+    let denied_at = Instant::now();
+    let request_after_restart = async {
+        loop {
+            let status = fixture
+                .client
+                .get(format!("http://{restarted}/api/chat"))
+                .header("host", "engineering.agents.example.org")
+                .header("cookie", &cookie)
+                .send()
+                .await
+                .unwrap()
+                .status();
+            if status == StatusCode::FORBIDDEN {
+                assert!(denied_at.elapsed() <= Duration::from_millis(5200));
+                break;
+            }
+            assert!(denied_at.elapsed() <= Duration::from_millis(5200));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    let body_after_restart = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Ok(Some(_)) = stream_restarted.chunk().await {}
+        })
+        .await
+        .expect("denied stream on restarted gateway did not close");
+    };
+    let (_, elapsed, _) = tokio::join!(
+        request_after_restart,
+        closed_within(bob_restarted, Duration::from_secs(10)),
+        body_after_restart
+    );
+    assert!(elapsed < Duration::from_secs(10));
+    task.abort();
+}
+
+#[tokio::test]
+async fn shared_origin_and_native_paths_use_only_the_classified_host() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let host = "engineering.agents.example.org";
+    let cookies = format!(
+        "{SESSION}={}; {BROWSER}=agent-proof; hermes-platform=tossed; native=value",
+        handle("bob")
+    );
+    for origin in ["https://research.agents.example.org", ORIGIN, "null"] {
+        let post = fixture
+            .client
+            .post(format!("{}/api/sessions", fixture.url))
+            .header("host", host)
+            .header("cookie", &cookies)
+            .header("origin", origin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(post.status(), StatusCode::FORBIDDEN);
+        let upgrade = fixture
+            .client
+            .get(format!("{}/api/ws", fixture.url))
+            .header("host", host)
+            .header("cookie", &cookies)
+            .header("origin", origin)
+            .header("connection", "upgrade")
+            .header("upgrade", "websocket")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(upgrade.status(), StatusCode::FORBIDDEN);
+    }
+    assert!(fixture.hits().is_empty());
+    for path in ["/login", "/auth/login", "/auth/callback"] {
+        let denied = fixture
+            .client
+            .get(format!("{}{path}", fixture.url))
+            .header("host", host)
+            .header("accept", "text/html")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::SEE_OTHER);
+        assert!(
+            denied.headers()["location"]
+                .to_str()
+                .unwrap()
+                .starts_with("/_platform/login?")
+        );
+        let response = fixture
+            .client
+            .get(format!("{}{path}", fixture.url))
+            .header("host", host)
+            .header("cookie", &cookies)
+            .header("authorization", "Bearer fixture-native")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response_cookies: Vec<_> = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            response_cookies,
+            ["__Host-hermes_session_at=native; Path=/; Secure; HttpOnly"]
+        );
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["instance"], "carol");
+        assert_eq!(body["headers"]["host"], host);
+        assert_eq!(body["headers"]["x-forwarded-host"], host);
+        assert_eq!(body["headers"]["authorization"], "Bearer fixture-native");
+        assert_eq!(body["headers"]["cookie"], "native=value");
+    }
+    let duplicate = format!("{cookies}; {SESSION}={}", handle("bob"));
+    let response = fixture
+        .client
+        .get(format!("{}/api/chat", fixture.url))
+        .header("host", host)
+        .header("cookie", duplicate)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn shared_denials_are_indistinguishable_and_pending_is_member_only() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let cookies = format!("{SESSION}={}; {BROWSER}=agent-proof", handle("bob"));
+    let mut bodies = Vec::new();
+    for host in [
+        "disabled.agents.example.org",
+        "ungranted.agents.example.org",
+        "unknown.agents.example.org",
+    ] {
+        let response = fixture
+            .client
+            .get(format!("{}/api/chat", fixture.url))
+            .header("host", host)
+            .header("cookie", &cookies)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        bodies.push(response.bytes().await.unwrap());
+    }
+    assert!(bodies.windows(2).all(|pair| pair[0] == pair[1]));
+    fixture.set("bob", Verdict::Pending(PendingCode::InstanceNotReady));
+    fixture
+        .resolver
+        .denied_shared
+        .lock()
+        .unwrap()
+        .insert("mallory".into());
+    for (subject, expected) in [
+        ("bob", StatusCode::ACCEPTED),
+        ("mallory", StatusCode::FORBIDDEN),
+    ] {
+        let cookie = format!("{SESSION}={}; {BROWSER}=research-proof", handle(subject));
+        let response = fixture
+            .client
+            .get(format!("{}/api/chat", fixture.url))
+            .header("host", "research.agents.example.org")
+            .header("cookie", cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    assert!(fixture.hits().is_empty());
 }
 
 #[tokio::test]
