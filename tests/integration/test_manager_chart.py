@@ -139,6 +139,48 @@ def test_role_configurations_equal_the_parsed_fixtures(tmp_path):
     }
 
 
+def test_shared_agent_hostnames_and_load_balancer_reach_all_roles(tmp_path):
+    values = example()
+    manager = values["hermesManager"]
+    manager["agentDomain"] = "agents.example.org"
+    manager["reservedAgentLabels"] = ["ops"]
+    manager["gateway"]["service"] = {
+        "type": "LoadBalancer",
+        "port": 443,
+        "loadBalancerClass": "tailscale",
+        "annotations": {"tailscale.com/proxy-group": "ingress"},
+    }
+    peer = {
+        "namespaceSelector": {
+            "matchLabels": {"kubernetes.io/metadata.name": "tailscale"}
+        }
+    }
+    manager["ingress"]["gateway"] = [peer]
+    documents = render(tmp_path, values)
+    for name in CONFIG_FIXTURES:
+        config = json.loads(named(documents, "ConfigMap", name)["data"]["config.json"])
+        assert config["agentDomain"] == "agents.example.org"
+        assert config["reservedAgentLabels"] == ["ops"]
+        assert config["publicOrigin"] == manager["publicOrigin"]
+    service = named(documents, "Service", "hermes-gateway")
+    assert service["spec"]["type"] == "LoadBalancer"
+    assert service["spec"]["loadBalancerClass"] == "tailscale"
+    assert service["metadata"]["annotations"]["tailscale.com/proxy-group"] == "ingress"
+    policy = named(documents, "NetworkPolicy", "hermes-gateway")
+    assert any(peer in rule.get("from", []) for rule in policy["spec"]["ingress"])
+    manager["gateway"]["service"]["type"] = "ClusterIP"
+    assert render(tmp_path, values, check=False).returncode != 0
+    manager["gateway"]["service"]["type"] = "LoadBalancer"
+    manager["agentDomain"] = "agents..example.org"
+    assert render(tmp_path, values, check=False).returncode != 0
+    manager["agentDomain"] = "agents.example.org"
+    manager["reservedAgentLabels"] = ["xn--invalid"]
+    assert render(tmp_path, values, check=False).returncode != 0
+    manager["agentDomain"] = ""
+    manager["reservedAgentLabels"] = ["ops"]
+    assert render(tmp_path, values, check=False).returncode != 0
+
+
 def test_only_the_controller_carries_a_token_and_every_pod_is_restricted(tmp_path):
     documents = render(tmp_path, example())
     deployments = {

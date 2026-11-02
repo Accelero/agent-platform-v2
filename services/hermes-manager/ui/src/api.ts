@@ -45,7 +45,12 @@ export const api = {
   assignments: (
     after?: string,
     signal?: AbortSignal,
-    filters: { q?: string; access?: string; templateId?: string } = {},
+    filters: {
+      q?: string;
+      access?: string;
+      templateId?: string;
+      kind?: string;
+    } = {},
   ) =>
     request<Result<"listAssignments">>(
       `/api/v1/assignments?${pageParams(after, filters)}`,
@@ -55,6 +60,35 @@ export const api = {
     versioned<Assignment>(`/api/v1/assignments/${id(assignmentId)}`, {
       signal,
     }),
+  endpointSettings: (signal?: AbortSignal) =>
+    request<Result<"getEndpointSettings">>("/api/v1/endpoint-settings", {
+      signal,
+    }),
+  endpoint: (assignmentId: string, signal?: AbortSignal) =>
+    versioned<Result<"getAssignmentEndpoint">>(
+      `/api/v1/assignments/${id(assignmentId)}/endpoint`,
+      { signal },
+    ),
+  grants: (assignmentId: string, signal?: AbortSignal) =>
+    versioned<Result<"listAssignmentGrants">>(
+      `/api/v1/assignments/${id(assignmentId)}/grants`,
+      { signal },
+    ),
+  groups: (after?: string, signal?: AbortSignal, q?: string) =>
+    request<Result<"listAccessGroups">>(
+      `/api/v1/access-groups?${pageParams(after, { q })}`,
+      { signal },
+    ),
+  group: (groupId: string, signal?: AbortSignal) =>
+    versioned<Result<"getAccessGroup">>(
+      `/api/v1/access-groups/${id(groupId)}`,
+      { signal },
+    ),
+  groupMembers: (groupId: string, after?: string, signal?: AbortSignal) =>
+    request<Result<"listAccessGroupMembers">>(
+      `/api/v1/access-groups/${id(groupId)}/members?${pageParams(after)}`,
+      { signal },
+    ),
   instance: (instanceId: string, signal?: AbortSignal) =>
     request<Instance>(`/api/v1/instances/${id(instanceId)}`, { signal }),
   environments: (instanceId: string, signal?: AbortSignal) =>

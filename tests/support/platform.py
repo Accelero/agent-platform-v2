@@ -129,7 +129,7 @@ def start_postgres(cluster: Cluster, cleanup: Cleanup):
     return name, database, f"postgres://hermes_test@{address}:5432/{database}"
 
 
-def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup):
+def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=False):
     """The installed platform with Bob's and Carol's commissioned instances."""
     require_local_images()
     server = cluster.servers[0]
@@ -176,13 +176,19 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup):
     )
     tls_directory = directory / "tls"
     tls_directory.mkdir()
-    tls = e2e.certificates(tls_directory)
+    shared_domain = e2e.SHARED_DOMAIN if shared else None
+    shared_hosts = (
+        tuple(f"{label}.{shared_domain}" for label in e2e.SHARED_LABELS)
+        if shared
+        else ()
+    )
+    tls = e2e.certificates(tls_directory, shared_domain)
     ca = str(tls_directory / "ca.crt")
     passwords = {name: secrets.token_urlsafe(18) for name in e2e.SUBJECTS}
     for name in ("directory", "llm", "registry"):
         passwords[name] = secrets.token_urlsafe(24)
 
-    e2e.keycloak(server, references["keycloak"], tls, passwords)
+    e2e.keycloak(server, references["keycloak"], tls, passwords, shared_hosts)
     e2e.fake_model(server, images["hermes"])
     for namespace, name in (("keycloak", "keycloak"), ("model", "fake-model")):
         e2e.kubectl(
@@ -197,7 +203,7 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup):
         )
     stack = ExitStack()
     cleanup.add("name routing", stack.close)
-    stack.enter_context(e2e.routed(node_ip))
+    stack.enter_context(e2e.routed(node_ip, shared_hosts))
     e2e.wait(
         lambda: (
             requests.get(
@@ -221,6 +227,7 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup):
         server,
         owned,
         e2e.FRESH,
+        shared_domain=shared_domain,
     )
     state = e2e.commission(server, images, ca, passwords)
     return SimpleNamespace(
@@ -239,4 +246,5 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup):
         directory=directory,
         tls=tls,
         owned=owned,
+        shared_hosts=shared_hosts,
     )

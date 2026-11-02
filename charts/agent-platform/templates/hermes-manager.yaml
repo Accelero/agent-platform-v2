@@ -17,6 +17,17 @@ mounted read-only at /run/hermes/secrets with the key names the README lists.
   "databaseUrlFile" (printf "%s/database-url" $secrets)
   "storageSources" $m.storageSources
   "dataIdentity" $m.dataIdentity }}
+{{- if and (not $v.agentDomain) $v.reservedAgentLabels }}
+{{- fail "hermesManager.reservedAgentLabels requires agentDomain" }}
+{{- end }}
+{{- if $v.agentDomain }}
+{{- $_ := set $common "agentDomain" $v.agentDomain }}
+{{- $_ := set $common "reservedAgentLabels" $v.reservedAgentLabels }}
+{{- $_ := set $common "publicOrigin" $publicOrigin }}
+{{- end }}
+{{- if and $v.gateway.service.loadBalancerClass (ne $v.gateway.service.type "LoadBalancer") }}
+{{- fail "hermesManager.gateway.service.loadBalancerClass requires type LoadBalancer" }}
+{{- end }}
 {{- if $v.oidcPrivateCa }}{{- $_ := set $common "oidcCaFile" (printf "%s/oidc-ca.crt" $secrets) }}{{- end }}
 {{- $tls := dict "admin" (dict "certificateFile" (printf "%s/admin-tls.crt" $secrets) "privateKeyFile" (printf "%s/admin-tls.key" $secrets)) }}
 {{- $executionUrl := printf "https://hermes-manager-api.%s.svc:8445/execution" $ns }}
@@ -107,6 +118,10 @@ mounted read-only at /run/hermes/secrets with the key names the README lists.
     "privateKeyFile" (printf "%s/resolver-client.key" $secrets))
   "clusterDomain" $gateway.clusterDomain
   "maxUploadMib" $gateway.maxUploadMib }}
+{{- if $v.agentDomain }}
+{{- $_ := set $config "agentDomain" $v.agentDomain }}
+{{- $_ := set $config "reservedAgentLabels" $v.reservedAgentLabels }}
+{{- end }}
 {{- if $v.oidcPrivateCa }}{{- $_ := set $config "oidcCaFile" (printf "%s/oidc-ca.crt" $secrets) }}{{- end }}
 {{- $keyring := include "hermes-manager.keyring" (dict "keys" $gateway.sessionKeys "dir" $secrets "field" "hermesManager.gateway.sessionKeys") }}
 {{- $_ := set $roles "gateway" (dict "name" "hermes-gateway" "config" $config "keyring" $keyring "secret" $gateway.existingSecret "replicas" $gateway.replicas "args" (list) "ports" (dict "gateway" 8443) "token" false) }}
@@ -200,8 +215,16 @@ metadata:
   name: {{ $r.name }}
   namespace: {{ $ns }}
   labels: {{ include "agent-platform.labels" $ | nindent 4 }}
+  {{- if eq $role "gateway" }}
+  {{- with $v.gateway.service.annotations }}
+  annotations: {{ toJson . }}
+  {{- end }}
+  {{- end }}
 spec:
   type: {{ ternary $v.gateway.service.type "ClusterIP" (eq $role "gateway") }}
+  {{- if and (eq $role "gateway") $v.gateway.service.loadBalancerClass }}
+  loadBalancerClass: {{ $v.gateway.service.loadBalancerClass | quote }}
+  {{- end }}
   selector: {app.kubernetes.io/instance: {{ $.Release.Name | quote }}, app.kubernetes.io/name: {{ $r.name }}}
   ports:
   {{- range $listener, $port := $r.ports }}

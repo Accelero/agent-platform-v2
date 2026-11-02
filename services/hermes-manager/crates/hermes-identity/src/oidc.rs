@@ -250,7 +250,22 @@ impl OidcProvider {
         browser_hash: Vec<u8>,
         return_path: String,
     ) -> Result<LoginStart, Error> {
+        self.begin_at(browser_hash, return_path, None).await
+    }
+
+    pub async fn begin_at(
+        &self,
+        browser_hash: Vec<u8>,
+        return_path: String,
+        callback: Option<&str>,
+    ) -> Result<LoginStart, Error> {
         let client = self.client(false).await?;
+        let client = match callback {
+            Some(callback) => client.as_ref().clone().set_redirect_uri(
+                RedirectUrl::new(callback.to_owned()).map_err(|_| Error::Configuration)?,
+            ),
+            None => client.as_ref().clone(),
+        };
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
         let mut request = client
             .authorize_url(
@@ -359,10 +374,25 @@ impl OidcProvider {
         code: &str,
         secrets: &LoginSecrets,
     ) -> Result<ProviderTokens, Error> {
+        self.exchange_at(code, secrets, None).await
+    }
+
+    pub async fn exchange_at(
+        &self,
+        code: &str,
+        secrets: &LoginSecrets,
+        callback: Option<&str>,
+    ) -> Result<ProviderTokens, Error> {
         if code.is_empty() || code.len() > 4096 {
             return Err(Error::Evidence);
         }
         let client = self.client(false).await?;
+        let client = match callback {
+            Some(callback) => client.as_ref().clone().set_redirect_uri(
+                RedirectUrl::new(callback.to_owned()).map_err(|_| Error::Configuration)?,
+            ),
+            None => client.as_ref().clone(),
+        };
         let response = client
             .exchange_code(AuthorizationCode::new(code.into()))
             .map_err(|_| Error::Configuration)?

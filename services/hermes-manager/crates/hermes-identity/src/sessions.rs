@@ -27,6 +27,12 @@ pub struct LoginFlow {
     pub sealed: Sealed,
 }
 
+pub(crate) struct NewSession<'a> {
+    pub identity: &'a Identity,
+    pub sealed: &'a Sealed,
+    pub host: Option<&'a str>,
+}
+
 pub struct StoredSession {
     pub id_hash: Vec<u8>,
     pub browser_hash: Vec<u8>,
@@ -145,6 +151,7 @@ impl PgSessions {
         browser_hash: &[u8],
         state_hash: &[u8],
         value: &Sealed,
+        host: Option<&str>,
     ) -> Result<i64, AuthError> {
         if browser_hash.len() != 32 || state_hash.len() != 32 {
             return Err(AuthError::Configuration);
@@ -163,8 +170,8 @@ impl PgSessions {
         .map_err(unavailable)?;
         revoke_browser_sessions(&mut tx, browser_hash).await?;
         sqlx::query(
-            "INSERT INTO flows (state_hash, browser_hash, browser_generation, key_id, nonce, ciphertext, expires_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp() + interval '10 minutes')",
+            "INSERT INTO flows (state_hash, browser_hash, browser_generation, key_id, nonce, ciphertext, expires_at, host) \
+             VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp() + interval '10 minutes', $7)",
         )
         .bind(state_hash)
         .bind(browser_hash)
@@ -172,6 +179,7 @@ impl PgSessions {
         .bind(&value.key_id)
         .bind(&value.nonce)
         .bind(&value.ciphertext)
+        .bind(host)
         .execute(&mut *tx)
         .await
         .map_err(unavailable)?;
@@ -198,17 +206,19 @@ impl PgSessions {
         &self,
         browser_hash: &[u8],
         state_hash: &[u8],
+        host: Option<&str>,
     ) -> Result<LoginFlow, AuthError> {
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
         let generation = Self::browser(&mut tx, browser_hash).await?;
         let row = sqlx::query(
             "UPDATE flows SET consumed_at = clock_timestamp() WHERE state_hash = $1 AND browser_hash = $2 \
-             AND browser_generation = $3 AND consumed_at IS NULL AND expires_at > clock_timestamp() \
+             AND browser_generation = $3 AND host IS NOT DISTINCT FROM $4 AND consumed_at IS NULL AND expires_at > clock_timestamp() \
              RETURNING key_id, nonce, ciphertext",
         )
         .bind(state_hash)
         .bind(browser_hash)
         .bind(generation)
+        .bind(host)
         .fetch_optional(&mut *tx)
         .await
         .map_err(unavailable)?
@@ -223,14 +233,13 @@ impl PgSessions {
 
     /// Creates the session for a consumed flow, once, while the browser is
     /// still at the flow's generation.
-    pub async fn create(
+    pub(crate) async fn create(
         &self,
         browser_hash: &[u8],
         generation: i64,
         state_hash: &[u8],
         session_hash: &[u8],
-        identity: &Identity,
-        value: &Sealed,
+        session: NewSession<'_>,
     ) -> Result<(), AuthError> {
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
         if Self::browser(&mut tx, browser_hash).await? != generation {
@@ -238,13 +247,14 @@ impl PgSessions {
         }
         let reserved = sqlx::query(
             "UPDATE flows SET session_hash = $4 WHERE state_hash = $1 AND browser_hash = $2 \
-             AND browser_generation = $3 AND consumed_at IS NOT NULL AND session_hash IS NULL \
+             AND browser_generation = $3 AND host IS NOT DISTINCT FROM $5 AND consumed_at IS NOT NULL AND session_hash IS NULL \
              AND expires_at > clock_timestamp()",
         )
         .bind(state_hash)
         .bind(browser_hash)
         .bind(generation)
         .bind(session_hash)
+        .bind(session.host)
         .execute(&mut *tx)
         .await
         .map_err(unavailable)?
@@ -254,17 +264,18 @@ impl PgSessions {
         }
         sqlx::query(
             "INSERT INTO sessions (id_hash, browser_hash, browser_generation, issuer, subject, key_id, nonce, \
-             ciphertext, expires_at) SELECT $1, $2, $3, $4, $5, $6, $7, $8, expires_at FROM browsers \
+             ciphertext, expires_at, host) SELECT $1, $2, $3, $4, $5, $6, $7, $8, expires_at, $9 FROM browsers \
              WHERE id_hash = $2 AND generation = $3",
         )
         .bind(session_hash)
         .bind(browser_hash)
         .bind(generation)
-        .bind(&identity.issuer)
-        .bind(&identity.subject)
-        .bind(&value.key_id)
-        .bind(&value.nonce)
-        .bind(&value.ciphertext)
+        .bind(&session.identity.issuer)
+        .bind(&session.identity.subject)
+        .bind(&session.sealed.key_id)
+        .bind(&session.sealed.nonce)
+        .bind(&session.sealed.ciphertext)
+        .bind(session.host)
         .execute(&mut *tx)
         .await
         .map_err(unavailable)?;
@@ -275,14 +286,17 @@ impl PgSessions {
         tx: &mut Transaction<'_, Postgres>,
         session_hash: &[u8],
         expected_browser: Option<&[u8]>,
+        host: Option<&str>,
     ) -> Result<PgRow, AuthError> {
-        let browser_hash: Vec<u8> =
-            sqlx::query_scalar("SELECT browser_hash FROM sessions WHERE id_hash = $1")
-                .bind(session_hash)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(unavailable)?
-                .ok_or(AuthError::Evidence)?;
+        let browser_hash: Vec<u8> = sqlx::query_scalar(
+            "SELECT browser_hash FROM sessions WHERE id_hash = $1 AND host IS NOT DISTINCT FROM $2",
+        )
+        .bind(session_hash)
+        .bind(host)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(unavailable)?
+        .ok_or(AuthError::Evidence)?;
         if expected_browser.is_some_and(|expected| expected != browser_hash) {
             return Err(AuthError::Evidence);
         }
@@ -322,9 +336,10 @@ impl PgSessions {
         &self,
         session_hash: &[u8],
         browser_hash: Option<&[u8]>,
+        host: Option<&str>,
     ) -> Result<StoredSession, AuthError> {
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
-        let row = Self::locked_session(&mut tx, session_hash, browser_hash).await?;
+        let row = Self::locked_session(&mut tx, session_hash, browser_hash, host).await?;
         if row.get::<String, _>("state") == "refreshing" {
             if row.get::<Option<bool>, _>("refresh_live") != Some(true) {
                 revoke(&mut tx, session_hash).await?;
@@ -343,9 +358,10 @@ impl PgSessions {
         &self,
         session_hash: &[u8],
         browser_hash: &[u8],
+        host: Option<&str>,
     ) -> Result<StoredSession, AuthError> {
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
-        let row = Self::locked_session(&mut tx, session_hash, Some(browser_hash)).await?;
+        let row = Self::locked_session(&mut tx, session_hash, Some(browser_hash), host).await?;
         let stored = Self::stored(&row);
         tx.commit().await.map_err(unavailable)?;
         Ok(stored)
@@ -356,9 +372,10 @@ impl PgSessions {
         &self,
         session_hash: &[u8],
         browser_hash: Option<&[u8]>,
+        host: Option<&str>,
     ) -> Result<RefreshClaim, AuthError> {
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
-        let row = Self::locked_session(&mut tx, session_hash, browser_hash).await?;
+        let row = Self::locked_session(&mut tx, session_hash, browser_hash, host).await?;
         if row.get::<String, _>("state") != "active" {
             return Err(AuthError::Unavailable);
         }

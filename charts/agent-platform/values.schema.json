@@ -190,6 +190,16 @@
           "type": "string",
           "pattern": "^(|https://[^/?#\\s]+)$"
         },
+        "agentDomain": {
+          "type": "string",
+          "maxLength": 251,
+          "pattern": "^(|[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*)$"
+        },
+        "reservedAgentLabels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "maxLength": 63, "pattern": "^[a-z]([a-z0-9-]*[a-z0-9])?$", "not": {"pattern": "--"}}
+        },
         "oidcPrivateCa": {
           "type": "boolean"
         },
@@ -499,6 +509,14 @@
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 65535
+                },
+                "loadBalancerClass": {
+                  "type": "string",
+                  "maxLength": 253
+                },
+                "annotations": {
+                  "type": "object",
+                  "additionalProperties": {"type": "string"}
                 }
               }
             }

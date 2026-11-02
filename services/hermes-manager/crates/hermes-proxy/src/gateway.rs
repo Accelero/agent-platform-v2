@@ -8,13 +8,15 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{Extension, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, Version, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use hermes_core::domain::routing::{Destination, Route};
+use hermes_core::domain::endpoints::EndpointNames;
+use hermes_core::domain::routing::{Destination, Route, Target};
 use hermes_identity::AuthError;
+use hermes_identity::browser::RequestOrigin;
 use hermes_identity::crypto::hash;
 use http_body_util::{BodyExt, LengthLimitError};
 use hyper_util::client::legacy::Client;
@@ -23,7 +25,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use serde_json::json;
 
 use crate::cache::TtlCache;
-use crate::hosts::Hosts;
+use crate::hosts::{HostClass, Hosts};
 use crate::hygiene::{
     expire_cookies, filter_response, forward_request, is_websocket, platform_cookies,
 };
@@ -58,13 +60,16 @@ pub struct Gateway {
     signed: TtlCache<SignedIn>,
     client: Client<HttpConnector, Body>,
     dial: Dial,
-    public_origin: String,
-    public_host: String,
     max_upload: u64,
     hosts: Hosts,
 }
 
 impl Gateway {
+    /// Enables classification of shared-agent hosts using the validated policy.
+    pub fn with_agents(mut self, names: EndpointNames) -> Self {
+        self.hosts = self.hosts.with_agents(names);
+        self
+    }
     /// `public_origin` is the Hermes hostname's origin, such as
     /// `https://hermes.example.org`.
     pub fn new(
@@ -74,11 +79,7 @@ impl Gateway {
         max_upload: u64,
     ) -> Result<Self, AuthError> {
         let url = url::Url::parse(public_origin).map_err(|_| AuthError::Configuration)?;
-        let host = url.host_str().ok_or(AuthError::Configuration)?;
-        let public_host = match url.port() {
-            Some(port) => format!("{host}:{port}"),
-            None => host.to_owned(),
-        };
+        url.host_str().ok_or(AuthError::Configuration)?;
         if url.scheme() != "https"
             || url.origin().ascii_serialization() != public_origin
             || max_upload == 0
@@ -99,8 +100,6 @@ impl Gateway {
             signed: TtlCache::new(ttl, CACHE_CAPACITY),
             client,
             dial,
-            public_origin: public_origin.to_owned(),
-            public_host,
             max_upload,
             hosts: Hosts::new(public_origin, None)?,
         })
@@ -110,28 +109,33 @@ impl Gateway {
     async fn signed_in(
         &self,
         headers: &HeaderMap,
+        host: Option<&str>,
     ) -> Result<(SignedIn, String, String), AuthError> {
         let (session, browser) = platform_cookies(headers)
             .map_err(|_| AuthError::Evidence)?
             .ok_or(AuthError::Evidence)?;
-        let key = session_key(&session, &browser);
+        let key = session_key(&session, &browser, host);
         if let Some(signed) = self.signed.get(&key) {
             return Ok((signed, session, browser));
         }
         let signed = self
             .checks
             .sessions
-            .authenticate(&session, &browser)
+            .authenticate_on_host(&session, &browser, host)
             .await?;
         self.signed.put(&key, signed.clone());
         Ok((signed, session, browser))
     }
 
-    async fn route(&self, signed: &SignedIn) -> Verdict {
+    async fn route(&self, signed: &SignedIn, target: &Target) -> Verdict {
         if let Some(route) = self.routes.get(&signed.handle) {
             return Verdict::Ready(route);
         }
-        let verdict = self.checks.resolver.resolve(&signed.identity).await;
+        let verdict = self
+            .checks
+            .resolver
+            .resolve_target(&signed.identity, target)
+            .await;
         match &verdict {
             Verdict::Ready(route) => self.routes.put(&signed.handle, route.clone()),
             Verdict::Pending(_) | Verdict::Denied | Verdict::Unavailable => {
@@ -142,9 +146,9 @@ impl Gateway {
     }
 
     /// Forgets the session these cookies name, if it is cached.
-    fn forget_cookies(&self, headers: &HeaderMap) {
+    fn forget_cookies(&self, headers: &HeaderMap, host: Option<&str>) {
         if let Ok(Some((session, browser))) = platform_cookies(headers)
-            && let Some(signed) = self.signed.get(&session_key(&session, &browser))
+            && let Some(signed) = self.signed.get(&session_key(&session, &browser, host))
         {
             self.forget(&signed.handle);
         }
@@ -155,11 +159,11 @@ impl Gateway {
         self.signed.remove_where(|signed| signed.handle == handle);
     }
 
-    fn same_origin(&self, headers: &HeaderMap) -> bool {
+    fn same_origin(&self, headers: &HeaderMap, origin: &str) -> bool {
         let mut origins = headers.get_all(header::ORIGIN).iter();
         matches!(
             (origins.next(), origins.next()),
-            (Some(origin), None) if origin.as_bytes() == self.public_origin.as_bytes()
+            (Some(value), None) if value.as_bytes() == origin.as_bytes()
         )
     }
 
@@ -167,8 +171,8 @@ impl Gateway {
     /// send `Origin` on every cross-origin request that can change state, and
     /// `null` from sandboxed or redirected contexts; clients that send none
     /// are not browsers acting for a page.
-    fn foreign_origin(&self, headers: &HeaderMap) -> bool {
-        headers.contains_key(header::ORIGIN) && !self.same_origin(headers)
+    fn foreign_origin(&self, headers: &HeaderMap, origin: &str) -> bool {
+        headers.contains_key(header::ORIGIN) && !self.same_origin(headers, origin)
     }
 
     fn upstream_request(
@@ -176,10 +180,11 @@ impl Gateway {
         route: &Route,
         method: Method,
         uri: &Uri,
-        headers: &HeaderMap,
+        headers_and_origin: (&HeaderMap, &str),
         websocket: bool,
         body: Body,
     ) -> Option<Request> {
+        let (headers, origin) = headers_and_origin;
         let path = uri.path_and_query().map_or("/", |p| p.as_str());
         let target = format!("http://{}{path}", (self.dial)(&route.destination));
         let mut request = Request::builder()
@@ -188,7 +193,8 @@ impl Gateway {
             .version(Version::HTTP_11)
             .body(body)
             .ok()?;
-        *request.headers_mut() = forward_request(headers, &self.public_host, websocket);
+        *request.headers_mut() =
+            forward_request(headers, origin.strip_prefix("https://")?, websocket);
         Some(request)
     }
 }
@@ -224,9 +230,21 @@ async fn classify_host(
                 Ok(class) => class,
                 Err(_) => return error(StatusCode::MISDIRECTED_REQUEST, "misdirected_request"),
             };
+        request
+            .extensions_mut()
+            .insert(gateway.hosts.request_origin(&class));
         request.extensions_mut().insert(class);
     }
     next.run(request).await
+}
+
+fn target(class: &HostClass) -> Target {
+    match class {
+        HostClass::Personal => Target::Personal {},
+        HostClass::Agent { label } => Target::Shared {
+            label: label.clone(),
+        },
+    }
 }
 
 async fn unknown_platform_path() -> Response {
@@ -245,8 +263,8 @@ pub fn platform(gateway: Arc<Gateway>) -> Router {
 }
 
 /// Cache key of a cookie pair; the cookie values themselves are not kept.
-fn session_key(session: &str, browser: &str) -> String {
-    hash(&format!("{session}\0{browser}"))
+fn session_key(session: &str, browser: &str, host: Option<&str>) -> String {
+    hash(&format!("{session}\0{browser}\0{}", host.unwrap_or("")))
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
@@ -262,11 +280,19 @@ pub async fn expire_on_logout(
     next: Next,
 ) -> Response {
     let logout = request.method() == Method::POST && request.uri().path() == "/_platform/logout";
-    let headers = logout.then(|| request.headers().clone());
+    let headers = logout.then(|| {
+        (
+            request.headers().clone(),
+            request
+                .extensions()
+                .get::<RequestOrigin>()
+                .and_then(|context| context.host.clone()),
+        )
+    });
     let mut response = next.run(request).await;
-    if let Some(headers) = headers {
+    if let Some((headers, host)) = headers {
         if response.status() == StatusCode::NO_CONTENT {
-            gateway.forget_cookies(&headers);
+            gateway.forget_cookies(&headers, host.as_deref());
         }
         if response.status() != StatusCode::FORBIDDEN {
             expire_cookies(response.headers_mut());
@@ -304,8 +330,12 @@ fn error_response(status: StatusCode) -> Response {
     error(status, code)
 }
 
-async fn me(State(gateway): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
-    match gateway.signed_in(&headers).await {
+async fn me(
+    State(gateway): State<Arc<Gateway>>,
+    Extension(context): Extension<RequestOrigin>,
+    headers: HeaderMap,
+) -> Response {
+    match gateway.signed_in(&headers, context.host.as_deref()).await {
         Ok((signed, _, _)) => {
             let mut response = axum::Json(json!({
                 "identity": signed.identity,
@@ -322,16 +352,26 @@ async fn me(State(gateway): State<Arc<Gateway>>, headers: HeaderMap) -> Response
 /// Native logout: forwarded best-effort so the instance can revoke its own
 /// tokens, then the platform session ends and every cookie is expired.
 async fn native_logout(State(gateway): State<Arc<Gateway>>, request: Request) -> Response {
-    if !gateway.same_origin(request.headers()) {
+    let Some(context) = request.extensions().get::<RequestOrigin>().cloned() else {
+        return error_response(StatusCode::MISDIRECTED_REQUEST);
+    };
+    let Some(class) = request.extensions().get::<HostClass>() else {
+        return error_response(StatusCode::MISDIRECTED_REQUEST);
+    };
+    let target = target(class);
+    if !gateway.same_origin(request.headers(), &context.origin) {
         return error_response(StatusCode::FORBIDDEN);
     }
-    if let Ok((signed, session, browser)) = gateway.signed_in(request.headers()).await {
-        if let Verdict::Ready(route) = gateway.route(&signed).await
+    if let Ok((signed, session, browser)) = gateway
+        .signed_in(request.headers(), context.host.as_deref())
+        .await
+    {
+        if let Verdict::Ready(route) = gateway.route(&signed, &target).await
             && let Some(upstream) = gateway.upstream_request(
                 &route,
                 Method::POST,
                 request.uri(),
-                request.headers(),
+                (request.headers(), &context.origin),
                 false,
                 Body::empty(),
             )
@@ -341,7 +381,7 @@ async fn native_logout(State(gateway): State<Arc<Gateway>>, request: Request) ->
         let _ = gateway
             .checks
             .sessions
-            .logout(&session, &browser, &signed.csrf)
+            .logout_on_host(&session, &browser, &signed.csrf, context.host.as_deref())
             .await;
         gateway.forget(&signed.handle);
     }
@@ -402,9 +442,19 @@ fn sign_in(uri: &Uri) -> Response {
 
 /// Every request outside the platform routes.
 pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) -> Response {
+    let Some(context) = request.extensions().get::<RequestOrigin>().cloned() else {
+        return error_response(StatusCode::MISDIRECTED_REQUEST);
+    };
+    let Some(class) = request.extensions().get::<HostClass>() else {
+        return error_response(StatusCode::MISDIRECTED_REQUEST);
+    };
+    let target = target(class);
     let navigation = navigation(&request);
     let websocket = is_websocket(request.headers());
-    let signed = match gateway.signed_in(request.headers()).await {
+    let signed = match gateway
+        .signed_in(request.headers(), context.host.as_deref())
+        .await
+    {
         Ok((signed, _, _)) => signed,
         Err(AuthError::Unavailable) => return Page::Unavailable.respond(navigation),
         Err(_) if navigation => return sign_in(request.uri()),
@@ -417,12 +467,12 @@ pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) ->
         *request.method(),
         Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
     );
-    if (websocket && !gateway.same_origin(request.headers()))
-        || (unsafe_method && gateway.foreign_origin(request.headers()))
+    if (websocket && !gateway.same_origin(request.headers(), &context.origin))
+        || (unsafe_method && gateway.foreign_origin(request.headers(), &context.origin))
     {
         return error_response(StatusCode::FORBIDDEN);
     }
-    let route = match gateway.route(&signed).await {
+    let route = match gateway.route(&signed, &target).await {
         Verdict::Ready(route) => route,
         Verdict::Pending(reason) => return Page::Pending(reason).respond(navigation),
         Verdict::Denied => return Page::Denied.respond(navigation),
@@ -472,9 +522,14 @@ pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) ->
             ),
         )
     };
-    let Some(upstream) =
-        gateway.upstream_request(&route, method.clone(), &uri, &headers, websocket, body)
-    else {
+    let Some(upstream) = gateway.upstream_request(
+        &route,
+        method.clone(),
+        &uri,
+        (&headers, &context.origin),
+        websocket,
+        body,
+    ) else {
         return error_response(StatusCode::BAD_REQUEST);
     };
     let mut response =
@@ -489,7 +544,12 @@ pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) ->
         && response.status() == StatusCode::SWITCHING_PROTOCOLS
     {
         let upstream_upgrade = hyper::upgrade::on(&mut response);
-        let supervisor = gateway.checks.spawn(signed.handle.clone(), route);
+        let supervisor = gateway.checks.spawn_on_host(
+            signed.handle.clone(),
+            route,
+            context.host.clone(),
+            target.clone(),
+        );
         let watcher = gateway.clone();
         tokio::spawn(async move {
             let (Ok(client), Ok(upstream)) = tokio::join!(client_upgrade, upstream_upgrade) else {
@@ -503,11 +563,11 @@ pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) ->
             }
         });
         let (mut parts, _) = response.into_parts();
-        filter_response(&mut parts.headers, true);
+        filter_response(&mut parts.headers, true, context.host.is_some());
         return Response::from_parts(parts, Body::empty());
     }
     let (mut parts, body) = response.into_parts();
-    filter_response(&mut parts.headers, false);
+    filter_response(&mut parts.headers, false, context.host.is_some());
     let streamed = !parts.headers.contains_key(header::CONTENT_LENGTH)
         && method != Method::HEAD
         && !matches!(
@@ -517,7 +577,12 @@ pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) ->
         && !parts.status.is_informational();
     let body = Body::new(body);
     let body = if streamed {
-        Revocable::wrap(body, gateway.checks.spawn(signed.handle, route))
+        Revocable::wrap(
+            body,
+            gateway
+                .checks
+                .spawn_on_host(signed.handle, route, context.host, target),
+        )
     } else {
         body
     };

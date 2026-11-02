@@ -45,10 +45,21 @@ impl RouteStore for Rows {
     }
     async fn shared_route_row(
         &self,
-        _: &Identity,
-        _: &str,
+        identity: &Identity,
+        label: &str,
     ) -> Result<Option<hermes_core::domain::routing::SharedRouteRow>, StoreError> {
-        Ok(None)
+        if identity.subject != "bob" || label != "engineering" {
+            return Ok(None);
+        }
+        let mut target = identity.clone();
+        target.subject = "carol".into();
+        Ok(self.0.lock().unwrap().get(&target).cloned().map(|route| {
+            hermes_core::domain::routing::SharedRouteRow {
+                endpoint_enabled: true,
+                granted: true,
+                route,
+            }
+        }))
     }
 }
 
@@ -179,6 +190,7 @@ impl Fixture {
             "tls": {"certificateFile": secrets.path("server.crt"), "privateKeyFile": secrets.path("server.key")},
             "publicOrigin": PUBLIC,
             "adminOrigin": "https://hermes-admin.localhost",
+            "agentDomain": "agents.localhost",
             "databaseUrlFile": path("database-url"),
             "oidcCaFile": secrets.path("ca.crt"),
             "oidc": {
@@ -305,6 +317,128 @@ impl Fixture {
             .await
             .unwrap()
     }
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn shared_login_uses_its_callback_and_cannot_be_replayed_on_personal_host(pool: PgPool) {
+    let fixture = Fixture::new(&pool).await;
+    fixture.provider.set_subject("bob");
+    let host = "engineering.agents.localhost";
+    let login = fixture
+        .client
+        .get(format!("{}/_platform/login", fixture.url))
+        .header("host", host)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 303);
+    let browser = cookie(&login, BROWSER);
+    let provider = fixture
+        .secrets
+        .client(None)
+        .get(login.headers()["location"].to_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    let callback = Url::parse(provider.headers()["location"].to_str().unwrap()).unwrap();
+    assert_eq!(
+        callback.as_str().split('?').next().unwrap(),
+        format!("https://{host}/_platform/oidc/callback")
+    );
+    let callback_url = format!(
+        "{}{}?{}",
+        fixture.url,
+        callback.path(),
+        callback.query().unwrap()
+    );
+    let wrong = fixture
+        .client
+        .get(&callback_url)
+        .header("cookie", format!("{BROWSER}={browser}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 401);
+    let complete = fixture
+        .client
+        .get(&callback_url)
+        .header("host", host)
+        .header("cookie", format!("{BROWSER}={browser}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(complete.status(), 303);
+    let cleared: Vec<_> = complete
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter(|value| value.contains("hermes_session_") || value.contains("hermes_sso_attempt"))
+        .collect();
+    assert_eq!(cleared.len(), 15);
+    assert!(cleared.iter().all(
+        |value| value.contains("Max-Age=0") && !value.to_ascii_lowercase().contains("domain=")
+    ));
+    let session = cookie(&complete, SESSION);
+    let pair = format!("{BROWSER}={browser}; {SESSION}={session}");
+    let wrong = fixture.get(&pair, "/_platform/me").await;
+    assert_eq!(wrong.status(), 401);
+    let right = fixture
+        .client
+        .get(format!("{}/api/sessions", fixture.url))
+        .header("host", host)
+        .header("cookie", &pair)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(right.status(), 200);
+    let body: Value = right.json().await.unwrap();
+    assert_eq!(body["instance"], "carol");
+    let me: Value = fixture
+        .client
+        .get(format!("{}/_platform/me", fixture.url))
+        .header("host", host)
+        .header("cookie", &pair)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let csrf = me["csrfToken"].as_str().unwrap();
+    let logout_url = format!("{}/_platform/logout", fixture.url);
+    let refused = fixture
+        .client
+        .post(&logout_url)
+        .header("host", host)
+        .header("origin", PUBLIC)
+        .header("cookie", &pair)
+        .header("x-csrf-token", csrf)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403);
+    assert_eq!(refused.headers().get_all("set-cookie").iter().count(), 0);
+    let ended = fixture
+        .client
+        .post(&logout_url)
+        .header("host", host)
+        .header("origin", format!("https://{host}"))
+        .header("cookie", &pair)
+        .header("x-csrf-token", csrf)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ended.status(), 204);
+    let after = fixture
+        .client
+        .get(format!("{}/_platform/me", fixture.url))
+        .header("host", host)
+        .header("cookie", &pair)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), 401);
 }
 
 #[sqlx::test(migrator = "hermes_store::MIGRATOR")]

@@ -52,6 +52,10 @@ def resolver_rules(node_ip: str):
         (e2e.PUBLIC, e2e.NODE_PORTS["gateway"]),
         (e2e.ADMIN, e2e.NODE_PORTS["admin"]),
     ]
+    mapped.extend(
+        (f"{label}.{e2e.SHARED_DOMAIN}", e2e.NODE_PORTS["gateway"])
+        for label in e2e.SHARED_LABELS
+    )
     rules = [f"MAP {host} {node_ip}:{port}" for host, port in mapped]
     return ", ".join([*rules, "MAP * ~NOTFOUND"])
 

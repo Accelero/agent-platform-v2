@@ -92,7 +92,8 @@ test("the built dashboard works under the production CSP", async ({
   // Every page renders against the real contract.
   for (const [path, text] of [
     ["/users", "Known identities"],
-    ["/assignments", "Assignments"],
+    ["/assignments", "Agents"],
+    ["/groups", "Groups"],
     ["/terminal-backends", "Terminal backends"],
     ["/storage", "Storage sources"],
     ["/activity", "template.publish"],

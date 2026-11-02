@@ -15,7 +15,7 @@ test("overview, navigation, lists and mobile layout", async ({ page }) => {
   ).toBeVisible();
   await page.keyboard.press("Escape");
   const nav = page.getByRole("navigation");
-  await nav.getByRole("link", { name: /Assignments/ }).click();
+  await nav.getByRole("link", { name: /Agents/ }).click();
   await expect(page.getByRole("link", { name: /^bob/ })).toBeVisible();
   await nav.getByRole("link", { name: /Terminal backends/ }).click();
   await expect(page.getByRole("link", { name: "ssh" })).toBeVisible();

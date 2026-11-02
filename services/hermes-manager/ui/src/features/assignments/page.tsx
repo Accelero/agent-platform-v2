@@ -13,8 +13,9 @@ import {
   StatusBadge,
   usePager,
 } from "../../components/data";
-import { ChangeAssignment } from "./editor";
+import { ChangeAssignment, CreateSharedAgent } from "./editor";
 import { Rollout } from "./rollout";
+import { SharedAgentAccess } from "./shared";
 
 export function AssignmentsPage() {
   const actor = useActorKey();
@@ -35,12 +36,14 @@ export function AssignmentsPage() {
   return (
     <>
       <p>
-        An assignment gives one exact identity its own Hermes instance. Create
-        one from <Link to="/users">Users</Link>.
+        Personal agents belong to one identity. Shared agents give explicitly
+        granted users and groups access to the same instance and workspace.
+        Create a personal agent from <Link to="/users">Users</Link>.
       </p>
       <ListControls
-        search="Search assignments"
+        search="Search agents"
         filters={[
+          { key: "kind", label: "Kind", options: ["personal", "shared"] },
           {
             key: "access",
             label: "Access",
@@ -57,7 +60,7 @@ export function AssignmentsPage() {
         {query.data && (
           <>
             <DataTable
-              caption="Assignments"
+              caption="Agents"
               rows={query.data.items}
               empty="No assignments match."
               columns={[
@@ -109,6 +112,7 @@ export function AssignmentsPage() {
         )}
       </ReadState>
       <Rollout selected={selected} onDone={() => setSelected(new Map())} />
+      <CreateSharedAgent />
     </>
   );
 }
@@ -255,10 +259,14 @@ export function AssignmentDetail() {
                     assignment.sharedAgent?.displayName}
                 </h2>
                 <dl>
-                  <dt>Issuer</dt>
-                  <dd>
-                    <code>{assignment.identity?.issuer}</code>
-                  </dd>
+                  {assignment.identity && (
+                    <>
+                      <dt>Issuer</dt>
+                      <dd>
+                        <code>{assignment.identity.issuer}</code>
+                      </dd>
+                    </>
+                  )}
                   <dt>Assignment</dt>
                   <dd>
                     <CopyId value={assignment.id} />
@@ -328,6 +336,9 @@ export function AssignmentDetail() {
                   </Link>
                 </div>
               </section>
+              {assignment.kind === "shared" && (
+                <SharedAgentAccess id={assignment.id} />
+              )}
               <InstanceStatus instance={assignment.instance} />
               <Environments instanceId={assignment.instance.id} />
               <DataTable

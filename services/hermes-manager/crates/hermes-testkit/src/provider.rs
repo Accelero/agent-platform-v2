@@ -48,6 +48,7 @@ struct Grant {
     nonce: String,
     challenge: String,
     subject: String,
+    redirect_uri: String,
 }
 
 struct ProviderState {
@@ -210,6 +211,7 @@ async fn authorize(
     let grant = Grant {
         nonce: q["nonce"].clone(),
         challenge: q["code_challenge"].clone(),
+        redirect_uri: q["redirect_uri"].clone(),
         subject: p.subject.lock().unwrap().clone(),
     };
     p.codes.lock().unwrap().insert(code.clone(), grant);
@@ -252,8 +254,9 @@ async fn token(
         let Some(grant) = p.codes.lock().unwrap().remove(&form["code"]) else {
             return invalid_grant();
         };
-        if URL_SAFE_NO_PAD.encode(Sha256::digest(form["code_verifier"].as_bytes()))
-            != grant.challenge
+        if form.get("redirect_uri") != Some(&grant.redirect_uri)
+            || URL_SAFE_NO_PAD.encode(Sha256::digest(form["code_verifier"].as_bytes()))
+                != grant.challenge
         {
             return invalid_grant();
         }

@@ -143,6 +143,114 @@ def known_person(platform, chromium, prefix):
     return username, password, subject
 
 
+def test_shared_agent_browser_login_chat_and_logout(platform, chromium):
+    """SH-E18: a real browser uses an agent hostname with scoped cookies."""
+    admin = platform.admin
+    created = admin.call(
+        "POST",
+        "/api/v1/assignments",
+        {
+            "sharedAgent": {
+                "name": "research",
+                "displayName": "Research",
+                "label": "research",
+                "enabled": True,
+            },
+            "spec": {
+                "access": "enabled",
+                "template": {"id": "assistant", "version": 1},
+                "volumes": {"workspace": {"source": "local", "sizeGib": 1}},
+                "terminal": platform.state.terminal,
+            },
+        },
+    ).json()
+    grants = f"/api/v1/assignments/{created['assignmentId']}/grants"
+    etag = admin.call("GET", grants).headers["ETag"]
+    admin.call(
+        "PUT",
+        grants,
+        {
+            "grants": [
+                {"identity": {"issuer": e2e.ISSUER, "subject": e2e.SUBJECTS["bob"]}}
+            ]
+        },
+        etag=etag,
+    )
+    e2e.wait(
+        lambda: admin.phase(created["instanceId"])["phase"] == "ready",
+        e2e.READY_TIMEOUT,
+        "shared browser instance never became ready",
+        interval=5,
+    )
+    host = platform.shared_hosts[1]
+    origin = f"https://{host}"
+    with chromium.context() as context:
+        page = context.new_page()
+        sign_in(
+            page, f"{origin}/", "bob", platform.passwords["bob"], left_the_login(host)
+        )
+        cookies = platform_cookies(context, origin)
+        assert set(cookies) == set(PLATFORM_COOKIES)
+        assert all(
+            cookie["secure"]
+            and cookie["httpOnly"]
+            and cookie["domain"] == host
+            and cookie["path"] == "/"
+            for cookie in cookies.values()
+        )
+        assert "__Host-hermes-platform" not in page.evaluate("document.cookie")
+        page.goto(f"{origin}/auth/login?provider=self-hosted&next=/")
+        page.wait_for_url(left_the_login(host))
+        page.goto(f"{origin}/_platform/healthz")
+        native = fetch(page, "/api/auth/me")
+        assert native["status"] == 200
+        assert json.loads(native["text"])["user_id"] == e2e.SUBJECTS["bob"]
+        ticket = fetch(page, "/api/auth/ws-ticket", method="POST")
+        assert ticket["status"] == 200
+        token = json.loads(ticket["text"])["ticket"]
+        reply = page.evaluate(
+            """ticket => new Promise((resolve, reject) => {
+              const url = `wss://${location.host}/api/ws?ticket=${encodeURIComponent(ticket)}`;
+              const ws = new WebSocket(url);
+              const timer = setTimeout(() => {
+                ws.close(); reject(new Error('chat timeout'));
+              }, 120000);
+              ws.onerror = () => {
+                clearTimeout(timer); reject(new Error('websocket failed'));
+              };
+              ws.onopen = () => ws.send(JSON.stringify({
+                jsonrpc:'2.0', id:1, method:'session.create', params:{}
+              }) + '\\n');
+              ws.onmessage = event => {
+                for (const line of event.data.split('\\n').filter(Boolean)) {
+                  const message = JSON.parse(line);
+                  if (message.id === 1) ws.send(JSON.stringify({
+                    jsonrpc:'2.0', id:2, method:'prompt.submit',
+                    params:{session_id:message.result.session_id,
+                            text:'browser shared turn'}
+                  }) + '\\n');
+                  if (message.method === 'event' &&
+                      message.params?.type === 'message.complete') {
+                    clearTimeout(timer); ws.close();
+                    resolve(message.params.payload.text);
+                  }
+                }
+              };
+            })""",
+            token,
+        )
+        assert reply == "hello from e2e"
+        me = json.loads(fetch(page, "/_platform/me")["text"])
+        logout = fetch(
+            page,
+            "/_platform/logout",
+            method="POST",
+            headers={"X-CSRF-Token": me["csrfToken"]},
+        )
+        assert logout["status"] == 204
+        assert fetch(page, "/_platform/me")["status"] == 401
+
+
 def test_an_owner_signs_in_through_keycloak_and_the_session_cookies_are_confined(
     platform, chromium
 ):

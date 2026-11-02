@@ -39,7 +39,7 @@ def platform(tmp_path_factory):
         directory = tmp_path_factory.mktemp("platform")
         directory.chmod(0o700)
         built = cluster_support.create(0, directory, cleanup)
-        yield platform_support.bring_up(built, directory, cleanup)
+        yield platform_support.bring_up(built, directory, cleanup, shared=True)
 
 
 def reclaim(platform):

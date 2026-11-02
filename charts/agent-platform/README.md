@@ -73,11 +73,22 @@ this installation.
 
 ## Exposure
 
-Services are ClusterIP; set `gateway.service.type` for a LoadBalancer. List the
+Services are ClusterIP; set `gateway.service.type` for a LoadBalancer. The
+gateway Service accepts `loadBalancerClass` and string `annotations`, including
+those required by a Tailscale ingress proxy group. List the
 peers that may reach the administration API and the gateway in
 `hermesManager.ingress`; empty lists deny ingress. The gateway terminates TLS
 itself, so a proxy in front of it passes TLS through. Never expose the resolver
-or execution listeners. Secret rotation requires restarting the affected role.
+or execution listeners. The gateway checks its TLS certificate and key every
+60 seconds and keeps the previous pair if the replacement is invalid. Other
+secret rotation requires restarting the affected role.
+
+Set `hermesManager.agentDomain` to enable shared-agent hostnames and optionally
+reserve more names with `reservedAgentLabels`. The deployment must provide DNS
+for the public host and `*.<agentDomain>`, a gateway certificate covering both,
+and an exact callback for each shared hostname on the gateway and native OIDC
+clients. The gateway validates certificate coverage at startup and on reload;
+DNS and identity-provider registration are managed outside the chart.
 
 Build and test locally, without publication or a deployment kubecontext:
 

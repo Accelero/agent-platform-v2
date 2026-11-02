@@ -68,6 +68,84 @@ pub fn tls_config(
     Ok(Arc::new(config))
 }
 
+/// Gateway certificates must cover the personal host and, when shared agents
+/// are enabled, the entire one-label agent namespace.
+pub fn gateway_tls_config(
+    cert_pem: &[u8],
+    key_pem: &[u8],
+    public_origin: &str,
+    agent_domain: Option<&str>,
+) -> Result<Arc<ServerConfig>, AppError> {
+    let origin = url::Url::parse(public_origin).map_err(|_| AppError::invalid())?;
+    let host = origin.host().ok_or_else(AppError::invalid)?;
+    let cert = rustls_pemfile::certs(&mut &cert_pem[..])
+        .next()
+        .transpose()
+        .map_err(|_| AppError::invalid())?
+        .ok_or_else(AppError::invalid)?;
+    let (_, parsed) = X509Certificate::from_der(cert.as_ref()).map_err(|_| AppError::invalid())?;
+    if !parsed.validity().is_valid() {
+        return Err(AppError::invalid());
+    }
+    if parsed
+        .basic_constraints()
+        .map_err(|_| AppError::invalid())?
+        .is_some_and(|constraints| constraints.value.ca)
+        || parsed
+            .key_usage()
+            .map_err(|_| AppError::invalid())?
+            .is_some_and(|usage| !usage.value.digital_signature())
+        || parsed
+            .extended_key_usage()
+            .map_err(|_| AppError::invalid())?
+            .is_some_and(|usage| !usage.value.server_auth && !usage.value.any)
+    {
+        return Err(AppError::invalid());
+    }
+    let names = parsed
+        .subject_alternative_name()
+        .map_err(|_| AppError::invalid())?
+        .ok_or_else(AppError::invalid)?;
+    let dns: Vec<_> = names
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            GeneralName::DNSName(name) => Some(*name),
+            _ => None,
+        })
+        .collect();
+    let public_covered = match host {
+        url::Host::Domain(host) => dns.iter().any(|name| {
+            let name = name.to_ascii_lowercase();
+            name == host
+                || name.strip_prefix("*.").is_some_and(|suffix| {
+                    host.strip_suffix(&format!(".{suffix}"))
+                        .is_some_and(|label| !label.is_empty() && !label.contains('.'))
+                })
+        }),
+        url::Host::Ipv4(ip) => names
+            .value
+            .general_names
+            .iter()
+            .any(|name| matches!(name, GeneralName::IPAddress(bytes) if *bytes == ip.octets())),
+        url::Host::Ipv6(ip) => names
+            .value
+            .general_names
+            .iter()
+            .any(|name| matches!(name, GeneralName::IPAddress(bytes) if *bytes == ip.octets())),
+    };
+    if !public_covered
+        || agent_domain.is_some_and(|domain| {
+            !dns.iter()
+                .any(|name| name.eq_ignore_ascii_case(&format!("*.{domain}")))
+        })
+    {
+        return Err(AppError::invalid());
+    }
+    tls_config(cert_pem, key_pem, None)
+}
+
 /// The certificate's single URI SAN among `allowed`, or none.
 fn certificate_identity(
     certificate: &CertificateDer<'_>,
@@ -144,7 +222,28 @@ pub async fn serve_bounded(
     shutdown: impl Future<Output = ()> + Send,
     connections: usize,
 ) -> Result<(), AppError> {
-    let acceptor = TlsAcceptor::from(config);
+    let (_sender, receiver) = tokio::sync::watch::channel(config);
+    serve_bounded_reloading(
+        listener,
+        receiver,
+        allowed_peers,
+        router,
+        shutdown,
+        connections,
+    )
+    .await
+}
+
+/// New handshakes use the current TLS configuration; existing connections
+/// retain the configuration with which they were accepted.
+pub async fn serve_bounded_reloading(
+    listener: TcpListener,
+    configs: tokio::sync::watch::Receiver<Arc<ServerConfig>>,
+    allowed_peers: BTreeSet<String>,
+    router: Router,
+    shutdown: impl Future<Output = ()> + Send,
+    connections: usize,
+) -> Result<(), AppError> {
     let permits = Arc::new(Semaphore::new(connections));
     let mut connections = JoinSet::new();
     tokio::pin!(shutdown);
@@ -158,7 +257,7 @@ pub async fn serve_bounded(
                     drop(socket);
                     continue;
                 };
-                let (acceptor, router, allowed) = (acceptor.clone(), router.clone(), allowed_peers.clone());
+                let (acceptor, router, allowed) = (TlsAcceptor::from(configs.borrow().clone()), router.clone(), allowed_peers.clone());
                 connections.spawn(async move {
                     let _permit = permit;
                     let Ok(Ok(stream)) = tokio::time::timeout(Duration::from_secs(3), acceptor.accept(socket)).await else {

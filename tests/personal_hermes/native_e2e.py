@@ -73,6 +73,8 @@ from tests.support.ownership import (
 
 NAMESPACE = "agents"
 PUBLIC = "hermes.e2e.test"
+SHARED_DOMAIN = "agents.e2e.test"
+SHARED_LABELS = ("engineering", "research")
 ADMIN = "hermes-admin.e2e.test"
 KEYCLOAK = "keycloak.keycloak.svc.cluster.local"
 ISSUER = f"https://{KEYCLOAK}:8443/realms/agents"
@@ -91,6 +93,7 @@ SUBJECTS = {
     "carol": "00000000-0000-4000-8000-0000000000c0",
     "mallory": "00000000-0000-4000-8000-0000000000d0",
     "erin": "00000000-0000-4000-8000-0000000000e0",
+    "frank": "00000000-0000-4000-8000-0000000000f0",
 }
 READY_TIMEOUT = 900
 HERE = Path(__file__).resolve().parent
@@ -148,7 +151,7 @@ def openssl(*args):
     command(["openssl", *args], timeout=60)
 
 
-def certificates(directory):
+def certificates(directory, shared_domain=None):
     """A throwaway CA and the fixture's server and client certificates."""
     path = Path(directory)
     openssl(
@@ -175,7 +178,11 @@ def certificates(directory):
             f"DNS:hermes-manager-api.{NAMESPACE}.svc,DNS:{ADMIN}",
             "serverAuth",
         ),
-        "gateway": (f"DNS:{PUBLIC},DNS:hermes-gateway.{NAMESPACE}.svc", "serverAuth"),
+        "gateway": (
+            f"DNS:{PUBLIC},DNS:hermes-gateway.{NAMESPACE}.svc"
+            + (f",DNS:*.{shared_domain}" if shared_domain else ""),
+            "serverAuth",
+        ),
         "gateway-client": (f"URI:{GATEWAY_IDENTITY}", "clientAuth"),
         "keycloak": (f"DNS:{KEYCLOAK},DNS:keycloak.keycloak.svc", "serverAuth"),
     }
@@ -225,7 +232,7 @@ def certificates(directory):
     }
 
 
-def realm(passwords):
+def realm(passwords, shared_hosts=()):
     """The `agents` realm: the fixture people, the three OIDC clients and a
     service account that manages users, standing in for the provider's own
     administration."""
@@ -249,7 +256,14 @@ def realm(passwords):
             "publicClient": True,
             "standardFlowEnabled": True,
             "directAccessGrantsEnabled": password_grant,
-            "redirectUris": [callback],
+            "redirectUris": [callback]
+            + [
+                f"https://{host}/_platform/oidc/callback"
+                if client_id == "hermes-gateway"
+                else f"https://{host}/auth/callback"
+                for host in shared_hosts
+                if client_id in ("hermes-gateway", "hermes-native")
+            ],
             "webOrigins": ["+"],
             "attributes": {"pkce.code.challenge.method": "S256"},
             "protocolMappers": [audience(audience_name)],
@@ -310,7 +324,7 @@ def realm(passwords):
     }
 
 
-def keycloak(identifier, pinned, tls, passwords):
+def keycloak(identifier, pinned, tls, passwords, shared_hosts=()):
     labels = {"app": "keycloak"}
     apply(
         identifier,
@@ -325,7 +339,7 @@ def keycloak(identifier, pinned, tls, passwords):
                 "apiVersion": "v1",
                 "kind": "ConfigMap",
                 "metadata": {"name": "keycloak-realm", "namespace": "keycloak"},
-                "data": {"agents.json": json.dumps(realm(passwords))},
+                "data": {"agents.json": json.dumps(realm(passwords, shared_hosts))},
             },
             {
                 "apiVersion": "apps/v1",
@@ -485,13 +499,14 @@ def node_port_service(name, namespace, selector, port, node_port):
 
 
 @contextmanager
-def routed(node_ip):
+def routed(node_ip, shared_hosts=()):
     """Resolves the fixture's hostnames to their node ports, for this process."""
     targets = {
         (KEYCLOAK, 8443): NODE_PORTS["keycloak"],
         (PUBLIC, 443): NODE_PORTS["gateway"],
         (ADMIN, 443): NODE_PORTS["admin"],
     }
+    targets.update({(host, 443): NODE_PORTS["gateway"] for host in shared_hosts})
     original = socket.getaddrinfo
 
     def getaddrinfo(host, port, *args, **kwargs):
@@ -653,21 +668,24 @@ def keycloak_login(session, page, username, password):
 class Browser:
     """One person's browser: platform session, native session, cookies."""
 
-    def __init__(self, ca, name, password):
+    def __init__(self, ca, name, password, host=PUBLIC):
         self.session = resilient(requests.Session())
         self.session.verify = ca
         self.ca = ca
         self.name = name
         self.password = password
+        self.host = host
 
     def get(self, path, **kwargs):
         kwargs.setdefault("timeout", 30)
-        return self.session.get(f"https://{PUBLIC}{path}", **kwargs)
+        return self.session.get(f"https://{self.host}{path}", **kwargs)
 
     def post(self, path, **kwargs):
         kwargs.setdefault("timeout", 30)
-        headers = {"Origin": f"https://{PUBLIC}", **kwargs.pop("headers", {})}
-        return self.session.post(f"https://{PUBLIC}{path}", headers=headers, **kwargs)
+        headers = {"Origin": f"https://{self.host}", **kwargs.pop("headers", {})}
+        return self.session.post(
+            f"https://{self.host}{path}", headers=headers, **kwargs
+        )
 
     def sign_in(self):
         """Platform login from a protected page, through Keycloak."""
@@ -694,16 +712,16 @@ class Browser:
         return "; ".join(
             f"{cookie.name}={cookie.value}"
             for cookie in self.session.cookies
-            if cookie.domain.lstrip(".") == PUBLIC
+            if cookie.domain.lstrip(".") == self.host
         )
 
     def websocket(self):
         ticket = self.post("/api/auth/ws-ticket")
         assert ticket.status_code == 200, f"ws ticket: {ticket.status_code}"
         connection = websocket.create_connection(
-            f"wss://{PUBLIC}/api/events?channel=e2e&ticket={ticket.json()['ticket']}",
+            f"wss://{self.host}/api/events?channel=e2e&ticket={ticket.json()['ticket']}",
             header=[f"Cookie: {self.cookie_header()}"],
-            origin=f"https://{PUBLIC}",
+            origin=f"https://{self.host}",
             sslopt={"ca_certs": self.ca, "cert_reqs": ssl.CERT_REQUIRED},
             timeout=20,
         )
@@ -711,8 +729,8 @@ class Browser:
 
     def put(self, path, **kwargs):
         kwargs.setdefault("timeout", 30)
-        headers = {"Origin": f"https://{PUBLIC}", **kwargs.pop("headers", {})}
-        return self.session.put(f"https://{PUBLIC}{path}", headers=headers, **kwargs)
+        headers = {"Origin": f"https://{self.host}", **kwargs.pop("headers", {})}
+        return self.session.put(f"https://{self.host}{path}", headers=headers, **kwargs)
 
     def upload(self, path, data):
         """Native Hermes's managed file upload."""
@@ -731,9 +749,9 @@ class Browser:
         ticket = self.post("/api/auth/ws-ticket")
         assert ticket.status_code == 200, f"ws ticket: {ticket.status_code}"
         return websocket.create_connection(
-            f"wss://{PUBLIC}/api/ws?ticket={ticket.json()['ticket']}",
+            f"wss://{self.host}/api/ws?ticket={ticket.json()['ticket']}",
             header=[f"Cookie: {self.cookie_header()}"],
-            origin=f"https://{PUBLIC}",
+            origin=f"https://{self.host}",
             sslopt={"ca_certs": self.ca, "cert_reqs": ssl.CERT_REQUIRED},
             timeout=60,
         )
@@ -884,7 +902,16 @@ RESTORED = [
 
 
 def install(
-    identifier, kubeconfig, temporary, images, database_url, tls, node, owned, steps
+    identifier,
+    kubeconfig,
+    temporary,
+    images,
+    database_url,
+    tls,
+    node,
+    owned,
+    steps,
+    shared_domain=None,
 ):
     """Secrets, then the chart with each operator step, then the roles."""
     private, public = owned["private"], owned["public"]
@@ -985,6 +1012,8 @@ def install(
             "ingress": {"admin": everyone, "gateway": everyone},
         },
     }
+    if shared_domain:
+        values["hermesManager"]["agentDomain"] = shared_domain
 
     def helm(operations):
         values["hermesManager"]["operations"] = operations
@@ -1192,7 +1221,8 @@ def e2e_on_database(
 
     tls_directory = Path(temporary) / "tls"
     tls_directory.mkdir()
-    tls = certificates(tls_directory)
+    shared_hosts = tuple(f"{label}.{SHARED_DOMAIN}" for label in SHARED_LABELS)
+    tls = certificates(tls_directory, SHARED_DOMAIN)
     ca = str(tls_directory / "ca.crt")
     passwords = {name: secrets.token_urlsafe(18) for name in SUBJECTS}
     # Fixture secrets of this run: the directory client, the model key and
@@ -1200,7 +1230,7 @@ def e2e_on_database(
     for name in ("directory", "llm", "registry"):
         passwords[name] = secrets.token_urlsafe(24)
 
-    keycloak(identifier, keycloak_image, tls, passwords)
+    keycloak(identifier, keycloak_image, tls, passwords, shared_hosts)
     fake_model(identifier, images["hermes"])
     for namespace, name in (("keycloak", "keycloak"), ("model", "fake-model")):
         kubectl(
@@ -1213,7 +1243,7 @@ def e2e_on_database(
             "--timeout=300s",
             timeout=320,
         )
-    with routed(node_ip):
+    with routed(node_ip, shared_hosts):
         wait(
             lambda: (
                 requests.get(
@@ -1235,6 +1265,7 @@ def e2e_on_database(
             node,
             owned,
             FRESH,
+            shared_domain=SHARED_DOMAIN,
         )
         run = environment["HERMES_TEST_RUN"]
         with private_registry(
@@ -1256,6 +1287,7 @@ def e2e_on_database(
             owned,
             assignments,
             run,
+            shared_domain=SHARED_DOMAIN,
         )
 
 
@@ -1405,6 +1437,121 @@ def commission(identifier, images, ca, passwords):
     )
 
 
+def shared_agent_direct_and_group_members_reach_one_workspace(platform):
+    """Real gateway, Keycloak, manager and native runtime share one instance."""
+    admin = platform.admin
+    created = admin.call(
+        "POST",
+        "/api/v1/assignments",
+        {
+            "sharedAgent": {
+                "name": "engineering",
+                "displayName": "Engineering",
+                "label": "engineering",
+                "enabled": True,
+            },
+            "spec": {
+                "access": "enabled",
+                "template": {"id": "assistant", "version": 1},
+                "volumes": {"workspace": {"source": "local", "sizeGib": 1}},
+                "terminal": platform.state.terminal,
+            },
+        },
+    ).json()
+    assignment = created["assignmentId"]
+    group = admin.call(
+        "POST",
+        "/api/v1/access-groups",
+        {"name": "engineers", "displayName": "Engineers"},
+    ).json()
+    group_path = f"/api/v1/access-groups/{group['groupId']}"
+    group_etag = admin.call("GET", group_path).headers["ETag"]
+    admin.call(
+        "POST",
+        f"{group_path}/members",
+        {
+            "identity": {
+                "issuer": ISSUER,
+                "subject": SUBJECTS["frank"],
+            }
+        },
+        etag=group_etag,
+    )
+    grants_path = f"/api/v1/assignments/{assignment}/grants"
+    grants_etag = admin.call("GET", grants_path).headers["ETag"]
+    admin.call(
+        "PUT",
+        grants_path,
+        {
+            "grants": [
+                {
+                    "identity": {
+                        "issuer": ISSUER,
+                        "subject": SUBJECTS["bob"],
+                    }
+                },
+                {"groupId": group["groupId"]},
+            ]
+        },
+        etag=grants_etag,
+    )
+    wait(
+        lambda: admin.phase(created["instanceId"])["phase"] == "ready",
+        READY_TIMEOUT,
+        "shared instance never became ready",
+        interval=5,
+    )
+    before_namespaces = namespaces(platform.identifier)
+
+    host = platform.shared_hosts[0]
+    members = [
+        Browser(platform.ca, name, platform.passwords[name], host=host)
+        for name in ("bob", "frank")
+    ]
+    for browser in members:
+        assert browser.sign_in().status_code == 200
+        assert (
+            browser.get("/_platform/me").json()["identity"]["subject"]
+            == SUBJECTS[browser.name]
+        )
+        assert browser.native_sign_in()["user_id"] == SUBJECTS[browser.name]
+    first, second = members[0].rpc(), members[1].rpc()
+    try:
+        _, first_reply = converse(first, "first shared fixture turn", 240)
+        _, second_reply = converse(second, "second shared fixture turn", 240)
+        assert first_reply == second_reply == "hello from e2e"
+    finally:
+        first.close()
+        second.close()
+    assignments = admin.call("GET", "/api/v1/assignments?limit=100").json()["items"]
+    assert not any(
+        (item.get("identity") or {}).get("subject") == SUBJECTS["frank"]
+        for item in assignments
+    )
+    assert namespaces(platform.identifier) == before_namespaces
+    outsider = Browser(platform.ca, "mallory", platform.passwords["mallory"], host=host)
+    assert outsider.sign_in().status_code == 403
+
+    grants_etag = admin.call("GET", grants_path).headers["ETag"]
+    admin.call(
+        "PUT",
+        grants_path,
+        {"grants": [{"groupId": group["groupId"]}]},
+        etag=grants_etag,
+    )
+    wait(
+        lambda: (
+            members[0].get("/api/sessions", allow_redirects=False).status_code == 403
+        ),
+        15,
+        "revoked member retained access",
+        interval=1,
+    )
+    assert members[1].get("/api/sessions").status_code == 200
+
+    return created
+
+
 def published_versions_commission_ready_instances_from_the_api(
     identifier, images, ca, passwords, postgres
 ):
@@ -1454,8 +1601,23 @@ def published_versions_commission_ready_instances_from_the_api(
     suspension_closes_open_connections_and_reenabling_keeps_data(
         identifier, admin, ca, passwords, assignments
     )
+    shared = shared_agent_direct_and_group_members_reach_one_workspace(
+        SimpleNamespace(
+            admin=admin,
+            ca=ca,
+            passwords=passwords,
+            state=state,
+            shared_hosts=tuple(f"{label}.{SHARED_DOMAIN}" for label in SHARED_LABELS),
+            identifier=identifier,
+        )
+    )
     only_the_controller_holds_kubernetes_credentials_and_logs_hold_no_secrets(
-        identifier, admin, ca, passwords, assignments
+        identifier, admin, ca, passwords, {**assignments, "shared": shared}
+    )
+    admin.set_access(shared["assignmentId"], "suspended")
+    print(
+        "PASS: shared agent grants, native identity, simultaneous WebSockets "
+        "and revocation"
     )
     print(
         "PASS: chart install with operator Jobs; two owners commissioned and reached "
@@ -3089,6 +3251,7 @@ def restore_on_a_new_cluster_rebinds_without_adoption(
     owned,
     assignments,
     run,
+    shared_domain=None,
 ):
     """PostgreSQL and the static storage root restored onto a new, empty
     cluster: `rebind-cluster` records it, and the controller recreates every
@@ -3185,7 +3348,12 @@ def restore_on_a_new_cluster_rebinds_without_adoption(
             "worker": import_image(second, WORKER_TAG, temporary),
         }
         keycloak_image = import_image(second, "hermes-e2e-keycloak:pinned", temporary)
-        keycloak(second, keycloak_image, tls, passwords)
+        shared_hosts = (
+            tuple(f"{label}.{shared_domain}" for label in SHARED_LABELS)
+            if shared_domain
+            else ()
+        )
+        keycloak(second, keycloak_image, tls, passwords, shared_hosts)
         kubectl(
             second,
             "rollout",
@@ -3199,7 +3367,7 @@ def restore_on_a_new_cluster_rebinds_without_adoption(
         node = kubectl(
             second, "get", "nodes", "-o", "jsonpath={.items[0].metadata.name}"
         )
-        with routed(container_ip(second, network)):
+        with routed(container_ip(second, network), shared_hosts):
             wait(
                 lambda: (
                     requests.get(
@@ -3222,6 +3390,7 @@ def restore_on_a_new_cluster_rebinds_without_adoption(
                 node,
                 owned,
                 RESTORED,
+                shared_domain=shared_domain,
             )
             admin = Admin(ca, passwords["alice"])
             wait(

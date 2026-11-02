@@ -15,6 +15,7 @@ import { CatalogDetail, CatalogPage } from "../features/catalog/page";
 import { StoragePage } from "../features/storage/page";
 import { SecretsPage } from "../features/secrets/page";
 import { ActivityDetail, ActivityPage } from "../features/activity/page";
+import { GroupDetail, GroupsPage } from "../features/groups/page";
 import {
   AdministratorDetail,
   AdministratorsPage,
@@ -53,6 +54,18 @@ const routes = [
     path: "/assignments/$id",
     validateSearch: validatePage,
     component: AssignmentDetail,
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/groups",
+    validateSearch: validatePage,
+    component: GroupsPage,
+  }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/groups/$id",
+    validateSearch: validatePage,
+    component: GroupDetail,
   }),
   createRoute({
     getParentRoute: () => root,

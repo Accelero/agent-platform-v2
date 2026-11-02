@@ -13,7 +13,7 @@ use axum::middleware::{from_fn, from_fn_with_state};
 use hermes_core::app::error::AppError;
 use hermes_http::files::{keyring, read, read_text};
 use hermes_http::limits::bounded;
-use hermes_http::server::{bind, serve_bounded, shutdown_signal, tls_config};
+use hermes_http::server::{bind, gateway_tls_config, serve_bounded_reloading, shutdown_signal};
 use hermes_identity::browser::{AdmitAll, BrowserAuth, BrowserConfig};
 use hermes_identity::crypto::{Purpose, Sealer};
 use hermes_identity::oidc::{OidcConfig, OidcProvider};
@@ -102,12 +102,32 @@ pub async fn app(config: &Config, auth: BrowserAuth, dial: Dial) -> Result<Route
         resolver: Arc::new(resolver),
         timing: Timing::default(),
     };
-    let gateway = Arc::new(Gateway::new(
+    let gateway = Gateway::new(
         checks,
         dial,
         &config.public_origin,
         config.max_upload_mib * 1024 * 1024,
-    )?);
+    )?;
+    let gateway = if let Some(domain) = config
+        .agent_domain
+        .as_deref()
+        .filter(|domain| !domain.is_empty())
+    {
+        let names = hermes_core::domain::endpoints::EndpointNames::new(
+            domain,
+            &config.reserved_agent_labels,
+            &[
+                &config.public_origin,
+                &config.admin_origin,
+                &config.installation.issuer,
+            ],
+        )
+        .map_err(|_| AppError::invalid())?;
+        gateway.with_agents(names)
+    } else {
+        gateway
+    };
+    let gateway = Arc::new(gateway);
     let own = hermes_http::browser::router(auth)
         .merge(platform(gateway.clone()))
         .layer(from_fn_with_state(gateway.clone(), expire_on_logout))
@@ -125,11 +145,39 @@ pub async fn run(config: Config) -> Result<(), AppError> {
         cluster_dial(config.cluster_domain.clone()),
     )
     .await?;
-    let tls = tls_config(
+    let domain = config
+        .agent_domain
+        .as_deref()
+        .filter(|domain| !domain.is_empty());
+    let tls = gateway_tls_config(
         &read(&config.tls.certificate_file, 64 * 1024).await?,
         &read(&config.tls.private_key_file, 64 * 1024).await?,
-        None,
+        &config.public_origin,
+        domain,
     )?;
+    let (tls_sender, tls_receiver) = tokio::sync::watch::channel(tls);
+    let cert_file = config.tls.certificate_file.clone();
+    let key_file = config.tls.private_key_file.clone();
+    let origin = config.public_origin.clone();
+    let domain = domain.map(str::to_owned);
+    let reloading = tokio::spawn(async move {
+        let mut timer = tokio::time::interval(Duration::from_secs(60));
+        timer.tick().await;
+        loop {
+            timer.tick().await;
+            let candidate = async {
+                let cert = read(&cert_file, 64 * 1024).await?;
+                let key = read(&key_file, 64 * 1024).await?;
+                gateway_tls_config(&cert, &key, &origin, domain.as_deref())
+            };
+            match tokio::time::timeout(Duration::from_secs(5), candidate).await {
+                Ok(Ok(tls)) => {
+                    let _ = tls_sender.send(tls);
+                }
+                _ => eprintln!("gateway_tls_reload_invalid"),
+            }
+        }
+    });
     let (listener, _) = bind(&config.listen).await?;
     let pruning = tokio::spawn(async move {
         let mut timer = tokio::time::interval(Duration::from_secs(60));
@@ -138,9 +186,9 @@ pub async fn run(config: Config) -> Result<(), AppError> {
             let _ = tokio::time::timeout(Duration::from_secs(5), auth.prune()).await;
         }
     });
-    let served = serve_bounded(
+    let served = serve_bounded_reloading(
         listener,
-        tls,
+        tls_receiver,
         BTreeSet::new(),
         app,
         shutdown_signal(),
@@ -148,5 +196,6 @@ pub async fn run(config: Config) -> Result<(), AppError> {
     )
     .await;
     pruning.abort();
+    reloading.abort();
     served
 }

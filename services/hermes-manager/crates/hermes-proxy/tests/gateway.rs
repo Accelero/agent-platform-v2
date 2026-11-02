@@ -19,8 +19,9 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use hermes_core::app::testing::{identity, installation};
+use hermes_core::domain::endpoints::EndpointNames;
 use hermes_core::domain::identity::Identity;
-use hermes_core::domain::routing::{Destination, Route};
+use hermes_core::domain::routing::{Destination, Route, Target};
 use hermes_identity::AuthError;
 use hermes_proxy::gateway::{Dial, Gateway, MAX_UPLOAD, platform, router};
 use hermes_proxy::resolver::{Resolve, Verdict};
@@ -71,6 +72,55 @@ impl FakeSessions {
 
 #[async_trait]
 impl Sessions for FakeSessions {
+    async fn authenticate_on_host(
+        &self,
+        session: &str,
+        browser: &str,
+        host: Option<&str>,
+    ) -> Result<SignedIn, AuthError> {
+        match (host, browser) {
+            (None, "proof") => self.authenticate(session, "proof").await,
+            (Some("engineering.agents.example.org"), "agent-proof") => {
+                let mut signed = self.authenticate(session, "proof").await?;
+                signed.handle = format!("engineering-{}", signed.handle);
+                Ok(signed)
+            }
+            (Some("research.agents.example.org"), "research-proof") => {
+                let mut signed = self.authenticate(session, "proof").await?;
+                signed.handle = format!("research-{}", signed.handle);
+                Ok(signed)
+            }
+            _ => Err(AuthError::Evidence),
+        }
+    }
+
+    async fn recheck_on_host(
+        &self,
+        handle: &str,
+        host: Option<&str>,
+    ) -> Result<Identity, AuthError> {
+        match host {
+            None => self.recheck(handle).await,
+            Some("engineering.agents.example.org") => {
+                self.recheck(
+                    handle
+                        .strip_prefix("engineering-")
+                        .ok_or(AuthError::Evidence)?,
+                )
+                .await
+            }
+            Some("research.agents.example.org") => {
+                self.recheck(
+                    handle
+                        .strip_prefix("research-")
+                        .ok_or(AuthError::Evidence)?,
+                )
+                .await
+            }
+            _ => Err(AuthError::Evidence),
+        }
+    }
+
     async fn authenticate(&self, session: &str, browser: &str) -> Result<SignedIn, AuthError> {
         self.authentications.fetch_add(1, Ordering::SeqCst);
         if browser != "proof" {
@@ -106,6 +156,20 @@ struct FakeResolver {
 
 #[async_trait]
 impl Resolve for FakeResolver {
+    async fn resolve_target(&self, identity: &Identity, target: &Target) -> Verdict {
+        match target {
+            Target::Personal {} => self.resolve(identity).await,
+            Target::Shared { label } if label == "engineering" => {
+                self.resolve(&hermes_core::app::testing::identity("carol"))
+                    .await
+            }
+            Target::Shared { label } if label == "research" => {
+                self.resolve(&hermes_core::app::testing::identity("bob"))
+                    .await
+            }
+            Target::Shared { .. } => Verdict::Denied,
+        }
+    }
     async fn resolve(&self, identity: &Identity) -> Verdict {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let failing = self
@@ -304,7 +368,12 @@ impl Fixture {
             resolver: resolver.clone(),
             timing,
         };
-        let gateway = Arc::new(Gateway::new(checks, dial, ORIGIN, max_upload).unwrap());
+        let names = EndpointNames::new("agents.example.org", &[], &[ORIGIN]).unwrap();
+        let gateway = Arc::new(
+            Gateway::new(checks, dial, ORIGIN, max_upload)
+                .unwrap()
+                .with_agents(names),
+        );
         let app = router(gateway.clone(), platform(gateway));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -417,9 +486,116 @@ async fn raw_request(fixture: &Fixture, target: &str, headers: &str) -> (u16, St
 }
 
 #[tokio::test]
+async fn one_http2_connection_routes_each_agent_by_authority_and_bound_session() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let stream = TcpStream::connect(fixture.address).await.unwrap();
+    let (mut h2, connection) =
+        hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(stream))
+            .await
+            .unwrap();
+    let connection = tokio::spawn(async move { connection.await.unwrap() });
+    for (host, proof, expected) in [
+        ("engineering.agents.example.org", "agent-proof", "carol"),
+        ("research.agents.example.org", "research-proof", "bob"),
+    ] {
+        let request = Request::builder()
+            .uri(format!("https://{host}/api/chat"))
+            .header(
+                "cookie",
+                format!("{SESSION}={}; {BROWSER}={proof}", handle("bob")),
+            )
+            .body(Body::empty())
+            .unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(3), h2.send_request(request))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = http_body_util::BodyExt::collect(response.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["instance"], expected);
+        assert_eq!(body["headers"]["host"], host);
+    }
+    let request = Request::builder()
+        .uri("https://research.agents.example.org/api/chat")
+        .header(
+            "cookie",
+            format!("{SESSION}={}; {BROWSER}=agent-proof", handle("bob")),
+        )
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        h2.send_request(request).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    connection.abort();
+}
+
+#[tokio::test]
+async fn shared_host_resolves_its_target_and_cannot_replay_other_host_sessions() {
+    let fixture = Fixture::new(Timing::default()).await;
+    let personal: Value = fixture
+        .get(Some("bob"), "/api/chat")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(personal["instance"], "bob");
+    let agent_cookie = format!("{SESSION}={}; {BROWSER}=agent-proof", handle("bob"));
+    let shared: Value = fixture
+        .client
+        .get(format!("{}/api/chat", fixture.url))
+        .header("host", "engineering.agents.example.org")
+        .header("cookie", &agent_cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(shared["instance"], "carol");
+    assert_eq!(shared["headers"]["host"], "engineering.agents.example.org");
+    assert_eq!(
+        shared["headers"]["x-forwarded-host"],
+        "engineering.agents.example.org"
+    );
+    let wrong = fixture
+        .client
+        .get(format!("{}/api/chat", fixture.url))
+        .header("cookie", agent_cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn wrong_authorities_are_refused_before_session_lookup_on_http1_and_http2() {
     let fixture = Fixture::new(Timing::default()).await;
     let contract = Contract::load("gateway.openapi.yaml");
+    // An allowed agent host cannot use a personal session, even if the same
+    // cookie pair was already cached on the personal host.
+    assert_eq!(
+        raw_request(&fixture, "/_platform/me", "Host: hermes.example.org\r\n")
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        raw_request(
+            &fixture,
+            "/_platform/me",
+            "Host: engineering.agents.example.org\r\n"
+        )
+        .await
+        .0,
+        401
+    );
     for authority in [
         "foreign.test",
         "hermes.example.org.",
@@ -478,7 +654,7 @@ async fn wrong_authorities_are_refused_before_session_lookup_on_http1_and_http2(
             &serde_json::from_slice::<Value>(&bytes).unwrap(),
         );
     }
-    assert_eq!(fixture.sessions.authentications.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.sessions.authentications.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.resolver.calls.load(Ordering::SeqCst), 0);
     assert!(fixture.hits().is_empty());
     let request = Request::builder()

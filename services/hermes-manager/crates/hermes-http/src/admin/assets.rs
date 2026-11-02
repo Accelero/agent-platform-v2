@@ -37,6 +37,8 @@ pub const PAGES: &[&str] = &[
     "/users/{id}",
     "/assignments",
     "/assignments/{id}",
+    "/groups",
+    "/groups/{id}",
     "/templates",
     "/templates/{id}",
     "/terminal-backends",
