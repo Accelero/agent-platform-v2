@@ -7,16 +7,7 @@ use hermes_identity::browser::BrowserAuth;
 use hermes_identity::crypto::Purpose;
 
 /// Native Hermes's own session cookies, which a platform logout expires.
-pub const NATIVE_COOKIES: [&str; 5] = [
-    "hermes_session_at",
-    "hermes_session_rt",
-    "hermes_session_provider",
-    "hermes_session_pkce",
-    "hermes_sso_attempt",
-];
-/// Native Hermes names a cookie with one of these prefixes, depending on how
-/// it was reached.
-const NATIVE_PREFIXES: [&str; 3] = ["__Host-", "__Secure-", ""];
+pub use hermes_identity::browser::NATIVE_COOKIES;
 
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
@@ -132,7 +123,7 @@ pub fn forward_request(headers: &HeaderMap, public_host: &str, websocket: bool) 
 /// Removes hop-by-hop headers and every `Set-Cookie` naming a platform
 /// cookie from an instance's response. A switching response keeps its
 /// handshake.
-pub fn filter_response(headers: &mut HeaderMap, switching: bool) {
+pub fn filter_response(headers: &mut HeaderMap, switching: bool, agent_host: bool) {
     for name in connection_tokens(headers) {
         if let Ok(name) = HeaderName::from_bytes(name.as_bytes()) {
             headers.remove(name);
@@ -148,9 +139,16 @@ pub fn filter_response(headers: &mut HeaderMap, switching: bool) {
         .get_all(header::SET_COOKIE)
         .iter()
         .filter(|value| {
-            value
-                .to_str()
-                .is_ok_and(|text| !platform_name(text.split(['=', ';']).next().unwrap_or(text)))
+            value.to_str().is_ok_and(|text| {
+                !platform_name(text.split(['=', ';']).next().unwrap_or(text))
+                    && (!agent_host
+                        || !text.split(';').skip(1).any(|attribute| {
+                            attribute
+                                .split('=')
+                                .next()
+                                .is_some_and(|name| name.trim().eq_ignore_ascii_case("domain"))
+                        }))
+            })
         })
         .cloned()
         .collect();
@@ -168,15 +166,10 @@ pub fn filter_response(headers: &mut HeaderMap, switching: bool) {
 /// variant of native Hermes's cookies.
 pub fn expire_cookies(headers: &mut HeaderMap) {
     let (session, browser) = BrowserAuth::cookies(Purpose::Gateway);
-    let names =
-        [session.to_owned(), browser.to_owned()]
-            .into_iter()
-            .chain(NATIVE_COOKIES.iter().flat_map(|name| {
-                NATIVE_PREFIXES
-                    .iter()
-                    .map(move |prefix| format!("{prefix}{name}"))
-            }));
-    for name in names {
+    for name in [session.to_owned(), browser.to_owned()]
+        .into_iter()
+        .chain(hermes_identity::browser::native_cookie_names())
+    {
         let value = format!("{name}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0");
         if let Ok(value) = HeaderValue::from_str(&value) {
             headers.append(header::SET_COOKIE, value);
@@ -337,13 +330,22 @@ mod tests {
             ("upgrade", "websocket"),
             ("content-type", "text/html"),
         ]);
-        filter_response(&mut response, false);
+        filter_response(&mut response, false, false);
         let cookies: Vec<_> = response.get_all("set-cookie").iter().collect();
         assert_eq!(cookies, ["__Host-hermes_session_at=x; Path=/; Secure"]);
         for removed in ["connection", "x-internal", "keep-alive", "upgrade"] {
             assert!(!response.contains_key(removed), "{removed}");
         }
         assert_eq!(response["content-type"], "text/html");
+        let mut agent = headers(&[
+            ("set-cookie", "native=ok; Path=/; Secure"),
+            ("set-cookie", "native=bad; dOmAiN=.agents.test; Path=/"),
+        ]);
+        filter_response(&mut agent, false, true);
+        assert_eq!(
+            agent.get_all("set-cookie").iter().collect::<Vec<_>>(),
+            ["native=ok; Path=/; Secure"]
+        );
     }
 
     #[test]

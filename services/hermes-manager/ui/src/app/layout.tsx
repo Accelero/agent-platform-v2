@@ -41,7 +41,8 @@ const navigation = [
   [{ to: "/", label: "Overview", icon: <OverviewIcon /> }],
   [
     { to: "/users", label: "Users", icon: <UsersIcon /> },
-    { to: "/assignments", label: "Assignments", icon: <AssignmentsIcon /> },
+    { to: "/assignments", label: "Agents", icon: <AssignmentsIcon /> },
+    { to: "/groups", label: "Groups", icon: <UsersIcon /> },
   ],
   [
     { to: "/templates", label: "Hermes templates", icon: <TemplatesIcon /> },
@@ -75,9 +76,10 @@ const titles: Record<string, [string, string]> = {
     "Exact identities known to the manager, and the optional Keycloak directory.",
   ],
   "/assignments": [
-    "Assignments",
-    "Who gets an instance: template version, volumes, terminal backends and admin settings.",
+    "Agents",
+    "Personal and shared instances, with their configuration and access.",
   ],
+  "/groups": ["Groups", "Manage members used in shared-agent grants."],
   "/templates": [
     "Hermes templates",
     "Versioned instance definitions with their enforced admin settings.",

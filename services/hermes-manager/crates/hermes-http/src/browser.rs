@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{Query, State};
+use axum::extract::{Extension, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use hermes_core::app::error::AppError;
 use hermes_identity::AuthError;
-use hermes_identity::browser::BrowserAuth;
+use hermes_identity::browser::{BrowserAuth, RequestOrigin};
 use hermes_identity::crypto::Purpose;
 use serde::Deserialize;
 
@@ -55,14 +55,19 @@ struct LoginQuery {
 
 async fn login(
     State(auth): State<Arc<BrowserAuth>>,
+    context: Option<Extension<RequestOrigin>>,
     headers: HeaderMap,
     query: Result<Query<LoginQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
     let Query(query) = query.map_err(|_| AppError::invalid())?;
     let browser = cookie(&headers, auth.browser_cookie())?;
-    let start = auth
-        .begin(browser, query.return_to.as_deref().unwrap_or("/"))
-        .await?;
+    let return_to = query.return_to.as_deref().unwrap_or("/");
+    let start = if let Some(Extension(context)) = context {
+        auth.begin_on_host(browser, return_to, &context.origin, context.host.as_deref())
+            .await?
+    } else {
+        auth.begin(browser, return_to).await?
+    };
     let mut response = redirect(&start.location);
     set_cookie(
         &mut response,
@@ -87,6 +92,7 @@ struct Callback {
 
 async fn callback(
     State(auth): State<Arc<BrowserAuth>>,
+    context: Option<Extension<RequestOrigin>>,
     headers: HeaderMap,
     query: Result<Query<Callback>, QueryRejection>,
 ) -> Result<Response, ApiError> {
@@ -104,7 +110,18 @@ async fn callback(
     }
     let code = query.code.ok_or(AuthError::Evidence)?;
     let browser = cookie(&headers, auth.browser_cookie())?.ok_or(AuthError::Evidence)?;
-    let complete = auth.complete(browser, &query.state, &code).await?;
+    let complete = if let Some(Extension(context)) = context {
+        auth.complete_on_host(
+            browser,
+            &query.state,
+            &code,
+            &context.origin,
+            context.host.as_deref(),
+        )
+        .await?
+    } else {
+        auth.complete(browser, &query.state, &code).await?
+    };
     let mut response = redirect(&complete.location);
     set_cookie(
         &mut response,
@@ -118,17 +135,35 @@ async fn callback(
         &complete.session,
         COOKIE_SECONDS,
     );
+    if auth.purpose() == Purpose::Gateway {
+        crate::cookies::expire_native(response.headers_mut());
+    }
     Ok(response)
 }
 
-async fn logout(State(auth): State<Arc<BrowserAuth>>, headers: HeaderMap) -> Response {
+async fn logout(
+    State(auth): State<Arc<BrowserAuth>>,
+    context: Option<Extension<RequestOrigin>>,
+    headers: HeaderMap,
+) -> Response {
     let result: Result<(), AppError> = async {
         let origin = one_header(&headers, "origin").map_err(|_| AppError::forbidden())?;
-        auth.check_origin(origin)?;
+        if let Some(Extension(context)) = &context {
+            if origin != context.origin {
+                return Err(AppError::forbidden());
+            }
+        } else {
+            auth.check_origin(origin)?;
+        }
         let session = cookie(&headers, auth.session_cookie())?.ok_or(AuthError::Evidence)?;
         let browser = cookie(&headers, auth.browser_cookie())?.ok_or(AuthError::Evidence)?;
         let csrf = one_header(&headers, "x-csrf-token").map_err(|_| AppError::forbidden())?;
-        auth.logout(session, browser, csrf).await?;
+        if let Some(Extension(context)) = &context {
+            auth.logout_on_host(session, browser, csrf, context.host.as_deref())
+                .await?;
+        } else {
+            auth.logout(session, browser, csrf).await?;
+        }
         Ok(())
     }
     .await;

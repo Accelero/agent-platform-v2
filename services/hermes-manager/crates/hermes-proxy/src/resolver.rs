@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hermes_core::domain::identity::Identity;
 use hermes_core::domain::installation::Installation;
-use hermes_core::domain::routing::Route;
+use hermes_core::domain::routing::{Route, Target};
 use hermes_identity::AuthError;
 use hermes_wire::routing::{DecisionBody, PendingCode, ResolveRequest};
 
@@ -23,6 +23,15 @@ pub enum Verdict {
 #[async_trait]
 pub trait Resolve: Send + Sync {
     async fn resolve(&self, identity: &Identity) -> Verdict;
+
+    /// Older implementations have no shared-agent authority and fail closed.
+    async fn resolve_target(&self, identity: &Identity, target: &Target) -> Verdict {
+        if target.is_personal() {
+            self.resolve(identity).await
+        } else {
+            Verdict::Denied
+        }
+    }
 }
 
 const DEADLINE: Duration = Duration::from_secs(2);
@@ -71,10 +80,10 @@ impl ResolverClient {
         })
     }
 
-    async fn call(&self, identity: &Identity) -> Option<(u16, Vec<u8>)> {
+    async fn call(&self, identity: &Identity, target: &Target) -> Option<(u16, Vec<u8>)> {
         let request = ResolveRequest {
             identity: identity.clone(),
-            target: hermes_core::domain::routing::Target::Personal {},
+            target: target.clone(),
         };
         let mut response = self
             .client
@@ -113,7 +122,11 @@ pub fn verdict(installation: &Installation, status: u16, body: &[u8]) -> Verdict
 #[async_trait]
 impl Resolve for ResolverClient {
     async fn resolve(&self, identity: &Identity) -> Verdict {
-        match tokio::time::timeout(DEADLINE, self.call(identity)).await {
+        self.resolve_target(identity, &Target::Personal {}).await
+    }
+
+    async fn resolve_target(&self, identity: &Identity, target: &Target) -> Verdict {
+        match tokio::time::timeout(DEADLINE, self.call(identity, target)).await {
             Ok(Some((status, body))) => verdict(&self.installation, status, &body),
             _ => Verdict::Unavailable,
         }

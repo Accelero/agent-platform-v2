@@ -20,6 +20,10 @@ pub struct Config {
     pub public_origin: String,
     /// The administration origin; it must be another host.
     pub admin_origin: String,
+    #[serde(default)]
+    pub agent_domain: Option<String>,
+    #[serde(default)]
+    pub reserved_agent_labels: Vec<String>,
     /// Connection for the `gateway_sessions` role.
     pub database_url_file: PathBuf,
     /// Private CA for the identity provider, if it is not publicly trusted.
@@ -79,6 +83,24 @@ impl Config {
         let config: Self = serde_json::from_slice(&read(path, MAX_CONFIG).await?)
             .map_err(|_| AppError::invalid())?;
         config.installation.validate()?;
+        if let Some(domain) = config
+            .agent_domain
+            .as_deref()
+            .filter(|domain| !domain.is_empty())
+        {
+            hermes_core::domain::endpoints::EndpointNames::new(
+                domain,
+                &config.reserved_agent_labels,
+                &[
+                    &config.public_origin,
+                    &config.admin_origin,
+                    &config.installation.issuer,
+                ],
+            )
+            .map_err(|_| AppError::invalid())?;
+        } else if !config.reserved_agent_labels.is_empty() {
+            return Err(AppError::invalid());
+        }
         let domain_valid = !config.cluster_domain.is_empty()
             && config.cluster_domain.len() <= 253
             && config

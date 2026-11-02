@@ -23,6 +23,41 @@ use crate::{AuthError, unix_time};
 /// Evidence older than this is never accepted (seconds since token issue).
 const MAXIMUM_EVIDENCE_AGE: u64 = 120;
 
+/// Origin established by the gateway's authority classifier, never from a
+/// forwarded header. Administration routes do not install this context.
+#[derive(Clone)]
+pub struct RequestOrigin {
+    pub origin: String,
+    pub host: Option<String>,
+}
+
+/// Native session cookies that must be expired when platform identity changes.
+pub const NATIVE_COOKIES: [&str; 5] = [
+    "hermes_session_at",
+    "hermes_session_rt",
+    "hermes_session_provider",
+    "hermes_session_pkce",
+    "hermes_sso_attempt",
+];
+
+/// Every host-only spelling emitted by native Hermes.
+pub fn native_cookie_names() -> impl Iterator<Item = String> {
+    NATIVE_COOKIES.into_iter().flat_map(|name| {
+        ["__Host-", "__Secure-", ""]
+            .into_iter()
+            .map(move |prefix| format!("{prefix}{name}"))
+    })
+}
+
+/// Preserve personal browser proofs while isolating shared hosts, even when a
+/// client deliberately copies a proof cookie between them.
+fn browser_hash(browser: &str, host: Option<&str>) -> Vec<u8> {
+    match host {
+        Some(host) => hash(&format!("gateway-browser\0{host}\0{browser}")),
+        None => hash(browser),
+    }
+}
+
 /// Decides whether a verified identity may hold a session of this purpose.
 /// Called at login and after every provider refresh.
 #[async_trait]
@@ -256,20 +291,79 @@ impl BrowserAuth {
             .seal(self.purpose(), "session", session_hash, &plaintext)
     }
 
+    /// The gateway supplies an origin only after classifying the request host.
+    fn callback_on_host(
+        &self,
+        request_origin: &str,
+        host: Option<&str>,
+    ) -> Result<Option<String>, AuthError> {
+        match host {
+            None if request_origin == self.config.public_origin => Ok(None),
+            Some(host) if self.purpose() == Purpose::Gateway => {
+                let requested = origin(request_origin)?;
+                let personal = origin(&self.config.public_origin)?;
+                let other = origin(&self.config.other_origin)?;
+                if requested.origin().ascii_serialization() != request_origin
+                    || requested.host_str() != Some(host)
+                    || requested.port_or_known_default() != personal.port_or_known_default()
+                    || requested.host_str() == other.host_str()
+                    || requested.host_str() == personal.host_str()
+                {
+                    return Err(AuthError::Configuration);
+                }
+                Ok(Some(format!(
+                    "{request_origin}{}",
+                    Self::paths(self.purpose()).1
+                )))
+            }
+            _ => Err(AuthError::Configuration),
+        }
+    }
+
+    fn validate_host(&self, host: Option<&str>) -> Result<(), AuthError> {
+        if let Some(host) = host
+            && (self.purpose() != Purpose::Gateway
+                || host.is_empty()
+                || host.len() > 253
+                || !host.is_ascii()
+                || host.bytes().any(|b| b.is_ascii_uppercase()))
+        {
+            return Err(AuthError::Evidence);
+        }
+        Ok(())
+    }
+
     /// Starts a login. Reuses a valid browser proof or issues a new one.
     pub async fn begin(
         &self,
         browser: Option<&str>,
         return_path: &str,
     ) -> Result<LoginRedirect, AuthError> {
+        self.begin_on_host(browser, return_path, &self.config.public_origin, None)
+            .await
+    }
+
+    pub async fn begin_on_host(
+        &self,
+        browser: Option<&str>,
+        return_path: &str,
+        request_origin: &str,
+        host: Option<&str>,
+    ) -> Result<LoginRedirect, AuthError> {
+        self.validate_host(host)?;
+        let callback = self.callback_on_host(request_origin, host)?;
         let browser = match browser.filter(|value| valid_handle(value)) {
             Some(value) => value.to_owned(),
             None => random_handle()?,
         };
-        let browser_hash = hash(&browser);
+        let browser_hash = browser_hash(&browser, host);
         let start = self
             .provider
-            .begin(browser_hash.clone(), self.safe_return_path(return_path)?)
+            .begin_at(
+                browser_hash.clone(),
+                self.safe_return_path(return_path)?,
+                callback.as_deref(),
+            )
             .await?;
         let plaintext = Zeroizing::new(
             serde_json::to_vec(&start.secrets).map_err(|_| AuthError::Configuration)?,
@@ -279,7 +373,7 @@ impl BrowserAuth {
             .sealer
             .seal(self.purpose(), "flow", &state_hash, &plaintext)?;
         self.store
-            .begin(&browser_hash, &state_hash, &sealed)
+            .begin(&browser_hash, &state_hash, &sealed, host)
             .await?;
         Ok(LoginRedirect {
             location: start.authorization_url,
@@ -294,6 +388,20 @@ impl BrowserAuth {
         state: &str,
         code: &str,
     ) -> Result<LoginComplete, AuthError> {
+        self.complete_on_host(browser, state, code, &self.config.public_origin, None)
+            .await
+    }
+
+    pub async fn complete_on_host(
+        &self,
+        browser: &str,
+        state: &str,
+        code: &str,
+        request_origin: &str,
+        host: Option<&str>,
+    ) -> Result<LoginComplete, AuthError> {
+        self.validate_host(host)?;
+        let callback = self.callback_on_host(request_origin, host)?;
         if !valid_handle(browser)
             || state.is_empty()
             || state.len() > 128
@@ -301,9 +409,9 @@ impl BrowserAuth {
         {
             return Err(AuthError::Evidence);
         }
-        let browser_hash = hash(browser);
+        let browser_hash = browser_hash(browser, host);
         let state_hash = hash(state);
-        let flow = self.store.consume(&browser_hash, &state_hash).await?;
+        let flow = self.store.consume(&browser_hash, &state_hash, host).await?;
         let secrets: LoginSecrets = serde_json::from_slice(&self.sealer.open(
             self.purpose(),
             "flow",
@@ -314,7 +422,10 @@ impl BrowserAuth {
         if secrets.browser_hash != browser_hash {
             return Err(AuthError::Evidence);
         }
-        let tokens = self.provider.exchange(code, &secrets).await?;
+        let tokens = self
+            .provider
+            .exchange_at(code, &secrets, callback.as_deref())
+            .await?;
         let verified = self.tokens.verify(&tokens.access_token).await?;
         if verified.identity().subject != tokens.subject {
             return Err(AuthError::Evidence);
@@ -338,8 +449,11 @@ impl BrowserAuth {
                 flow.generation,
                 &state_hash,
                 &session_hash,
-                &verified.identity(),
-                &sealed,
+                crate::sessions::NewSession {
+                    identity: &verified.identity(),
+                    sealed: &sealed,
+                    host,
+                },
             )
             .await;
         if let Err(error) = created {
@@ -359,24 +473,45 @@ impl BrowserAuth {
         session: &str,
         browser: &str,
     ) -> Result<BrowserIdentity, AuthError> {
+        self.authenticate_on_host(session, browser, None).await
+    }
+
+    pub async fn authenticate_on_host(
+        &self,
+        session: &str,
+        browser: &str,
+        host: Option<&str>,
+    ) -> Result<BrowserIdentity, AuthError> {
+        self.validate_host(host)?;
         if !valid_handle(session) || !valid_handle(browser) {
             return Err(AuthError::Evidence);
         }
-        self.authenticate_hash(&hash(session), Some(&hash(browser)))
+        self.authenticate_hash(&hash(session), Some(&browser_hash(browser, host)), host)
             .await
     }
 
     /// Re-authenticates an established connection by its session handle.
     pub async fn authenticate_handle(&self, handle: &str) -> Result<BrowserIdentity, AuthError> {
-        self.authenticate_hash(&decode_handle(handle)?, None).await
+        self.authenticate_handle_on_host(handle, None).await
+    }
+
+    pub async fn authenticate_handle_on_host(
+        &self,
+        handle: &str,
+        host: Option<&str>,
+    ) -> Result<BrowserIdentity, AuthError> {
+        self.validate_host(host)?;
+        self.authenticate_hash(&decode_handle(handle)?, None, host)
+            .await
     }
 
     async fn authenticate_hash(
         &self,
         session_hash: &[u8],
         browser_hash: Option<&[u8]>,
+        host: Option<&str>,
     ) -> Result<BrowserIdentity, AuthError> {
-        let stored = self.store.load(session_hash, browser_hash).await?;
+        let stored = self.store.load(session_hash, browser_hash, host).await?;
         let payload = self.payload(&stored)?;
         if !stored.refresh_due {
             match self.tokens.verify(&payload.access_token).await {
@@ -397,7 +532,10 @@ impl BrowserAuth {
                 _ => {}
             }
         }
-        let claim = self.store.claim_refresh(session_hash, browser_hash).await?;
+        let claim = self
+            .store
+            .claim_refresh(session_hash, browser_hash, host)
+            .await?;
         let previous = self.payload(&claim.session)?;
         let refreshed = async {
             let tokens = self
@@ -441,16 +579,27 @@ impl BrowserAuth {
     /// Ends the browser's sessions after checking the session's CSRF token,
     /// then revokes the provider refresh token on a best-effort basis.
     pub async fn logout(&self, session: &str, browser: &str, csrf: &str) -> Result<(), AuthError> {
+        self.logout_on_host(session, browser, csrf, None).await
+    }
+
+    pub async fn logout_on_host(
+        &self,
+        session: &str,
+        browser: &str,
+        csrf: &str,
+        host: Option<&str>,
+    ) -> Result<(), AuthError> {
+        self.validate_host(host)?;
         if !valid_handle(session) || !valid_handle(browser) {
             return Err(AuthError::Evidence);
         }
         let stored = self
             .store
-            .load_for_logout(&hash(session), &hash(browser))
+            .load_for_logout(&hash(session), &browser_hash(browser, host), host)
             .await?;
         let payload = self.payload(&stored)?;
         Self::check_csrf(&payload.csrf, csrf)?;
-        self.store.logout(&hash(browser)).await?;
+        self.store.logout(&browser_hash(browser, host)).await?;
         self.provider.revoke(&payload.refresh_token).await;
         Ok(())
     }

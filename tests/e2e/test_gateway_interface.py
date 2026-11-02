@@ -23,6 +23,11 @@ from tests.personal_hermes import native_e2e as scenarios
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.security]
 
+
+def test_shared_agent_direct_and_group_members_reach_one_workspace(platform):
+    scenarios.shared_agent_direct_and_group_members_reach_one_workspace(platform)
+
+
 BASE = f"https://{scenarios.PUBLIC}"
 HTML = {"Accept": "text/html"}
 ORIGIN = {"Origin": BASE}

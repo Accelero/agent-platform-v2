@@ -8,6 +8,8 @@ export const IMAGE = `ghcr.io/example/hermes@sha256:${"a".repeat(64)}`;
 export const ASSIGNMENT = "6f1c2a52-8f0e-4d55-9a4b-0d8c1b2e3f40";
 export const INSTANCE = "0b7d4c1e-2a3f-4e5d-8c6b-7a9f0e1d2c3b";
 export const IDENTITY = "a3c1e2f4-5b6d-4e7f-8a9b-0c1d2e3f4a5b";
+export const GROUP = "4f1c2a52-8f0e-4d55-9a4b-0d8c1b2e3f40";
+export const HOSTILE = '<img src=x onerror="window.hostileExecuted=true">';
 
 export type Recorded = {
   method: string;
@@ -63,7 +65,12 @@ const page = <T>(items: T[]) => ({ items, nextCursor: null });
 /** Serves a small administration API and records every mutation. */
 export async function mockApi(
   pageObject: Page,
-  options: { permitted?: string[]; directory?: boolean } = {},
+  options: {
+    permitted?: string[];
+    directory?: boolean;
+    shared?: boolean;
+    hostile?: boolean;
+  } = {},
 ) {
   const recorded: Recorded[] = [];
   const permitted = options.permitted ?? ["administer", "administrator.manage"];
@@ -143,7 +150,95 @@ export async function mockApi(
         },
       };
     if (path === `/api/v1/assignments/${ASSIGNMENT}` && method === "GET")
-      return { json: assignment, headers: { ETag: '"3"' } };
+      return {
+        json: options.shared
+          ? {
+              ...assignment,
+              kind: "shared",
+              identity: undefined,
+              identityId: undefined,
+              sharedAgent: {
+                name: "engineering",
+                displayName: options.hostile ? HOSTILE : "Engineering",
+              },
+            }
+          : assignment,
+        headers: { ETag: '"3"' },
+      };
+    if (path === "/api/v1/endpoint-settings")
+      return {
+        json: { agentDomain: "agents.example.org", reservedLabels: [] },
+      };
+    if (path === `/api/v1/assignments/${ASSIGNMENT}/endpoint`) {
+      if (method === "GET")
+        return {
+          json: {
+            label: "engineering",
+            hostname: "engineering.agents.example.org",
+            url: "https://engineering.agents.example.org",
+            gatewayCallbackUrl:
+              "https://engineering.agents.example.org/_platform/oidc/callback",
+            nativeCallbackUrl:
+              "https://engineering.agents.example.org/auth/callback",
+            enabled: true,
+            version: 2,
+          },
+          headers: { ETag: '"2"' },
+        };
+      return { status: 202, json: { assignmentId: ASSIGNMENT, version: 3 } };
+    }
+    if (path === `/api/v1/assignments/${ASSIGNMENT}/grants`) {
+      if (method === "GET")
+        return {
+          json: { grants: [{ groupId: GROUP }], grantsVersion: 4 },
+          headers: { ETag: '"4"' },
+        };
+      return {
+        status: 202,
+        json: { assignmentId: ASSIGNMENT, grantsVersion: 5 },
+      };
+    }
+    if (path === "/api/v1/access-groups") {
+      if (method === "GET")
+        return {
+          json: page([
+            {
+              id: GROUP,
+              name: "engineers",
+              displayName: options.hostile ? HOSTILE : "Engineers",
+              version: 5,
+            },
+          ]),
+        };
+      return { status: 202, json: { groupId: GROUP, version: 1 } };
+    }
+    if (path === `/api/v1/access-groups/${GROUP}`) {
+      if (method === "GET")
+        return {
+          json: {
+            id: GROUP,
+            name: "engineers",
+            displayName: options.hostile ? HOSTILE : "Engineers",
+            version: 5,
+          },
+          headers: { ETag: '"5"' },
+        };
+      return { status: 202, json: { groupId: GROUP, version: 6 } };
+    }
+    if (path === `/api/v1/access-groups/${GROUP}/members`) {
+      if (method === "GET")
+        return {
+          json: page([
+            {
+              identityId: IDENTITY,
+              identity: identity(options.hostile ? HOSTILE : "bob"),
+            },
+          ]),
+        };
+      return { status: 202, json: { groupId: GROUP, version: 6 } };
+    }
+    if (path === `/api/v1/access-groups/${GROUP}/members/${IDENTITY}`)
+      return { status: 202, json: { groupId: GROUP, version: 6 } };
     if (path === `/api/v1/assignments/${ASSIGNMENT}/preview`)
       return {
         json: {

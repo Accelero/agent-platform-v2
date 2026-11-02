@@ -108,6 +108,7 @@ export function DataTable<T>({
 export const searchKeys = [
   "q",
   "access",
+  "kind",
   "templateId",
   "source",
   "targetKind",
@@ -173,6 +174,7 @@ export function usePager() {
           [
             "q",
             "access",
+            "kind",
             "templateId",
             "source",
             "targetKind",

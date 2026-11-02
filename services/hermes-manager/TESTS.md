@@ -257,3 +257,23 @@ administration.
 | SH-C01: Shared rendering | `shared_instances_render_agent_binding_origin_and_enforced_login`, `platform_enforced_keys_cannot_be_overridden`, `test_retained_configuration_cannot_add_native_login_providers` | unit, integration | pass |
 | SH-C02: Stable rendered workload | `shared_access_commands_leave_the_assignment_and_workload_unchanged`, `shared_instances_render_agent_binding_origin_and_enforced_login` | unit, integration | pass |
 | SH-C03: Native auth-gate probe | `successful_probe_checks_native_contract_without_following_or_returning_cookies`, `malformed_or_additional_interactive_providers_fail_closed`, `health_failure_and_unprotected_native_apis_never_pass`, `test_retained_configuration_cannot_add_native_login_providers` | unit, integration | pass |
+
+## Planned shared-agent gateway verification
+
+The following cases cover parts of the planned shared-host gateway. Full
+gateway and deployment verification remains to be completed.
+
+| Case | Tests | Level | Status |
+| --- | --- | --- | --- |
+| SH-G03 HTTP/2 authority classification | `one_http2_connection_routes_each_agent_by_authority_and_bound_session` | integration | pass |
+| SH-G06 cross-host callback | `gateway_flows_and_sessions_are_bound_to_their_request_host`, `shared_login_uses_its_callback_and_cannot_be_replayed_on_personal_host` | integration | partial |
+| SH-G08 host binding | `shared_host_resolves_its_target_and_cannot_replay_other_host_sessions`, `gateway_flows_and_sessions_are_bound_to_their_request_host` | integration | partial |
+| SH-G18 native cookies on login | `shared_login_uses_its_callback_and_cannot_be_replayed_on_personal_host` | integration | pass |
+| SH-G17 certificate coverage and reload | `gateway_certificate_requires_personal_and_wildcard_coverage`, `replacement_certificate_serves_new_connections_without_closing_existing_ones` | integration | partial |
+| SH-E14 shared gateway exposure | `test_shared_agent_hostnames_and_load_balancer_reach_all_roles` | integration | partial |
+| SH-E18 real browser journey | `test_shared_agent_browser_login_chat_and_logout` | e2e | pending |
+| SH-E02 and SH-E03 shared members | `test_shared_agent_direct_and_group_members_reach_one_workspace` | e2e | pending |
+| SH-E04 and SH-E07 denial and revocation | `test_shared_agent_direct_and_group_members_reach_one_workspace` | e2e | pending |
+| SH-U01 shared agent administration | `create a shared agent with an explicit endpoint and template`, `manage a shared endpoint and grants without claiming member privacy`, `create, edit and delete groups through versioned commands`, `add and remove a group member with the current group version` | browser | partial |
+| SH-U02 honest workflow text | `manage a shared endpoint and grants without claiming member privacy`, `add and remove a group member with the current group version` | browser | partial |
+| SH-U03 hostile text | `agent, group and identity labels render as text` | browser | pass |

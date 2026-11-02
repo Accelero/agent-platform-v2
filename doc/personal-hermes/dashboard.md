@@ -3,7 +3,8 @@
 The manager serves an authenticated React/TypeScript administration dashboard
 from its Rust API role. Administrators use it to manage:
 
-- who gets a Hermes instance (assignments);
+- personal and shared agents, their endpoints and access grants;
+- access groups and their members;
 - Hermes templates;
 - terminal backends;
 - volumes;
@@ -47,7 +48,8 @@ failed query never looks like an empty database.
 | --- | --- | --- |
 | Overview | The platform's name and mark, then real figures: instances by phase, published templates and terminal backends with their open drafts, cluster leftovers, blocked instances that need attention, and the latest recorded changes | Open the view behind each figure |
 | Users | Known identities (exact issuer/subject, labels, assignment and instance state) and, when configured, a live Keycloak directory tab | Create an assignment for an exact identity, or open the existing one |
-| Assignments | Identity, access, template version, volumes, allowed terminal backends and default, lifetime mode, admin overrides, secret references; the instance's phase, conditions and generations; its terminal environments with state, lease count and a failed worker's reason | Change access, template version, volumes, backends, overrides or secret references after a preview; retry a blocked instance; set a template version for selected assignments |
+| Agents | Personal and shared agents, their configuration and instance status; shared-agent endpoints and grants | Create a shared agent; change its endpoint and grants; change configuration after a preview; retry a blocked instance; set a template version for selected agents |
+| Groups | Access groups and exact member identities | Create, rename or delete groups, and add or remove members |
 | Hermes templates | Template IDs with version count, latest published version, current draft and assignment count; each version's state, revision and definition | Start a draft, or the next version from an existing one; edit drafts as a form, JSON or YAML; validate; publish; withdraw |
 | Terminal backends | The same catalog view for terminal backend versions: image, SSH contract, UID/GID, resources, limits, mount slots and registry secret | The same as templates |
 | Storage | Installation storage sources (read-only, from Helm values), the volumes on each by instance and path, and orphaned namespaces and volumes with first- and last-seen times | Open the owning assignment |
@@ -168,7 +170,7 @@ markup.
   to manage the existing one. Creation reviews the selected template version,
   the managed settings layers, the volumes and the terminal backends before
   submission.
-- **Assignments.** Assignment details show:
+- **Agents.** Agent details show:
   - desired and observed generation;
   - the instance phase and its conditions (storage, native initialization,
     native authentication, terminal);
@@ -178,6 +180,12 @@ markup.
 
   Activity shows redacted change details. A recorded command means the change
   was accepted, not that reconciliation has completed.
+- **Shared agents.** Endpoint details show the agent URL and both callback URLs
+  to register with the identity provider. The status reports what the manager
+  knows; it does not verify DNS, TLS or callback registration. A rename restarts
+  the agent, ends use of the old URL and frees that URL for later reuse.
+  Members share the workspace. Removing a grant or group membership closes
+  affected connections but does not remove work inside the agent.
 - **Never shown.** Private user configuration, secret values and command
   content.
 - **Validation before saving.** When editing an assignment, the dashboard

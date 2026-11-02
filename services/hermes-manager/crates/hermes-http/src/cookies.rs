@@ -7,6 +7,16 @@ use hermes_core::domain::ErrorKind;
 
 const AMBIGUOUS: AppError = AppError::new(ErrorKind::Unauthenticated, "invalid_identity_evidence");
 
+/// Expire host-only native credentials whenever platform identity changes.
+pub fn expire_native(headers: &mut HeaderMap) {
+    for name in hermes_identity::browser::native_cookie_names() {
+        let value = format!("{name}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0");
+        if let Ok(value) = HeaderValue::from_str(&value) {
+            headers.append(header::SET_COOKIE, value);
+        }
+    }
+}
+
 /// The cookie's value. Duplicates are refused rather than letting parser
 /// order choose a credential.
 pub fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, AppError> {

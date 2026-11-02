@@ -52,6 +52,21 @@ struct Login {
 
 impl Fixture {
     async fn new(pool: PgPool) -> Self {
+        Self::with_purpose(pool, Purpose::Administration).await
+    }
+
+    async fn with_purpose(pool: PgPool, purpose: Purpose) -> Self {
+        let public = if purpose == Purpose::Gateway {
+            "https://hermes.localhost"
+        } else {
+            PUBLIC
+        };
+        let other = if purpose == Purpose::Gateway {
+            PUBLIC
+        } else {
+            "https://hermes.localhost"
+        };
+        let callback = BrowserAuth::paths(purpose).1;
         let secrets = Secrets::new().await;
         let provider = FakeProvider::start(&secrets, "manager-admin", "manager-api").await;
         let http = http_client(Some(&secrets.read("ca.crt"))).unwrap();
@@ -71,7 +86,7 @@ impl Fixture {
             OidcConfig {
                 issuer: provider.issuer.clone(),
                 client_id: "manager-admin".into(),
-                callback_url: format!("{PUBLIC}/auth/oidc/callback"),
+                callback_url: format!("{public}{callback}"),
                 scopes: vec!["openid".into()],
                 client_secret: None,
                 revocation_url: None,
@@ -79,10 +94,9 @@ impl Fixture {
             http,
         )
         .unwrap();
-        let sessions =
-            PgSessions::connect_with((*pool.connect_options()).clone(), Purpose::Administration)
-                .await
-                .unwrap();
+        let sessions = PgSessions::connect_with((*pool.connect_options()).clone(), purpose)
+            .await
+            .unwrap();
         let sealer = Sealer::new(
             Uuid::new_v4(),
             "key-one".into(),
@@ -98,8 +112,8 @@ impl Fixture {
             tokens,
             sealer,
             BrowserConfig {
-                public_origin: PUBLIC.into(),
-                other_origin: "https://hermes.localhost".into(),
+                public_origin: public.into(),
+                other_origin: other.into(),
             },
             admission.clone(),
         )
@@ -437,5 +451,171 @@ async fn pruning_keeps_live_sessions(pool: PgPool) {
             .authenticate(&live.session, &live.browser)
             .await
             .is_ok()
+    );
+}
+
+#[sqlx::test(migrator = "hermes_store::MIGRATOR")]
+async fn gateway_flows_and_sessions_are_bound_to_their_request_host(pool: PgPool) {
+    let fixture = Fixture::with_purpose(pool, Purpose::Gateway).await;
+    let engineering = "https://engineering.agents.test";
+    let support = "https://support.agents.test";
+    let start = fixture
+        .auth
+        .begin_on_host(
+            None,
+            "/projects",
+            engineering,
+            Some("engineering.agents.test"),
+        )
+        .await
+        .unwrap();
+    let authorize = fixture
+        .secrets
+        .client(None)
+        .get(&start.location)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(authorize.status(), 303);
+    let callback = Url::parse(authorize.headers()["location"].to_str().unwrap()).unwrap();
+    assert_eq!(callback.origin().ascii_serialization(), engineering);
+    assert_eq!(callback.path(), "/_platform/oidc/callback");
+    let query: BTreeMap<_, _> = callback.query_pairs().into_owned().collect();
+    assert!(
+        fixture
+            .auth
+            .complete_on_host(
+                &start.browser,
+                &query["state"],
+                &query["code"],
+                support,
+                Some("support.agents.test")
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        fixture
+            .auth
+            .complete_on_host(
+                &start.browser,
+                &query["state"],
+                &query["code"],
+                "https://hermes.localhost",
+                None
+            )
+            .await
+            .is_err()
+    );
+    let complete = fixture
+        .auth
+        .complete_on_host(
+            &start.browser,
+            &query["state"],
+            &query["code"],
+            engineering,
+            Some("engineering.agents.test"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(complete.location, "/projects");
+    let valid = fixture
+        .auth
+        .authenticate_on_host(
+            &complete.session,
+            &complete.browser,
+            Some("engineering.agents.test"),
+        )
+        .await
+        .unwrap();
+    fixture
+        .auth
+        .begin_on_host(
+            Some(&complete.browser),
+            "/",
+            support,
+            Some("support.agents.test"),
+        )
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .auth
+            .authenticate_on_host(
+                &complete.session,
+                &complete.browser,
+                Some("engineering.agents.test"),
+            )
+            .await
+            .is_ok()
+    );
+    assert!(
+        fixture
+            .auth
+            .authenticate_on_host(
+                &complete.session,
+                &complete.browser,
+                Some("support.agents.test")
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        fixture
+            .auth
+            .authenticate(&complete.session, &complete.browser)
+            .await
+            .is_err()
+    );
+    assert!(
+        fixture
+            .auth
+            .authenticate_handle_on_host(&valid.session_handle, Some("support.agents.test"))
+            .await
+            .is_err()
+    );
+    assert!(
+        fixture
+            .auth
+            .logout_on_host(
+                &complete.session,
+                &complete.browser,
+                &valid.csrf_token,
+                Some("support.agents.test")
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        fixture
+            .auth
+            .authenticate_on_host(
+                &complete.session,
+                &complete.browser,
+                Some("engineering.agents.test")
+            )
+            .await
+            .is_ok()
+    );
+    fixture
+        .auth
+        .logout_on_host(
+            &complete.session,
+            &complete.browser,
+            &valid.csrf_token,
+            Some("engineering.agents.test"),
+        )
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .auth
+            .authenticate_on_host(
+                &complete.session,
+                &complete.browser,
+                Some("engineering.agents.test")
+            )
+            .await
+            .is_err()
     );
 }

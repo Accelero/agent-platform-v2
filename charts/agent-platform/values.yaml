@@ -17,6 +17,9 @@ hermesManager:
   # The Hermes hostname and the separate administration hostname.
   publicOrigin: ''
   adminOrigin: ''
+  # Empty disables shared-agent hostnames.
+  agentDomain: ''
+  reservedAgentLabels: []
   # Each role's Secret carries `oidc-ca.crt` when the identity provider uses a private CA.
   oidcPrivateCa: false
   # Native Hermes's own OIDC client (owner-pinned login inside each instance).
@@ -75,6 +78,8 @@ hermesManager:
     service:
       type: ClusterIP
       port: 443
+      loadBalancerClass: ''
+      annotations: {}
   # One-shot operator Jobs; enable for one upgrade, then disable.
   operations:
     # `hermes-manager migrate` with the schema owner's `database-url`.

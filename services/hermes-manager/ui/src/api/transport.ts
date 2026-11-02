@@ -46,6 +46,15 @@ const messages: Record<string, string> = {
   dependency_unavailable:
     "A service the manager depends on is unavailable. Try again later.",
   foreign_issuer: "This identity belongs to a different identity provider.",
+  hostname_taken: "This hostname is already assigned to another agent.",
+  group_in_use: "Remove this group's agent grants before deleting it.",
+  invalid_hostname_label:
+    "Use a lowercase agent label beginning with a letter; do not use consecutive hyphens.",
+  reserved_hostname_label: "This hostname is reserved. Choose another label.",
+  endpoints_not_configured:
+    "Shared-agent hostnames are not configured for this installation.",
+  unknown_group:
+    "This group no longer exists. Refresh and choose a current group.",
   idempotency_conflict:
     "This request key was already used for a different change. Review and submit a new change.",
   identity_not_verified:

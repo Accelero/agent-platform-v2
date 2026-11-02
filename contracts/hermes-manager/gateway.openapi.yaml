@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
-  title: Personal Hermes gateway
+  title: Hermes gateway
   version: 0.1.0
   description: >-
-    Public interface of hermes-gateway on the Hermes hostname. The gateway owns
+    Public interface of hermes-gateway on personal and shared agent hostnames. The gateway owns
     `/_platform/*` and intercepts native `POST /auth/logout`; it forwards every
-    other request to the signed-in owner's own instance (see `x-proxy`). A path
+    other request to the instance authorized for that hostname (see `x-proxy`). A path
     under `/_platform` that is not listed here is answered `404`
     (`invalid_request`) to everyone, with or without a session, and is never
     forwarded: an instance runs agent code and must not be able to serve pages
@@ -23,7 +23,8 @@ servers:
 x-proxy:
   authority: >-
     Except for /_platform/healthz, every request must name the configured public
-    origin's host and port. ASCII hostname case is normalized, and an explicit
+    origin's host or a valid non-reserved label immediately below the configured
+    agent domain, with the public origin's port. ASCII hostname case is normalized, and an explicit
     default port 443 is equivalent to its omission. Another authority, userinfo,
     a trailing dot, missing or duplicate HTTP/1 Host headers, or disagreement
     between Host and the URI authority (including HTTP/2 :authority) is refused
@@ -33,12 +34,14 @@ x-proxy:
     request and does not use TLS SNI. Health probes answer on any authority.
   session: >-
     Every proxied request needs a valid platform session (both platform
-    cookies). Without one, a safe HTML navigation (`GET` or `HEAD` that accepts
+    cookies) bound to this hostname. Login flows, redirects, sessions and
+    logout are hostname-bound. Without one, a safe HTML navigation (`GET` or `HEAD` that accepts
     `text/html`, not a WebSocket) is redirected with `303` to
     `/_platform/login?returnTo=<path>`; anything else gets `401`
     `{"error": "invalid_identity_evidence"}`.
   resolution: >-
-    The session's verified `(issuer, subject)` is resolved over mTLS with a
+    The session's verified `(issuer, subject)` and classified personal or shared
+    target are resolved over mTLS with a
     2-second deadline. A ready decision is cached for at most 5 seconds per
     session; no other decision is cached.
   decisions:
@@ -66,7 +69,8 @@ x-proxy:
     through. Request bodies are limited to 64 MiB.
   responseHygiene: >-
     Hop-by-hop headers are removed, and so is any `Set-Cookie` that names a
-    platform cookie.
+    platform cookie. On a shared hostname, cookies with a Domain attribute are
+    removed to prevent an instance from setting cookies for sibling hosts.
   revocation: >-
     WebSockets and streamed responses without a length are re-checked every 5
     seconds against the session and the resolver. They end when the session
@@ -101,7 +105,8 @@ paths:
       description: >-
         Needs the current browser proof and an unused state. The exact issuer
         and the subject of both tokens are verified. Callback parameters never
-        select a backend and are never reflected.
+        select a backend and are never reflected. A successful platform login
+        expires the host's native session cookie variants.
       parameters:
         - { name: state, in: query, required: true, schema: { type: string, maxLength: 128 } }
         - { name: code, in: query, schema: { type: string, maxLength: 4096 } }

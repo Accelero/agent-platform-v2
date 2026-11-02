@@ -452,6 +452,129 @@ function EditorDialog({
   );
 }
 type Receipt = Schemas["AssignmentReceipt"];
+export function CreateSharedAgent() {
+  return (
+    <EditorDialog title="Create shared agent">
+      {() => <CreateSharedBody />}
+    </EditorDialog>
+  );
+}
+
+function CreateSharedBody() {
+  const actor = useActorKey();
+  const settings = useQuery({
+    queryKey: [actor, "endpoint-settings"],
+    queryFn: ({ signal }) => api.endpointSettings(signal),
+  });
+  const session = useSession();
+  const [spec, setSpec] = useState(emptySpec);
+  const [agent, setAgent] = useState({
+    name: "",
+    displayName: "",
+    label: "",
+    enabled: false,
+  });
+  const [submit] = useState(() => createIntent());
+  const mutation = useMutation({
+    mutationFn: () =>
+      submit<Receipt>(
+        "POST",
+        "/api/v1/assignments",
+        { sharedAgent: agent, spec },
+        session.data!.csrfToken!,
+      ),
+    onSuccess: () => void queryClient.invalidateQueries(),
+  });
+  if (mutation.data)
+    return (
+      <p role="status">
+        Shared agent created.{" "}
+        <Link to="/assignments/$id" params={{ id: mutation.data.assignmentId }}>
+          Open the agent
+        </Link>
+      </p>
+    );
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        mutation.mutate();
+      }}
+    >
+      <p>
+        Members share this agent and its workspace. Register both callback URLs
+        before enabling its endpoint.
+      </p>
+      {settings.error && <ErrorNotice error={settings.error} />}
+      {!settings.data?.agentDomain && (
+        <p>Shared-agent hostnames are not configured.</p>
+      )}
+      <fieldset disabled={mutation.isPending || !settings.data?.agentDomain}>
+        <label>
+          Name{" "}
+          <input
+            required
+            value={agent.name}
+            maxLength={63}
+            onChange={(event) =>
+              setAgent({ ...agent, name: event.target.value })
+            }
+          />
+        </label>
+        <label>
+          Display name{" "}
+          <input
+            required
+            value={agent.displayName}
+            maxLength={128}
+            onChange={(event) =>
+              setAgent({ ...agent, displayName: event.target.value })
+            }
+          />
+        </label>
+        <label>
+          Hostname label{" "}
+          <input
+            required
+            value={agent.label}
+            maxLength={63}
+            onChange={(event) =>
+              setAgent({ ...agent, label: event.target.value })
+            }
+          />
+        </label>
+        <p>
+          {agent.label && settings.data?.agentDomain
+            ? `${agent.label}.${settings.data.agentDomain}`
+            : "Choose a hostname label."}
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={agent.enabled}
+            onChange={(event) =>
+              setAgent({ ...agent, enabled: event.target.checked })
+            }
+          />{" "}
+          Enable endpoint
+        </label>
+        <SpecEditor value={spec} onChange={setSpec} />
+      </fieldset>
+      {mutation.error && <ErrorNotice error={mutation.error} />}
+      <ProblemList error={mutation.error} />
+      <button
+        disabled={
+          mutation.isPending ||
+          !settings.data?.agentDomain ||
+          !spec.template.id ||
+          !session.data?.csrfToken
+        }
+      >
+        Create shared agent
+      </button>
+    </form>
+  );
+}
 /** Creates the one assignment of an exact identity. */
 export function CreateAssignment({ identity }: { identity: Identity }) {
   return (

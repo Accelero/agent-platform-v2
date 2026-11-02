@@ -4,6 +4,7 @@
 use axum::http::{HeaderMap, Uri, Version, header, uri::Authority};
 use hermes_core::domain::endpoints::EndpointNames;
 use hermes_identity::AuthError;
+use hermes_identity::browser::RequestOrigin;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostClass {
@@ -16,11 +17,16 @@ pub struct Misdirected;
 
 pub struct Hosts {
     personal: String,
+    personal_origin: String,
     port: u16,
     agents: Option<EndpointNames>,
 }
 
 impl Hosts {
+    pub fn with_agents(mut self, agents: EndpointNames) -> Self {
+        self.agents = Some(agents);
+        self
+    }
     pub fn new(origin: &str, agents: Option<EndpointNames>) -> Result<Self, AuthError> {
         let url = url::Url::parse(origin).map_err(|_| AuthError::Configuration)?;
         if url.scheme() != "https"
@@ -31,11 +37,39 @@ impl Hosts {
         }
         Ok(Self {
             personal: url.host_str().ok_or(AuthError::Configuration)?.to_owned(),
+            personal_origin: origin.to_owned(),
             port: url
                 .port_or_known_default()
                 .ok_or(AuthError::Configuration)?,
             agents,
         })
+    }
+
+    /// Reconstruct an origin from the classified host and configured port.
+    pub fn request_origin(&self, class: &HostClass) -> RequestOrigin {
+        match class {
+            HostClass::Personal => RequestOrigin {
+                origin: self.personal_origin.clone(),
+                host: None,
+            },
+            HostClass::Agent { label } => {
+                let domain = self
+                    .agents
+                    .as_ref()
+                    .expect("agent class requires agent policy")
+                    .domain();
+                let host = format!("{label}.{domain}");
+                let authority = if self.port == 443 {
+                    host.clone()
+                } else {
+                    format!("{host}:{}", self.port)
+                };
+                RequestOrigin {
+                    origin: format!("https://{authority}"),
+                    host: Some(host),
+                }
+            }
+        }
     }
 
     pub fn classify(
@@ -122,6 +156,14 @@ mod tests {
         )
         .unwrap();
         let policy = Hosts::new("https://home.agents.test", Some(names)).unwrap();
+        let agent = policy.request_origin(&HostClass::Agent {
+            label: "engineering".into(),
+        });
+        assert_eq!(agent.origin, "https://engineering.agents.test");
+        assert_eq!(agent.host.as_deref(), Some("engineering.agents.test"));
+        let personal = policy.request_origin(&HostClass::Personal);
+        assert_eq!(personal.origin, "https://home.agents.test");
+        assert!(personal.host.is_none());
         for (authority, expected) in [
             ("home.agents.test", Ok(HostClass::Personal)),
             ("HOME.AGENTS.TEST:443", Ok(HostClass::Personal)),
@@ -170,7 +212,13 @@ mod tests {
                 }
             }
         }
-        let policy = Hosts::new("https://home.agents.test:8443", None).unwrap();
+        let names =
+            EndpointNames::new("agents.test", &[], &["https://home.agents.test:8443"]).unwrap();
+        let policy = Hosts::new("https://home.agents.test:8443", Some(names)).unwrap();
+        let agent = policy.request_origin(&HostClass::Agent {
+            label: "engineering".into(),
+        });
+        assert_eq!(agent.origin, "https://engineering.agents.test:8443");
         let uri = "/".parse().unwrap();
         let mut headers = HeaderMap::new();
         headers.insert(header::HOST, "home.agents.test:8443".parse().unwrap());

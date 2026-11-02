@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
-use hermes_core::domain::routing::Route;
+use hermes_core::domain::routing::{Route, Target};
 use hermes_identity::AuthError;
 use http_body_util::BodyExt;
 use hyper::body::{Frame, SizeHint};
@@ -70,16 +70,22 @@ enum Check {
 }
 
 impl Checks {
-    async fn check(&self, handle: &str, route: &Route) -> Check {
+    async fn check(
+        &self,
+        handle: &str,
+        route: &Route,
+        host: Option<&str>,
+        target: &Target,
+    ) -> Check {
         let run = async {
-            let identity = match self.sessions.recheck(handle).await {
+            let identity = match self.sessions.recheck_on_host(handle, host).await {
                 Ok(identity) => identity,
                 Err(AuthError::Unavailable) => return Check::Failed,
                 Err(AuthError::Evidence | AuthError::Forbidden | AuthError::Configuration) => {
                     return Check::Ended(Ended::Session);
                 }
             };
-            match self.resolver.resolve(&identity).await {
+            match self.resolver.resolve_target(&identity, target).await {
                 Verdict::Ready(current) if current == *route => Check::Same,
                 Verdict::Ready(_) | Verdict::Pending(_) | Verdict::Denied => {
                     Check::Ended(Ended::Decision)
@@ -94,6 +100,18 @@ impl Checks {
 
     /// Completes when the exchange of `handle` on `route` must end.
     pub async fn until_revoked(&self, handle: &str, route: &Route) -> Ended {
+        self.until_revoked_on_host(handle, route, None, &Target::Personal {})
+            .await
+    }
+
+    /// Recheck the same host and target for the lifetime of an exchange.
+    pub async fn until_revoked_on_host(
+        &self,
+        handle: &str,
+        route: &Route,
+        host: Option<&str>,
+        target: &Target,
+    ) -> Ended {
         let mut failed = false;
         loop {
             let wait = if failed {
@@ -102,7 +120,7 @@ impl Checks {
                 self.timing.recheck
             };
             tokio::time::sleep(wait).await;
-            match self.check(handle, route).await {
+            match self.check(handle, route, host, target).await {
                 Check::Same => failed = false,
                 Check::Ended(reason) => return reason,
                 Check::Failed if failed => return Ended::Unavailable,
@@ -113,10 +131,22 @@ impl Checks {
 
     /// Starts supervising; the receiver completes when the exchange must end.
     pub fn spawn(&self, handle: String, route: Route) -> Supervisor {
+        self.spawn_on_host(handle, route, None, Target::Personal {})
+    }
+
+    pub fn spawn_on_host(
+        &self,
+        handle: String,
+        route: Route,
+        host: Option<String>,
+        target: Target,
+    ) -> Supervisor {
         let (ended, receiver) = oneshot::channel();
         let checks = self.clone();
         let task = tokio::spawn(async move {
-            let reason = checks.until_revoked(&handle, &route).await;
+            let reason = checks
+                .until_revoked_on_host(&handle, &route, host.as_deref(), &target)
+                .await;
             let _ = ended.send(reason);
         });
         Supervisor { receiver, task }
