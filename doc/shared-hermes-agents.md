@@ -64,7 +64,7 @@ native login, refresh, logout, home binding and callbacks on the project image;
 | E1 | Keycloak refuses a redirect URI with a wildcard in its host: a client registered with `https://*.hermes.example.org/_platform/oidc/callback` answers `400 Invalid parameter: redirect_uri` for `https://engineering.hermes.example.org/_platform/oidc/callback`. | Experiment on the pinned image | Each hostname's gateway and native callbacks are registered in Keycloak individually. See [D1 and D2](#planned-design-decisions) |
 | E2 | The gateway has one OIDC callback, and `BrowserAuth::new` refuses any other. Its session cookies are `__Host-` and so per host. | `hermes-gateway/src/lib.rs`, `hermes-identity/src/browser.rs` | The gateway must log in per host. See [Sign-in on each host](#sign-in-on-each-host) |
 | E3 | Native OIDC builds its redirect URI from `HERMES_DASHBOARD_PUBLIC_URL`. Without it, the URI comes from the request, whose scheme is `https` only if `dashboard.trusted_proxies` trusts the gateway's address; no such setting is rendered today, and a test with an untrusted caller produced `http://engineering.hermes.example.org/auth/callback`. | `hermes_cli/dashboard_auth/routes.py`, `hermes_cli/web_server_lifecycle.py`, `hermes-render/src/instance.rs`, experiment | Each shared instance gets its own hostname as its public URL, as a personal one does, so a rename restarts its Pod |
-| E4 | The owner pin is our patch, not an upstream feature. `patch-dashboard-owner.py` also adds the `terminal.runtime_id` setting, and the owner context also binds the home in `personal-init.py` and `personal-run.py`. | Source | Removing the pin must keep the setting and the home binding. See [Removing the owner pin](#removing-the-owner-pin) |
+| E4 | The native OIDC provider is the pinned upstream implementation. The terminal patch preserves `terminal.runtime_id`, and the initialization context binds a personal or shared home. | Source and native-image tests | Home binding is independent of native login |
 | E5 | Native login cannot be disabled. On a non-loopback bind, the dashboard refuses to start without a registered provider, and `--insecure` is ignored. Binding `0.0.0.0` accepts any `Host`. | `hermes_cli/web_server.py`, experiment | Shared instances keep a login provider. The router's forwarded hostname is accepted |
 | E6 | The pinned image does not separate users: with two identities, one read the other's sessions, a stored `.env` value and test copies of the instance's credential files, and deleted the other's cron job. | Experiment | Hermes's part; see [Responsibility boundary](#planned-responsibility-boundary). Recorded for whoever chooses the image, and not a platform obligation |
 | E7 | A member can register another auth provider by writing `dashboard.basic_auth` to the home's `config.yaml`. A blank `dashboard.basic_auth` in the managed configuration prevents this. | Experiment | [Managed configuration](#managed-configuration) |
@@ -590,9 +590,8 @@ evidence exists.
 **Verified:** SH-N01, SH-N02, SH-N04 and SH-N05 pass in the collected
 `python-native` profile, together with the supplemental provider-session cases.
 
-Before building anything else, remove the owner pin in a test image and write
-`tests/integration/test_native_shared.py`, with a disposable Keycloak. This turns E14 to E16
-into collected tests on the project's image, for
+The collected `tests/integration/test_native_shared.py` cases exercise the project
+image with a disposable Keycloak and TLS relay for
 [SH-N01, SH-N02, SH-N04 and SH-N05](#native-runtime).
 
 The collected SH-N04 case checks SSO and independent refresh on two hosts,
@@ -624,8 +623,8 @@ send the configured authority.
 
 **Verified:** SH-D01 to SH-D08 have collected hostname, memory/PostgreSQL,
 real API and database-guard cases. Personal and shared inventories, including
-pagination without a personal assignment, pass. Shared runtime rendering remains
-planned for Phase 4.
+pagination without a personal assignment, pass. Shared runtime rendering and
+its remaining verification are covered by Phase 4.
 
 Migration, domain rules, port contract cases first, commands, read models and the
 `openapi.yaml` changes.
@@ -647,6 +646,11 @@ and revocation behavior are covered. Per-host gateway forwarding remains planned
 ### Phase 4: runtime and controller
 
 Owner pin removal, v2 context, init and run branches, rendering and managed configuration.
+
+**Verified:** SH-N01 to SH-N05, SH-I01 to SH-I03 and SH-C01 to SH-C03
+have collected tests. The rebuilt native image passed the 23-case native profile;
+the disposable k3s and native end-to-end runs passed with that image, including
+the compatibility check that platform routing is independent of native identity.
 
 **Gate:** rebuild the image with `tests.personal_hermes.native_runtime --build`, then
 SH-N01 to SH-N05 on the built image (the `python-native` profile);

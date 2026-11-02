@@ -149,6 +149,10 @@ impl Controller {
             oidc_ca_pem,
             native_client_id: self.native_client_id.clone(),
             public_origin: self.public_origin.clone(),
+            agent_domain: settings
+                .endpoint_names
+                .as_ref()
+                .map(|n| n.domain().to_owned()),
             service_egress: self.service_egress.clone(),
             public_https: self.public_https,
         };

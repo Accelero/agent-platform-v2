@@ -215,6 +215,11 @@ pub async fn shared_access_commands_leave_the_assignment_and_workload_unchanged<
 ) {
     let receipt = setup(&store).await;
     let env = envelope(&store);
+    let cluster = super::super::fakes::FakeCluster::default();
+    let controller = super::controller::controller(&store, &cluster, Arc::new(NoFaults));
+    let epoch = store.advance_epoch().await.unwrap();
+    super::controller::until(&controller, epoch, receipt.instance_id, Phase::Ready).await;
+    let materials = store.materials(receipt.instance_id).await.unwrap();
     let before = store
         .desired_instance(receipt.instance_id)
         .await
@@ -289,6 +294,11 @@ pub async fn shared_access_commands_leave_the_assignment_and_workload_unchanged<
     assert_eq!(
         store.instance_generations(receipt.instance_id).await,
         (1, 1)
+    );
+    super::controller::until(&controller, epoch, receipt.instance_id, Phase::Ready).await;
+    assert_eq!(
+        store.materials(receipt.instance_id).await.unwrap(),
+        materials
     );
     let mut tx = store.begin().await.unwrap();
     assert_eq!(

@@ -74,6 +74,23 @@ impl EndpointNames {
         Ok(names)
     }
 
+    pub fn origin(&self, label: &str, personal_origin: &str) -> Result<String, LabelRejected> {
+        self.validate_label(label)?;
+        let origin = url::Url::parse(personal_origin).map_err(|_| LabelRejected::Invalid)?;
+        if origin.scheme() != "https" || origin.origin().ascii_serialization() != personal_origin {
+            return Err(LabelRejected::Invalid);
+        }
+        let port = origin
+            .port_or_known_default()
+            .ok_or(LabelRejected::Invalid)?;
+        let suffix = if port == 443 {
+            String::new()
+        } else {
+            format!(":{port}")
+        };
+        Ok(format!("https://{label}.{}{suffix}", self.domain))
+    }
+
     pub fn domain(&self) -> &str {
         &self.domain
     }
@@ -142,6 +159,18 @@ mod tests {
                 "{label}"
             );
         }
+        assert_eq!(
+            names
+                .origin("engineering", "https://home.example.test")
+                .unwrap(),
+            "https://engineering.example.test"
+        );
+        assert_eq!(
+            names
+                .origin("engineering", "https://home.example.test:8443")
+                .unwrap(),
+            "https://engineering.example.test:8443"
+        );
         let nested = EndpointNames::new(
             "example.test",
             &[],

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 
 def read(path, maximum):
@@ -28,19 +29,39 @@ def environment():
     if os.geteuid() == 0:
         raise ValueError("personal_runtime_requires_non_root")
     context = json.loads(read("/run/hermes/owner/context.json", 16384))
-    owner = context["owner"]
+    version = context.get("schemaVersion")
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("invalid_personal_runtime_input")
+    if version == 1:
+        principal = context["owner"]
+        digest_key = "ownerDigest"
+        expected_issuer = principal["issuer"]
+    else:
+        principal = {"agentId": context["agent"]["id"]}
+        digest_key = "agentDigest"
+        expected_issuer = os.environ.get("HERMES_PLATFORM_OIDC_ISSUER", "")
+        parsed = urlsplit(expected_issuer)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("personal_runtime_auth_conflict")
     receipt = json.loads(
         read("/opt/data/.agent-platform/native-init-receipt.json", 16384)
     )
     binding = receipt["record"]["intent"]["binding"]
     expected = {
-        "schemaVersion": 1,
+        "schemaVersion": version,
         "installationId": context["installationId"],
         "instanceId": context["instanceId"],
         "materialId": context["materialId"],
-        "ownerDigest": hashlib.sha256(
+        digest_key: hashlib.sha256(
             json.dumps(
-                owner, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                principal, sort_keys=True, separators=(",", ":"), ensure_ascii=False
             ).encode()
         ).hexdigest(),
     }
@@ -52,7 +73,7 @@ def environment():
     if not re.fullmatch(r"[a-f0-9]{64}", token):
         raise ValueError("invalid_personal_runtime_key")
     env = dict(os.environ)
-    if env.get("HERMES_DASHBOARD_OIDC_ISSUER") != owner["issuer"] or not env.get(
+    if env.get("HERMES_DASHBOARD_OIDC_ISSUER") != expected_issuer or not env.get(
         "HERMES_DASHBOARD_OIDC_CLIENT_ID"
     ):
         raise ValueError("personal_runtime_auth_conflict")

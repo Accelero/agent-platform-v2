@@ -7,6 +7,14 @@ from pathlib import Path
 ROOT = Path("/opt/hermes")
 PATCHES = [
     (
+        "hermes_cli/env_loader.py",
+        "f33feafb58da3bd1e19eb3c97fdfc461c570ed3823fb56dd84f8e95357d2e7b9",
+        "    assignments = list(DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse())",
+        "    from hermes_cli._platform_terminal_policy import filter_dashboard_auth\n"
+        "    assignments = filter_dashboard_auth(\n"
+        "        list(DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse()))",
+    ),
+    (
         "hermes_cli/managed_scope.py",
         "692289b37fa3ce547b37d8fc20baf12f0e1a8358689ebdc48e51d06250e91037",
         '    override = os.environ.get("HERMES_MANAGED_DIR", "").strip()',
@@ -87,5 +95,29 @@ def patch(root=ROOT):
         path.write_text(text)
 
 
+def patch_terminal_schema(source: Path) -> None:
+    original = source.read_bytes()
+    if (
+        hashlib.sha256(original).hexdigest()
+        != "02ca12ce0ca241ee41e839a0388cbd88618b986e6e8a460b6699e0b125e16ae9"
+    ):
+        raise RuntimeError(
+            "Pinned native settings source changed; review terminal selector"
+        )
+    before = "    return {**CONFIG_SCHEMA, **overlay} if overlay else CONFIG_SCHEMA"
+    after = """    overlay["terminal.runtime_id"] = {
+        "type": "string", "category": "terminal",
+        "description": "Managed terminal backend ID (empty uses manager default; access is enforced by the manager)",
+    }
+    return {**CONFIG_SCHEMA, **overlay} if overlay else CONFIG_SCHEMA"""
+    text = original.decode()
+    if text.count(before) != 1:
+        raise RuntimeError("Native terminal settings schema no longer matches")
+    text = text.replace(before, after)
+    compile(text, str(source), "exec")
+    source.write_text(text)
+
+
 if __name__ == "__main__":
     patch()
+    patch_terminal_schema(ROOT / "hermes_cli/web_server_config.py")

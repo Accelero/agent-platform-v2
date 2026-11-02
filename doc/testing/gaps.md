@@ -1027,8 +1027,7 @@ paths include `/api/status`, `/api/health` and `/api/auth/providers`.
 **Security reasoning to carry into ARCH.** Notes are created only from responses to
 authenticated requests and bound to one session, one user and one instance, so an
 outsider cannot create one. A stolen ticket gives one-shot access to that user's
-instance for at most 30 s and still has to satisfy the instance's own ticket and
-owner checks; upstream accepts the same exposure. The existing `Origin` rule keeps
+instance for at most 30 s and still has to satisfy the instance's own ticket checks; upstream accepts the same exposure. The existing `Origin` rule keeps
 a page on a sibling host from minting tickets. Accepted residuals: an instance
 runs the owner's agent code and could return a weak ticket value, which makes only
 its own instance reachable without a session; the gateway now parses one bounded

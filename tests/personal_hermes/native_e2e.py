@@ -1444,7 +1444,7 @@ def published_versions_commission_ready_instances_from_the_api(
     a_private_backend_pulls_with_its_registry_secret_and_reports_failures(
         identifier, admin, assignments, images, passwords, worker
     )
-    foreign_cookies_tickets_and_forged_headers_reach_nothing(ca, passwords)
+    platform_routing_ignores_native_identity_and_refuses_foreign_tickets(ca, passwords)
     an_email_change_keeps_ownership_and_the_old_email_gets_nothing(
         ca, passwords, assignments
     )
@@ -1459,7 +1459,7 @@ def published_versions_commission_ready_instances_from_the_api(
     )
     print(
         "PASS: chart install with operator Jobs; two owners commissioned and reached "
-        "through the gateway with Keycloak; owner-pinned native login; denial "
+        "through the gateway with Keycloak; native realm login; denial "
         "without assignment or enrollment; a missing static directory blocks, then "
         "recovers; static folders shared with independent read-only mounts; "
         "chat, settings precedence and the "
@@ -1467,7 +1467,8 @@ def published_versions_commission_ready_instances_from_the_api(
         "job fired without browser traffic and acquired a terminal; a second "
         "backend with the private home only there; idle workers retired; a backend "
         "change kept the active lease; a private registry with pull failures "
-        "reported; foreign cookies and tickets refused; an email change kept "
+        "reported; platform routing independent of native identity; foreign tickets "
+        "refused; an email change kept "
         "ownership; outages and provider revocation failed closed; suspension "
         "closed connections and drained a pending worker; data kept on re-enable; "
         "only the controller holds cluster rights; no secret in any log"
@@ -2703,9 +2704,10 @@ def cookie_header(browser, native):
     )
 
 
-def foreign_cookies_tickets_and_forged_headers_reach_nothing(ca, passwords):
-    """Carol's native cookie or WebSocket ticket in Bob's browser reaches only
-    Bob's instance, which refuses it; forged identity headers change nothing."""
+def platform_routing_ignores_native_identity_and_refuses_foreign_tickets(ca, passwords):
+    """Platform identity chooses the instance even with another native identity.
+    Native cookies are realm credentials; foreign tickets and header claims fail.
+    """
     bob = signed_in(ca, "bob", passwords)
     carol = signed_in(ca, "carol", passwords)
     raw = requests.Session()
@@ -2717,9 +2719,19 @@ def foreign_cookies_tickets_and_forged_headers_reach_nothing(ca, passwords):
         },
         timeout=30,
     )
-    assert foreign.status_code in (401, 403), (
-        f"foreign native cookie: {foreign.status_code}"
+    assert foreign.status_code == 200 and foreign.json()["user_id"] == SUBJECTS["carol"]
+    bob_history = bob.get("/api/sessions").json()
+    carol_history = carol.get("/api/sessions").json()
+    assert bob_history != carol_history
+    mixed = raw.get(
+        f"https://{PUBLIC}/api/sessions",
+        headers={
+            "Cookie": cookie_header(bob, False) + "; " + cookie_header(carol, True)
+        },
+        timeout=30,
     )
+    assert mixed.status_code == 200
+    assert mixed.json() == bob_history
     alone = raw.get(
         f"https://{PUBLIC}/api/auth/me",
         headers={"Cookie": cookie_header(carol, True), "Accept": "text/html"},

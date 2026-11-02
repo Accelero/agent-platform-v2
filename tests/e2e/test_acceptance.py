@@ -24,8 +24,8 @@ def test_two_owners_reach_their_own_native_instances_through_the_gateway(platfor
 
 
 @pytest.mark.security
-def test_foreign_cookies_tickets_and_forged_headers_reach_nothing(platform):
-    scenarios.foreign_cookies_tickets_and_forged_headers_reach_nothing(
+def test_platform_routing_ignores_native_identity_and_refuses_foreign_tickets(platform):
+    scenarios.platform_routing_ignores_native_identity_and_refuses_foreign_tickets(
         platform.ca, platform.passwords
     )
 

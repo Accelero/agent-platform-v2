@@ -49,20 +49,23 @@ def missing_instance_policies_are_refused():
             """
 import os
 from hermes_cli._platform_terminal_policy import enforce_backend, managed_directory
-from plugins.dashboard_auth.self_hosted import SelfHostedOIDCProvider
-# Environment pins cannot stand in for the mounted owner policy.
+import importlib.util
+spec = importlib.util.spec_from_file_location(
+    "personal_run", "/usr/local/lib/personal-run.py")
+supervisor = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(supervisor)
+# Startup and terminal execution require the instance mounts.
 os.environ['HERMES_DASHBOARD_EXPECTED_ISSUER'] = 'https://sso.example.org/realms/agents'
 os.environ['HERMES_DASHBOARD_EXPECTED_SUBJECT'] = 'owner-a'
 for operation in [
     lambda: enforce_backend('local'),
     lambda: enforce_backend('managed_execution'),
     managed_directory,
-    lambda: SelfHostedOIDCProvider(
-        issuer='https://sso.example.org/realms/agents', client_id='native-hermes'),
+    supervisor.environment,
 ]:
     try:
         operation()
-    except (RuntimeError, ValueError):
+    except (RuntimeError, ValueError, OSError):
         pass
     else:
         raise AssertionError('Missing instance policy was accepted')

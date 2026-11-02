@@ -359,3 +359,124 @@ def test_the_refusal_codes_are_the_ones_the_manager_blocks_on(fixture):
     source = SOURCE.read_text()
     for code in initializer.REFUSALS:
         assert f'raise ValueError("{code}")' in source, code
+
+
+def shared_context(context, *, other=False):
+    value = json.loads(context.read_text())
+    value.pop("owner", None)
+    value["schemaVersion"] = 2
+    value["agent"] = {
+        "id": "00000000-0000-4000-8000-000000000005"
+        if other
+        else "00000000-0000-4000-8000-000000000004"
+    }
+    context.write_text(json.dumps(value))
+    return value
+
+
+def test_a_shared_home_initializes_once_and_ignores_hostname_state(
+    fixture, monkeypatch
+):
+    initializer, root, context, _config, _key = fixture
+    value = shared_context(context)
+    proof = invoke(fixture)
+    binding = json.loads(proof)["record"]["intent"]["binding"]
+    assert binding["schemaVersion"] == 2
+    assert "ownerDigest" not in binding
+    assert (
+        binding["agentDigest"]
+        == initializer.hashlib.sha256(
+            initializer.canonical({"agentId": value["agent"]["id"]})
+        ).hexdigest()
+    )
+    (root / "config.yaml").write_text("retained user configuration")
+    (root / "user-data").write_text("retained shared data")
+    before = {
+        str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    }
+    monkeypatch.setenv("HERMES_DASHBOARD_PUBLIC_URL", "https://renamed.agents.test")
+    assert invoke(fixture) == proof
+    assert {
+        str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    } == before
+
+
+@pytest.mark.parametrize(
+    ("existing", "wanted"),
+    [("personal", "shared"), ("shared", "personal"), ("shared", "other-shared")],
+    ids=["personal-to-shared", "shared-to-personal", "other-agent"],
+)
+def test_shared_home_kind_and_agent_conflicts_leave_all_data_untouched(
+    fixture, existing, wanted, monkeypatch, tmp_path
+):
+    initializer, root, context, config, key = fixture
+    personal = context.read_bytes()
+    if existing == "shared":
+        shared_context(context)
+    invoke(fixture)
+    (root / "user-data").write_text("retain every byte")
+    before = {
+        str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    }
+    if wanted == "personal":
+        context.write_bytes(personal)
+    else:
+        shared_context(context, other=wanted == "other-shared")
+    with pytest.raises(ValueError, match="^native_home_owner_conflict$"):
+        invoke(fixture)
+    result = tmp_path / "termination-message"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "personal-init",
+            "--root",
+            str(root),
+            "--context",
+            str(context),
+            "--config",
+            str(config),
+            "--key",
+            str(key),
+            "--result",
+            str(result),
+        ],
+    )
+    with pytest.raises(SystemExit):
+        initializer.main()
+    assert result.read_text() == "native_home_owner_conflict"
+    assert {
+        str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()
+    } == before
+
+
+def test_shared_supervisor_checks_the_receipt_and_rendered_issuer(fixture, monkeypatch):
+    _initializer, _root, context, _config, _key = fixture
+    value = shared_context(context)
+    proof = invoke(fixture)
+    spec = importlib.util.spec_from_file_location(
+        "personal_run", SOURCE.with_name("personal-run.py")
+    )
+    supervisor = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(supervisor)
+    files = {
+        "/run/hermes/owner/context.json": json.dumps(value).encode(),
+        "/opt/data/.agent-platform/native-init-receipt.json": proof,
+        "/run/hermes/credentials/dashboard-session-token": b"ab" * 32,
+        "/run/hermes/execution-ca/config.yaml": b"{}",
+    }
+    monkeypatch.setattr(supervisor.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(supervisor, "read", lambda path, _maximum: files[path])
+    issuer = "https://sso.example.org/realms/agents"
+    monkeypatch.setenv("HERMES_DASHBOARD_OIDC_ISSUER", issuer)
+    monkeypatch.setenv("HERMES_PLATFORM_OIDC_ISSUER", issuer)
+    monkeypatch.setenv("HERMES_DASHBOARD_OIDC_CLIENT_ID", "hermes-native")
+    monkeypatch.setenv("HERMES_MANAGED_DIR", "/run/hermes/execution-ca")
+    monkeypatch.delenv("HERMES_PERSONAL_OIDC_CA_FILE", raising=False)
+    assert supervisor.environment()["HERMES_DASHBOARD_OIDC_ISSUER"] == issuer
+    monkeypatch.setenv("HERMES_DASHBOARD_OIDC_ISSUER", "https://foreign.test/realm")
+    with pytest.raises(ValueError, match="^personal_runtime_auth_conflict$"):
+        supervisor.environment()
+    value["agent"]["id"] = "00000000-0000-4000-8000-000000000005"
+    files["/run/hermes/owner/context.json"] = json.dumps(value).encode()
+    with pytest.raises(ValueError, match="^personal_runtime_home_conflict$"):
+        supervisor.environment()

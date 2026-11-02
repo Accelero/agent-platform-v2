@@ -49,7 +49,7 @@ flowchart LR
 | `hermes-manager api` (one or more replicas) | Administration API and dashboard, route resolution, execution API | Database URL for the registry and admin sessions, admin OIDC client, TLS keys, admin-secret *public* sealing key | Kubernetes credentials, secret decryption keys |
 | `hermes-manager controller` (one active, Kubernetes `Lease` leader election) | Reconciles instances and terminal environments, expires leases, enforces drains, reports orphans | Database URL, constrained ServiceAccount, material and admin-secret decryption keys | OIDC clients |
 | `hermes-gateway` (one or more replicas) | Public login, platform sessions, route resolution, proxying, connection revocation | Gateway OIDC client, session keys, a database role limited to the `gateway_sessions` schema, mTLS client certificate | Registry tables, Kubernetes credentials |
-| Personal Hermes | Native agent, dashboard, cron; owner-pinned native OIDC | Private home, its volumes, native keys, execution credential, SSH client key, referenced admin secrets | Kubernetes token |
+| Personal Hermes | Native agent, dashboard, cron; native realm OIDC | Private home, its volumes, native keys, execution credential, SSH client key, referenced admin secrets | Kubernetes token |
 | Terminal backend Pod | SSH shell and file access | Mounted volumes, authorized key, host key | Kubernetes token; any manager or database access |
 
 One image contains both binaries:
@@ -115,9 +115,8 @@ shared-only endpoint/grant references, permanent endpoint rows and independent
 assignment/audience version advances. Read models use bounded keyset pagination;
 multi-table audience reads use one repeatable-read snapshot.
 
-**Planned:** native v2 home binding, per-host gateway
-sessions and deployment configuration are separate phases. Shared rendering is
-refused until its native runtime branch is built.
+**Planned:** per-host gateway sessions and deployment configuration must be
+wired before shared instances can serve users.
 
 Shared route resolution uses `Target::{Personal, Shared { label }}`. An omitted
 target decodes as personal, and the gateway still omits its personal target on
@@ -525,10 +524,18 @@ forwards the request when the instance is ready, with a 2 s deadline, so
 native Hermes can revoke its own tokens, then ends the platform session,
 whether or not the instance answered.
 
+Managed native configuration blanks basic authentication and the Nous provider's
+client ID and secret-bearing self-hosted configuration. The pinned dotenv loader
+is patched at a hash-checked seam to ignore user-controlled dashboard OIDC,
+OAuth, basic-auth, public-URL and session-token variables in a managed instance.
+Other user settings remain available. This prevents retained `.env` and YAML
+settings from replacing the rendered native login policy.
+
 The manager trusts the gateway's verified mTLS identity for the asserted
 subject. The gateway is in the trust base anyway, because it carries all user
-traffic. Native Hermes still independently verifies its owner through its own
-OIDC login.
+traffic. Native Hermes independently verifies a realm login; the gateway alone
+decides access to the selected instance. A native cookie can be accepted on
+other instances using the same realm and client, and does not grant platform access.
 
 ## Security model
 
@@ -547,7 +554,7 @@ network peers are untrusted.
 
 | Threat | Controls |
 | --- | --- |
-| A user reaches another owner's instance | Gateway routes only by verified identity to a registered namespace; native owner pin; NetworkPolicy admits only the gateway to native ports |
+| A user reaches another owner's instance | Gateway routes only by verified identity to a registered namespace; NetworkPolicy admits only the gateway to native ports |
 | Forged identity or routing headers | Stripped by the gateway; instances reachable only from the gateway |
 | Compromised Hermes instance | No Kubernetes token; execution credential scoped server-side to that instance; NetworkPolicy allows only the execution API, its own workers and approved egress |
 | Compromised terminal backend | No credentials beyond its mounts and keys; SSH ingress only from its Hermes and the controller |
@@ -556,7 +563,7 @@ network peers are untrusted.
 | Compromised or buggy API | No Kubernetes credentials; cannot read admin secrets or materials; what it writes is bounded by static admission when rendered |
 | Buggy controller | Static admission rejects privileged Pods, hostPath, unapproved PersistentVolume paths, foreign namespaces, unpinned images and token automount |
 | Compromised controller | Accepted (trusted). The controller writes component labels and could label a Pod as worker to select any non-zero identity. RBAC limits it to the namespace prefix, owned namespaces and PersistentVolume creation, without cluster-wide Secrets or role escalation |
-| Compromised gateway | Accepted (trusted). Native owner pin still requires the real owner's native login |
+| Compromised gateway | Accepted (trusted). A compromised gateway can connect any valid realm identity to any instance |
 | Stale authorization after revoke | 5 s freshness bound; execution credential revoked in the same transaction |
 | Secret leakage | Sealed at rest; write-only API; no values in responses, audit, logs or errors. A delivered admin secret is readable by its owner's agent; give each person their own provider key, or use a model gateway that issues per-person keys, rather than sharing one |
 | Admin CSRF or cross-origin attacks | Separate admin hostname; host-only `SameSite` cookies; `Origin` check and CSRF token on mutations |
@@ -686,7 +693,7 @@ Each trigger names the domain rule it mirrors.
 | One versioned catalog (Draft, Published, Withdrawn) for templates and backends | Published definitions are immutable; rollouts pin exact versions |
 | `hermes-gateway` as a Rust reverse proxy | Session, decision, hygiene and the revocation of open connections live in one tested component, instead of an edge proxy, an auth service and an interpreted plugin |
 | The gateway asserts identity over mTLS | No user token is relayed; the gateway carries all user traffic and is trusted anyway |
-| The native owner pin stays mandatory | Hermes checks its owner independently of the gateway |
+| The gateway is the access-control boundary | Native OIDC verifies realm identities; home receipts bind data to the owner or shared agent |
 | One 5 s freshness bound for HTTP and WebSockets | One bound, one mechanism |
 | Storage sources in installation values; volumes per assignment | Administrators choose storage without cluster access; shared volumes keep the same path in Hermes and workers |
 | Write-only admin secrets sealed to the controller's key | Enforcing a provider usually needs a key, and the API never needs to read it |

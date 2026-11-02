@@ -104,6 +104,7 @@ pub struct RenderConfig {
     pub native_client_id: String,
     /// The public origin users reach their Hermes at.
     pub public_origin: String,
+    pub agent_domain: Option<String>,
     pub service_egress: Vec<ServiceEgress>,
     /// Allow HTTPS to public addresses (model providers).
     pub public_https: bool,

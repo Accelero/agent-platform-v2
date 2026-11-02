@@ -158,11 +158,19 @@ pub fn render(
     workload: Workload,
 ) -> Result<Vec<Object>, RenderError> {
     config.validate()?;
-    let hermes_core::domain::shared::InstanceBinding::Personal(identity) = &desired.binding else {
-        return Err(RenderError::Invalid);
+    let valid_binding = match &desired.binding {
+        hermes_core::domain::shared::InstanceBinding::Personal(identity) => {
+            identity.validate(&config.installation.issuer).is_ok()
+                && desired.endpoint_label.is_none()
+        }
+        hermes_core::domain::shared::InstanceBinding::Shared { agent_id } => {
+            !agent_id.is_nil()
+                && *agent_id == desired.assignment_id
+                && desired.endpoint_label.is_some()
+        }
     };
     if desired.namespace != config.installation.instance_namespace(desired.instance_id)
-        || identity.validate(&config.installation.issuer).is_err()
+        || !valid_binding
     {
         return Err(RenderError::Invalid);
     }
@@ -296,19 +304,27 @@ pub fn render(
             true,
         );
     }
-    let owner = json!({
-        "schemaVersion": 1,
+    let mut context = json!({
         "installationId": config.installation.id.to_string(),
         "instanceId": instance,
         "materialId": materials.initialization_id.to_string(),
-        "owner": {"issuer": identity.issuer, "subject": identity.subject},
         "template": {"id": desired.template.id, "version": desired.template.version},
     });
+    match &desired.binding {
+        hermes_core::domain::shared::InstanceBinding::Personal(identity) => {
+            context["schemaVersion"] = json!(1);
+            context["owner"] = json!({"issuer": identity.issuer, "subject": identity.subject});
+        }
+        hermes_core::domain::shared::InstanceBinding::Shared { agent_id } => {
+            context["schemaVersion"] = json!(2);
+            context["agent"] = json!({"id": agent_id});
+        }
+    }
     builder.push(
         "v1",
         "ConfigMap",
         OWNER,
-        json!({"metadata": {}, "data": {"context.json": owner.to_string()}}),
+        json!({"metadata": {}, "data": {"context.json": context.to_string()}}),
         true,
     );
     builder.push(
@@ -505,6 +521,35 @@ fn network_policies(builder: &mut Builder<'_>) {
     );
 }
 
+fn instance_origin(
+    config: &RenderConfig,
+    desired: &DesiredInstance,
+) -> Result<String, RenderError> {
+    match &desired.binding {
+        hermes_core::domain::shared::InstanceBinding::Personal(_) => {
+            Ok(config.public_origin.clone())
+        }
+        hermes_core::domain::shared::InstanceBinding::Shared { .. } => {
+            let domain = config.agent_domain.as_deref().ok_or(RenderError::Invalid)?;
+            let names = hermes_core::domain::endpoints::EndpointNames::new(
+                domain,
+                &[],
+                &[&config.public_origin, &config.installation.issuer],
+            )
+            .map_err(|_| RenderError::Invalid)?;
+            names
+                .origin(
+                    desired
+                        .endpoint_label
+                        .as_deref()
+                        .ok_or(RenderError::Invalid)?,
+                    &config.public_origin,
+                )
+                .map_err(|_| RenderError::Invalid)
+        }
+    }
+}
+
 fn deployment(
     config: &RenderConfig,
     desired: &DesiredInstance,
@@ -526,11 +571,17 @@ fn deployment(
         json!({"name": "HERMES_MANAGED_DIR", "value": TRUST_DIR}),
         json!({"name": "HERMES_DASHBOARD_OIDC_ISSUER", "value": config.installation.issuer}),
         json!({"name": "HERMES_DASHBOARD_OIDC_CLIENT_ID", "value": config.native_client_id}),
-        json!({"name": "HERMES_DASHBOARD_PUBLIC_URL", "value": config.public_origin}),
+        json!({"name": "HERMES_DASHBOARD_PUBLIC_URL", "value": instance_origin(config, desired)?}),
         json!({"name": "HERMES_DASHBOARD_OIDC_SCOPES", "value": "openid profile email"}),
         json!({"name": "API_SERVER_ENABLED", "value": "false"}),
         json!({"name": "PYTHONDONTWRITEBYTECODE", "value": "1"}),
     ];
+    if matches!(
+        desired.binding,
+        hermes_core::domain::shared::InstanceBinding::Shared { .. }
+    ) {
+        env.push(json!({"name":"HERMES_PLATFORM_OIDC_ISSUER", "value":config.installation.issuer}));
+    }
     if config.oidc_ca_pem.is_some() {
         env.push(json!({"name": "HERMES_PERSONAL_OIDC_CA_FILE", "value": format!("{TRUST_DIR}/oidc-ca.crt")}));
     }

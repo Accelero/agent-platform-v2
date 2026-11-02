@@ -140,7 +140,7 @@ pub fn validate_admin_config_content(
 pub fn unvalidated_admin_keys(config: &Map<String, Value>, at: &str) -> Vec<Problem> {
     config
         .keys()
-        .filter(|key| !matches!(key.as_str(), "terminal" | "plugins"))
+        .filter(|key| !matches!(key.as_str(), "terminal" | "plugins" | "dashboard"))
         .map(|key| Problem {
             pointer: format!("{at}/{}", pointer_segment(key)),
             code: "unvalidated",
@@ -154,6 +154,20 @@ pub fn validate_admin_config(config: &Map<String, Value>, at: &str, problems: &m
         .map(|bytes| bytes.len())
         .unwrap_or(usize::MAX);
     problems.check(size <= MAX_ADMIN_CONFIG, at, "too_large");
+    if let Some(dashboard) = config.get("dashboard") {
+        match dashboard.as_object() {
+            None => problems.add(format!("{at}/dashboard"), "invalid_type"),
+            Some(dashboard) => {
+                for key in ["basic_auth", "public_url", "oauth"] {
+                    problems.check(
+                        !dashboard.contains_key(key),
+                        format!("{at}/dashboard/{key}"),
+                        "platform_enforced",
+                    );
+                }
+            }
+        }
+    }
     if let Some(terminal) = config.get("terminal") {
         match terminal.as_object() {
             None => problems.add(format!("{at}/terminal"), "invalid_type"),
@@ -257,6 +271,12 @@ mod tests {
                 "platform_enforced"
             )]
         );
+        for key in ["basic_auth", "public_url", "oauth"] {
+            assert_eq!(
+                codes(json!({"dashboard": {key: {}}})),
+                [(format!("/adminConfig/dashboard/{key}"), "platform_enforced")]
+            );
+        }
         assert_eq!(
             codes(json!({"terminal": "local"})),
             [("/adminConfig/terminal".to_owned(), "invalid_type")]
