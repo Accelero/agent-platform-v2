@@ -14,15 +14,16 @@ the test changes required.
 ## Scope
 
 A Helm-installed Kubernetes application that gives selected people in an
-SSO realm their own Hermes agent:
+SSO realm access to personal or shared Hermes agents:
 
 - **Explicit.** An administrator decides who gets a Hermes instance, which
   template it uses and which terminal backends and storage it may use.
-- **Private and persistent.** Every instance has its own namespace, storage,
+- **Persistent and isolated.** Every instance has its own namespace, storage,
   native sessions and credentials. It keeps running without browser traffic,
-  so native cron works.
-- **One address.** Everyone uses the same Hermes URL; the verified Keycloak
-  identity selects the instance.
+  so native cron works. A shared agent's home and credentials belong to that
+  agent and are available to its members.
+- **One gateway.** The personal hostname routes by verified Keycloak identity;
+  each shared hostname selects an agent and its explicit audience.
 - **Terminals on demand.** Hermes runs shell commands and file access in
   terminal backend containers over SSH. The manager creates them only for
   backends the instance is allowed to use, with only the storage the
@@ -39,8 +40,12 @@ Not in scope:
 - SMB storage;
 - non-empty terminal service egress;
 - worker prewarming;
-- board integration;
-- serving shared instances; their administration model is built, while shared routing, runtime and browser support remain planned.
+- board integration.
+
+The gateway controls access to each shared instance, but the instance runs
+agent code and is not a privacy boundary between its members. Members can
+access shared instance data and credentials according to the capabilities of
+the selected Hermes image. Administrators choose that image and its audience.
 
 ## Terminology
 
@@ -48,7 +53,7 @@ Not in scope:
 | --- | --- |
 | Identity | Exact OIDC issuer and verified subject. Email and display names are labels, never keys |
 | Administrator | Identity with an active PostgreSQL administrator grant |
-| Assignment | The administrator's decision for one identity: access state, Hermes template version, volumes, allowed terminal backends and admin setting overrides |
+| Assignment | The administrator's decision for a personal identity or a shared agent: access state, Hermes template version, volumes, allowed terminal backends and admin setting overrides |
 | Instance | The commissioned result of an assignment: a stable ID, a private namespace, storage, credentials and one Hermes Deployment |
 | Hermes template | Versioned instance definition: image digest, resources, private home size, default volumes and mounts, admin settings and admin secret references |
 | Admin settings | Hermes configuration (`adminConfig`) enforced over the user's own settings |
@@ -66,14 +71,14 @@ Not in scope:
 | ID | Requirement |
 | --- | --- |
 | R1 | Keycloak authenticates identities. PostgreSQL in the manager is the only source of assignments, templates, terminal backends, volumes, admin secrets and administrator grants. |
-| R2 | Only an explicit administrator command enables an assignment. Login, group membership or directory presence never enroll anyone. |
-| R3 | Enabling an assignment converges to exactly one instance for that identity, including under concurrent commands and restarts. |
-| R4 | Every instance has a private home, native session keys, model authentication and execution credentials. A new instance inherits no private state from another owner; administrators may explicitly share static folders. |
-| R5 | One hostname routes by verified `(issuer, subject)`. A missing, disabled, unknown or foreign assignment is denied, with no fallback to any other backend. |
+| R2 | Only an explicit administrator command enables an assignment. Login, group membership or directory presence never creates a personal assignment. |
+| R3 | Enabling a personal or shared assignment converges to exactly one instance, including under concurrent commands and restarts. |
+| R4 | Every instance has its own home, native session keys, model authentication and execution credentials. A new instance inherits no private state from another instance; administrators may explicitly share static folders. A shared instance's home and credentials are available to its members. |
+| R5 | The personal hostname routes by verified `(issuer, subject)`; a shared hostname routes to its agent only for an explicitly granted identity or group member. Missing, disabled, unknown or unauthorized targets are denied, with no fallback to another backend. |
 | R6 | Native Hermes chat, settings, history, uploads, HTTP mutations and WebSockets work through the gateway. Native authentication stays enabled and verifies the configured realm; the gateway decides which instance a platform identity may reach. |
 | R7 | The dashboard uses only the administration API. The API without the dashboard supports every administration workflow. |
 | R8 | Reconciliation never overwrites the user's settings, profiles, memory, sessions or files, and never reseeds an initialized home. |
-| R9 | Suspension or revocation denies new access within 5 s, closes open connections within 10 s and stops the instance's terminal work within the drain bound. All volumes and credentials are retained until a separate purge decision. |
+| R9 | Suspension or revocation denies affected users new access within 5 s and closes their open connections within 10 s. Suspending an assignment also stops its terminal work within the drain bound. Removing a shared member does not stop the instance or drain other members' work. Volumes and credentials are retained until a separate purge decision. |
 | R10 | Admin settings take precedence over the user's settings. Settings an administrator does not set stay editable by the user. Platform-enforced settings cannot be overridden by anyone. |
 | R11 | An admin secret value is delivered only to the instances whose template or assignment references it, and is never returned by any API or shown in the dashboard after it is written. |
 | R12 | An instance can use only the terminal backends its assignment allows. A user can choose any allowed backend per Hermes profile; an unknown or disallowed choice fails without fallback. Image, resources and mounts come only from manager records. |
@@ -95,7 +100,7 @@ Administrators configure:
 | Hermes template version | Image digest; CPU and memory; private home size and storage source; default volumes and their mount paths; `adminConfig`; admin secret references |
 | Terminal backend version | Image digest; `managed-ssh-v2` contract; UID/GID; CPU, memory and limits; idle and lifetime bounds; mount slots (volume name, path, read-only) |
 | Admin secret | Name, kind (`env`, `file` or `registry`), value (write-only) |
-| Assignment | Identity; access; template version; volumes (source plus path, or size); allowed terminal backend versions and default; terminal lifetime mode; optional `adminConfig` overrides and secret references |
+| Assignment | Personal identity or shared-agent name and endpoint; access; template version; volumes (source plus path, or size); allowed terminal backend versions and default; terminal lifetime mode; optional `adminConfig` overrides and secret references |
 | Administrator grant | Identity; whether it can manage grants |
 
 Storage sources are installation configuration (Helm values), not dashboard
@@ -132,10 +137,9 @@ Every mutation:
 - writes an audit event in the same transaction.
 
 Browser mutations also check `Origin` and a CSRF token. The gateway likewise
-refuses a request that can change state when its `Origin` names another
-origin than the public one, before the instance sees it; the owner's cookies
-travel with requests from a sibling host of the same site, and only this check
-refuses them.
+refuses a request that can change state when its `Origin` differs from the
+classified request host, before the instance sees it. Gateway browser flows and
+sessions are bound to that host.
 
 The dashboard never exposes model keys, native tokens, chat history, private
 files, raw Pod specifications or an impersonation function. The optional
@@ -493,6 +497,8 @@ including case variants and cookies set by a sibling on the parent domain.
 | --- | --- |
 | Route resolution | 2 s deadline; failure denies |
 | Authorization freshness | HTTP decisions at most 5 s old; open WebSockets re-checked every 5 s and closed within 10 s of denial or failure |
+| Shared-agent membership and endpoint changes | Affected requests are denied within 5 s and open WebSockets and streams close within 10 s; unaffected members remain connected |
+| Gateway certificate reload | Replacements are checked every 60 s; invalid replacements leave the active certificate in place |
 | Identity evidence | While a session is in use the gateway refreshes provider state at most every 60 s; evidence older than 120 s is never used as it stands: it is refreshed first, and a session whose refresh fails (the provider login lapsed, was revoked or is unreachable) is refused and ended |
 | Provider signing keys | The manager API and the gateway cache the provider's published keys for 5 min and refetch for a key ID they do not know, at most once every 5 s. A token of a newly rotated key is therefore accepted without a restart, except that a request arriving less than 5 s after the last fetch is refused and the next one is accepted; a token of a key the provider stops publishing is refused once the cache has expired and been refetched |
 | External identity revocation | Effective within 130 s, including open WebSockets |
@@ -590,7 +596,7 @@ restorable:
 | Valid but unassigned identity | Denial page; no commissioning side effect |
 | Concurrent enable, retry and controller kill | One stable instance; credentials generated once |
 | Email change or new subject with an old email | Ownership unchanged; the new subject gets nothing |
-| Forged headers, foreign platform cookie or native ticket, callback race | No cross-owner access |
+| Forged headers, foreign platform cookie or native ticket, callback race | No cross-instance routing or use of another session's native WebSocket ticket |
 | SH-D01: Shared hostname labels | Valid, malformed, reserved and over-long labels follow the configured domain policy |
 | SH-D02: Concurrent shared creation | Concurrent retries create one assignment, endpoint and instance; a contested label has one winner |
 | SH-D03: Endpoint rename and reuse | Renaming frees the old label; disabled labels remain owned; concurrent renames have one winner; endpoint binding is immutable |
@@ -605,7 +611,7 @@ restorable:
 | SH-R04: Personal route compatibility | Absent and explicit personal targets preserve personal routing; shared grants create no personal assignment |
 | SH-R05: Shared route failures | Store failures return unavailable without a fallback |
 | SH-R06: Shared resolver boundary | Only the configured gateway mTLS identity can resolve; identity and target input are neither logged nor reflected |
-| SH-G01: Gateway authority classification | HTTP/1.1 and HTTP/2 authorities outside the configured public host and port are `421` before session lookup or forwarding; health probes work on any authority |
+| SH-G01: Gateway authority classification | HTTP/1.1 and HTTP/2 authorities outside the configured personal and shared hosts and port are `421` before session lookup or forwarding; health probes work on any authority |
 | SH-G02: Forged host and absolute target | Forwarded headers never choose a target, and a URI authority that differs from Host is refused |
 | SH-G04: Tossed platform cookies | Lookalike cookies do not disturb a valid session and are stripped; duplicate exact platform-cookie names remain refused |
 | Native HTTP, upload and WebSocket through the gateway | Login, mutations, upload, ticketed WebSocket and logout work |

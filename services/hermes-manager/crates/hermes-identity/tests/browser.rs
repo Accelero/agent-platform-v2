@@ -485,6 +485,19 @@ async fn gateway_flows_and_sessions_are_bound_to_their_request_host(pool: PgPool
         fixture
             .auth
             .complete_on_host(
+                &"b".repeat(64),
+                &query["state"],
+                &query["code"],
+                engineering,
+                Some("engineering.agents.test"),
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        fixture
+            .auth
+            .complete_on_host(
                 &start.browser,
                 &query["state"],
                 &query["code"],
@@ -507,6 +520,11 @@ async fn gateway_flows_and_sessions_are_bound_to_their_request_host(pool: PgPool
             .await
             .is_err()
     );
+    let sessions: i64 = sqlx::query_scalar("SELECT count(*) FROM gateway_sessions.sessions")
+        .fetch_one(&fixture.pool)
+        .await
+        .unwrap();
+    assert_eq!(sessions, 0, "a refused callback created a session");
     let complete = fixture
         .auth
         .complete_on_host(
@@ -518,6 +536,53 @@ async fn gateway_flows_and_sessions_are_bound_to_their_request_host(pool: PgPool
         )
         .await
         .unwrap();
+    assert!(
+        fixture
+            .auth
+            .complete_on_host(
+                &start.browser,
+                &query["state"],
+                &query["code"],
+                engineering,
+                Some("engineering.agents.test"),
+            )
+            .await
+            .is_err()
+    );
+    let expired = fixture
+        .auth
+        .begin_on_host(None, "/", engineering, Some("engineering.agents.test"))
+        .await
+        .unwrap();
+    let expired_url = Url::parse(&expired.location).unwrap();
+    let expired_query: BTreeMap<_, _> = expired_url.query_pairs().into_owned().collect();
+    sqlx::query("UPDATE gateway_sessions.flows SET expires_at = clock_timestamp() - interval '1 second' WHERE consumed_at IS NULL")
+        .execute(&fixture.pool)
+        .await
+        .unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM gateway_sessions.sessions")
+        .fetch_one(&fixture.pool)
+        .await
+        .unwrap();
+    assert_eq!(before, 1, "a replayed callback created a session");
+    assert!(
+        fixture
+            .auth
+            .complete_on_host(
+                &expired.browser,
+                &expired_query["state"],
+                "unused-code",
+                engineering,
+                Some("engineering.agents.test"),
+            )
+            .await
+            .is_err()
+    );
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM gateway_sessions.sessions")
+        .fetch_one(&fixture.pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "an expired flow created a session");
     assert_eq!(complete.location, "/projects");
     let valid = fixture
         .auth
