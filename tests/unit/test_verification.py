@@ -177,7 +177,7 @@ def test_reviewed_ledger_accounts_for_every_cited_helper():
         "Operational bounds",
     }
     assert len([row for row in rows if row["section"] == "Interfaces"]) == 71
-    assert len([row for row in rows if row["section"] == "Operational bounds"]) == 10
+    assert len([row for row in rows if row["section"] == "Operational bounds"]) == 12
 
 
 def test_machine_reports_do_not_capture_failure_text_or_environment(tmp_path):
