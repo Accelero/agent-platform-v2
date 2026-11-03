@@ -199,6 +199,8 @@ are implemented and executed; accelerated timings do not prove production deadli
 | --- | --- | --- |
 | Route resolution | `a_stalled_registry_is_unavailable_within_the_deadline`, `a_resolver_that_never_answers_is_unavailable_at_the_deadline`, `a_resolver_that_stalls_in_the_body_is_unavailable_at_the_deadline`, `a_reply_over_16_kib_is_unavailable_without_waiting` | pass |
 | Authorization freshness | `default_timing_meets_the_specified_bounds`, `open_websockets_close_when_access_changes_within_the_bound`, `streamed_responses_end_when_access_is_revoked`, `with_the_real_defaults_an_open_websocket_closes_within_10_seconds_of_a_denial`, `with_the_real_defaults_a_failed_dependency_closes_a_websocket_within_10_seconds`, `with_the_real_defaults_a_denial_reaches_new_requests_within_5_seconds` | pass |
+| Shared-agent membership and endpoint changes | `shared_revocation_closes_only_the_denied_members_exchanges_within_bounds`, `test_shared_agent_direct_and_group_members_reach_one_workspace` | partial |
+| Gateway certificate reload | `replacement_certificate_serves_new_connections_without_closing_existing_ones`, `gateway_certificate_requires_personal_and_wildcard_coverage` | partial |
 | Identity evidence | `refresh_rechecks_the_provider_and_revokes_on_failure`, `tokens_with_wrong_claims_are_rejected`, `test_a_rotated_signing_key_is_followed_without_a_restart_and_the_old_one_is_dropped`, `test_a_session_whose_provider_login_expired_is_refused_and_an_active_one_is_not` | partial |
 | Provider signing keys | `test_a_rotated_signing_key_is_followed_without_a_restart_and_the_old_one_is_dropped` | partial |
 | External identity revocation | `test_outages_and_provider_revocation_fail_closed_within_the_bounds` | partial |
@@ -267,7 +269,7 @@ gateway and deployment verification remains to be completed.
 | --- | --- | --- | --- |
 | SH-G03 HTTP/2 authority classification | `one_http2_connection_routes_each_agent_by_authority_and_bound_session` | integration | pass |
 | SH-G04 tossed cookies | `shared_origin_and_native_paths_use_only_the_classified_host` | integration | pass |
-| SH-G06 cross-host callback | `gateway_flows_and_sessions_are_bound_to_their_request_host`, `shared_login_uses_its_callback_and_cannot_be_replayed_on_personal_host` | integration | partial |
+| SH-G06 cross-host callback | `gateway_flows_and_sessions_are_bound_to_their_request_host`, `shared_login_uses_its_callback_and_cannot_be_replayed_on_personal_host` | integration | pass |
 | SH-G08 host binding | `shared_host_resolves_its_target_and_cannot_replay_other_host_sessions`, `gateway_flows_and_sessions_are_bound_to_their_request_host` | integration | partial |
 | SH-G09 to SH-G11 origin and native paths | `shared_origin_and_native_paths_use_only_the_classified_host` | integration | pass |
 | SH-G12 shared response cookies | `shared_origin_and_native_paths_use_only_the_classified_host` | integration | pass |
