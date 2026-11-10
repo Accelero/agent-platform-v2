@@ -46,7 +46,12 @@ pub(crate) async fn timed<T>(
 pub(crate) fn cluster_error(error: kube::Error) -> ClusterError {
     match error {
         kube::Error::Api(status) => match status.code {
-            400 | 403 | 422 => ClusterError::Rejected,
+            400 | 403 | 422 => ClusterError::RejectedBy(format!(
+                "{} {}: {}",
+                status.code,
+                status.reason,
+                status.message.chars().take(300).collect::<String>()
+            )),
             409 => ClusterError::Conflict,
             _ => ClusterError::Unavailable,
         },
