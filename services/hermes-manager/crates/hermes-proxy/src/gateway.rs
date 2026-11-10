@@ -555,10 +555,10 @@ pub async fn proxy(State(gateway): State<Arc<Gateway>>, mut request: Request) ->
             let (Ok(client), Ok(upstream)) = tokio::join!(client_upgrade, upstream_upgrade) else {
                 return;
             };
-            if splice(TokioIo::new(client), TokioIo::new(upstream), supervisor)
-                .await
-                .is_some()
+            if let Some(reason) =
+                splice(TokioIo::new(client), TokioIo::new(upstream), supervisor).await
             {
+                eprintln!("gateway_exchange_ended reason={reason:?}");
                 watcher.forget(&signed.handle);
             }
         });

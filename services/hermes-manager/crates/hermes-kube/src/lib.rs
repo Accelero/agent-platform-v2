@@ -21,7 +21,7 @@ use hermes_core::domain::instances::{Apply, Precondition, Workload};
 use hermes_core::domain::orphans::{OrphanKind, OwnedObject};
 use hermes_render::{INSTALLATION_LABEL, INSTANCE_LABEL, Object, RenderConfig, instance, worker};
 use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::{Namespace, PersistentVolume, Pod};
+use k8s_openapi::api::core::v1::{Namespace, PersistentVolume, Pod, ServiceAccount};
 use kube::api::{DeleteParams, ListParams, Patch, PatchParams, Preconditions, PropagationPolicy};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
@@ -33,6 +33,12 @@ use uuid::Uuid;
 pub const FIELD_MANAGER: &str = "hermes-manager";
 /// Deadline of one Kubernetes call; below the leader renew deadline.
 pub const CALL_DEADLINE: Duration = Duration::from_secs(5);
+/// The RoleBinding that grants the controller its instance namespace.
+const CONTROLLER_BINDING: &str = "hermes-controller";
+/// How long that binding may take to reach the authorizer; below the leader
+/// renew deadline.
+const BINDING_DEADLINE: Duration = Duration::from_secs(8);
+const BINDING_POLL: Duration = Duration::from_millis(100);
 
 pub(crate) async fn timed<T>(
     call: impl Future<Output = Result<T, kube::Error>>,
@@ -46,12 +52,7 @@ pub(crate) async fn timed<T>(
 pub(crate) fn cluster_error(error: kube::Error) -> ClusterError {
     match error {
         kube::Error::Api(status) => match status.code {
-            400 | 403 | 422 => ClusterError::RejectedBy(format!(
-                "{} {}: {}",
-                status.code,
-                status.reason,
-                status.message.chars().take(300).collect::<String>()
-            )),
+            400 | 403 | 422 => ClusterError::Rejected,
             409 => ClusterError::Conflict,
             _ => ClusterError::Unavailable,
         },
@@ -225,9 +226,58 @@ pub async fn apply_objects(client: &Client, objects: &[Object]) -> Result<(), Cl
         if object.kind == "PersistentVolume" && timed(api.get_opt(&object.name)).await?.is_some() {
             continue;
         }
-        timed(api.patch(&object.name, &params, &Patch::Apply(&object.body))).await?;
+        let applied = tokio::time::timeout(
+            CALL_DEADLINE,
+            api.patch(&object.name, &params, &Patch::Apply(&object.body)),
+        )
+        .await
+        .map_err(|_| ClusterError::Unavailable)?;
+        // Names what was refused. Never the server's message: a validation
+        // message can echo the values of the refused object.
+        if let Err(kube::Error::Api(status)) = &applied {
+            eprintln!(
+                "kubernetes_apply_refused kind={} name={} status={} reason={}",
+                object.kind, object.name, status.code, status.reason
+            );
+        }
+        applied.map_err(cluster_error)?;
+        if object.kind == "RoleBinding"
+            && object.name == CONTROLLER_BINDING
+            && let Some(namespace) = &object.namespace
+        {
+            await_binding(client, namespace, BINDING_DEADLINE).await?;
+        }
     }
     Ok(())
+}
+
+/// Waits until the API server authorizes the controller in a namespace.
+///
+/// The controller's access to an instance namespace comes from the RoleBinding
+/// it has just applied, and the authorizer reads bindings from a cache that
+/// sees it slightly later. Without this wait the next object is refused and
+/// the instance is blocked as if its objects were invalid. A grant that does
+/// not appear in time is `Unavailable`, so reconciliation retries.
+async fn await_binding(
+    client: &Client,
+    namespace: &str,
+    deadline: Duration,
+) -> Result<(), ClusterError> {
+    let accounts: Api<ServiceAccount> = Api::namespaced(client.clone(), namespace);
+    let params = ListParams::default().limit(1);
+    let visible = async {
+        loop {
+            match timed(accounts.list_metadata(&params)).await {
+                Err(ClusterError::Rejected) => {
+                    tokio::time::sleep(BINDING_POLL).await;
+                }
+                other => return other.map(|_| ()),
+            }
+        }
+    };
+    tokio::time::timeout(deadline, visible)
+        .await
+        .map_err(|_| ClusterError::Unavailable)?
 }
 
 pub struct KubeCluster {
@@ -429,7 +479,12 @@ impl Cluster for KubeCluster {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
     use serde_json::{Value, json};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
 
     use super::*;
 
@@ -539,5 +594,116 @@ mod tests {
         assert_eq!(result.err(), Some(ClusterError::Rejected));
         assert!(!marker.exists());
         std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    /// An API server that refuses reads of the namespace `refusals` times, as
+    /// an authorizer does before it sees a new binding, and logs each request.
+    async fn lagging_authorizer(refusals: usize) -> (Client, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let log = requests.clone();
+        let reads = Arc::new(AtomicUsize::new(0));
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (log, reads) = (log.clone(), reads.clone());
+                tokio::spawn(async move {
+                    let mut stream = BufReader::new(stream);
+                    loop {
+                        let mut line = String::new();
+                        if stream.read_line(&mut line).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let mut length = 0;
+                        loop {
+                            let mut header = String::new();
+                            stream.read_line(&mut header).await.unwrap();
+                            if header.trim().is_empty() {
+                                break;
+                            }
+                            if let Some((name, value)) = header.split_once(':')
+                                && name.eq_ignore_ascii_case("content-length")
+                            {
+                                length = value.trim().parse().unwrap();
+                            }
+                        }
+                        let mut body = vec![0; length];
+                        stream.read_exact(&mut body).await.unwrap();
+                        let (method, path) = line.split_once(' ').unwrap();
+                        let path = path.split([' ', '?']).next().unwrap().to_owned();
+                        log.lock().unwrap().push(format!("{method} {path}"));
+                        let (status, reply) = if method != "GET" {
+                            ("200 OK", json!({"metadata": {"name": "applied"}}))
+                        } else if reads.fetch_add(1, Ordering::SeqCst) < refusals {
+                            (
+                                "403 Forbidden",
+                                json!({"kind": "Status", "apiVersion": "v1", "metadata": {},
+                                       "status": "Failure", "reason": "Forbidden", "code": 403,
+                                       "message": "serviceaccounts is forbidden"}),
+                            )
+                        } else {
+                            (
+                                "200 OK",
+                                json!({"apiVersion": "meta.k8s.io/v1",
+                                       "kind": "PartialObjectMetadataList",
+                                       "metadata": {}, "items": []}),
+                            )
+                        };
+                        let reply = reply.to_string();
+                        let response = format!(
+                            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n\
+                             content-length: {}\r\n\r\n{reply}",
+                            reply.len()
+                        );
+                        stream.write_all(response.as_bytes()).await.unwrap();
+                    }
+                });
+            }
+        });
+        let url = format!("http://{address}").parse().unwrap();
+        (Client::try_from(Config::new(url)).unwrap(), requests)
+    }
+
+    fn object(api_version: &'static str, kind: &'static str, name: &str) -> Object {
+        Object {
+            api_version,
+            kind,
+            namespace: Some("instance".to_owned()),
+            name: name.to_owned(),
+            body: json!({"apiVersion": api_version, "kind": kind, "metadata": {"name": name}}),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_next_object_waits_until_the_new_binding_is_authorized() {
+        let (client, requests) = lagging_authorizer(2).await;
+        let objects = [
+            object(
+                "rbac.authorization.k8s.io/v1",
+                "RoleBinding",
+                CONTROLLER_BINDING,
+            ),
+            object("v1", "ServiceAccount", "hermes"),
+        ];
+        apply_objects(&client, &objects).await.unwrap();
+        let read = "GET /api/v1/namespaces/instance/serviceaccounts";
+        assert_eq!(
+            *requests.lock().unwrap(),
+            [
+                "PATCH /apis/rbac.authorization.k8s.io/v1/namespaces/instance/rolebindings/hermes-controller",
+                read,
+                read,
+                read,
+                "PATCH /api/v1/namespaces/instance/serviceaccounts/hermes",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_binding_that_never_takes_effect_is_retried_not_rejected() {
+        let (client, _) = lagging_authorizer(usize::MAX).await;
+        let result = await_binding(&client, "instance", Duration::from_millis(300)).await;
+        assert_eq!(result, Err(ClusterError::Unavailable));
     }
 }

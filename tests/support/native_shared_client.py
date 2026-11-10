@@ -75,6 +75,9 @@ async def proxy():
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain("/fixture/tls/server.crt", "/fixture/tls/server.key")
+    # With TLS 1.3 session tickets this asyncio relay intermittently never
+    # receives a client's request (about 1 attempt in 5). Nothing here resumes.
+    context.num_tickets = 0
     server = await asyncio.start_server(serve, "0.0.0.0", 443, ssl=context)
     async with server:
         await server.serve_forever()

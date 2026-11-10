@@ -594,6 +594,8 @@
       "hermes-identity/test:tokens::valid_access_token_yields_the_exact_identity": "integration",
       "hermes-kube/lib:hermes_kube::observe::tests::a_refusal_the_initializer_wrote_is_found_in_either_state": "unit",
       "hermes-kube/lib:hermes_kube::observe::tests::nothing_else_reads_as_a_refusal": "unit",
+      "hermes-kube/lib:hermes_kube::tests::the_next_object_waits_until_the_new_binding_is_authorized": "unit",
+      "hermes-kube/lib:hermes_kube::tests::a_binding_that_never_takes_effect_is_retried_not_rejected": "unit",
       "hermes-kube/lib:hermes_kube::tests::executable_kubeconfig_is_rejected_without_running_its_command": "unit",
       "hermes-kube/lib:hermes_kube::tests::explicit_context_and_credential_references_cannot_fall_back": "unit",
       "hermes-kube/lib:hermes_kube::tests::the_client_refuses_what_could_redirect_or_widen_its_credential": "unit",

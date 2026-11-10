@@ -52,6 +52,8 @@ def tls(directory: Path):
     extension = authority / "server.ext"
     extension.write_text(
         "basicConstraints=critical,CA:FALSE\n"
+        # OpenSSL 4 no longer adds this by default; strict verifiers require it.
+        "authorityKeyIdentifier=keyid:always\n"
         "extendedKeyUsage=serverAuth\n"
         "subjectAltName=DNS:sso.shared.test,DNS:*.agents.test\n"
     )
@@ -215,6 +217,7 @@ class SharedNative:
                         },
                     },
                 }
+                layout.hand_to("runner")
                 (directory / "home/config.yaml").write_text(json.dumps(configuration))
                 (directory / "home/.env").write_text(
                     "HERMES_DASHBOARD_OIDC_ISSUER=https://unreachable.shared.test/realm\n"
@@ -223,6 +226,7 @@ class SharedNative:
                     "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=local-fixture\n"
                     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=local-fixture-password\n"
                 )
+                layout.hand_to("pod")
             common = layout.common()
             # Replace the networkless default with this isolated network.
             del common[:2]

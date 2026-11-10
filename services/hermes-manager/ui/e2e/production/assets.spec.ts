@@ -84,9 +84,10 @@ test("the built dashboard works under the production CSP", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "Confirm change" })
     .click();
-  await expect(page.getByText("Change accepted.")).toBeVisible();
-  await page.keyboard.press("Escape");
+  // The publish action exists only for drafts, so the dialog and its transient
+  // "Change accepted." disappear as soon as the refetched state arrives.
   await expect(page.getByText("published", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   expect(violations, "template workflow CSP").toEqual([]);
 
   // Every page renders against the real contract.

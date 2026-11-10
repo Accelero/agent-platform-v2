@@ -175,7 +175,7 @@ impl Controller {
             None => hermes_kube::incluster(),
         }
         .map_err(|error| match error {
-            ClusterError::Rejected | ClusterError::RejectedBy(_) => AppError::invalid(),
+            ClusterError::Rejected => AppError::invalid(),
             _ => AppError::unavailable(),
         })
     }
