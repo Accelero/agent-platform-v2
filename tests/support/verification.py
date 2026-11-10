@@ -275,10 +275,11 @@ def rust_cases(profile, *, execute):
     test_arguments = ["--color=never"]
     if profile in IGNORED_PROFILES:
         test_arguments.append("--ignored")
-    if profile in {"rust-cluster", "rust-controller"}:
-        # Cases install cluster-scoped admission policies, roles and bindings. Two
-        # at once overwrite each other's objects, which made compliant pods refused
-        # and instances stall on a runner that interleaved them differently.
+    if profile == "rust-cluster":
+        test_arguments.extend(["--test-threads", "2"])
+    if profile == "rust-controller":
+        # Each case installs the cluster-scoped admission objects for its own
+        # control namespace; two at once would overwrite each other's.
         test_arguments.extend(["--test-threads", "1"])
     code, output = capture(
         [*arguments, "--no-fail-fast", "--", *test_arguments],

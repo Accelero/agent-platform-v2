@@ -599,6 +599,8 @@ integration tests install it and act as the controller's real ServiceAccount.
 | RoleBindings | Only the fixed instance role, bound to the controller ServiceAccount |
 | Services | ClusterIP only, without external IPs |
 
+The controller's access to an instance namespace comes from the RoleBinding it applies there. The API server authorizes from a cache that sees a new binding slightly later, so the adapter waits, within a bound below the leader renew deadline, until a read in the namespace is authorized before it applies the next object. A grant that does not appear in time is a retryable failure, not a rejection.
+
 Every expression guards optional fields with `has()`: the policies fail
 closed, so a missing field would otherwise deny unrelated requests.
 
