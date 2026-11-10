@@ -285,7 +285,14 @@ def rust_cases(profile, *, execute):
         cwd=WORKSPACE,
         timeout=2400,
     )
-    for identity, status in cargo_results(output, artifacts).items():
+    results = cargo_results(output, artifacts)
+    if any(status == "failed" for status in results.values()):
+        # The reports keep only identities and outcomes. Print the libtest failure
+        # section so a failure on a runner can be diagnosed from the job log.
+        failures = output.split("\nfailures:\n", 1)
+        print("verification: cargo failure output (bounded)", flush=True)
+        print(failures[-1][-20000:], flush=True)
+    for identity, status in results.items():
         if identity in excluded:
             continue
         if identity not in cases:
