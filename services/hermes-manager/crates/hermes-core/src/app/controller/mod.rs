@@ -201,12 +201,16 @@ pub struct ApplyRequest<'a> {
     pub secrets: &'a [DeliveredSecret],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ClusterError {
     /// Refused as invalid or forbidden, for example by admission. Retrying
     /// the same objects does not help.
     #[error("rejected")]
     Rejected,
+    /// The same refusal with the server's status and message, for diagnosis.
+    /// Displays as `rejected`, so logs and statuses are unchanged.
+    #[error("rejected")]
+    RejectedBy(String),
     /// A precondition or optimistic write lost a race.
     #[error("conflict")]
     Conflict,
@@ -438,7 +442,7 @@ impl<S: InstanceStore, C: Cluster, V: Vault, N: Native> Controller<S, C, V, N> {
         }
         if let Err(error) = self.apply(&desired, &plan).await {
             match error {
-                ControllerError::Cluster(ClusterError::Rejected) => {
+                ControllerError::Cluster(ClusterError::Rejected | ClusterError::RejectedBy(_)) => {
                     plan = instances::rejected(&plan)
                 }
                 other => return Err(other),
@@ -544,7 +548,7 @@ impl<S: InstanceStore, C: Cluster, V: Vault, N: Native> Controller<S, C, V, N> {
                     match self.cluster.apply_worker(&request).await {
                         Ok(()) => {}
                         // An unrenderable or refused worker never starts.
-                        Err(ClusterError::Rejected) => {
+                        Err(ClusterError::Rejected | ClusterError::RejectedBy(_)) => {
                             transition = Some(EnvironmentState::Draining);
                             failure = Some(WorkerFailure::ContractFailed);
                         }

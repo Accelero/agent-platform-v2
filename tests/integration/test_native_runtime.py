@@ -380,6 +380,7 @@ def test_an_infrastructure_update_and_an_abrupt_kill_keep_the_owners_state(layou
         running.wait_ready(HEALTH)
         # Dashboard writes belong to the retained user layer; an infrastructure
         # update overrides only the managed leaves.
+        layout.hand_to("runner")
         settings_path = layout.root / "home/config.yaml"
         settings = json.loads(settings_path.read_text())
         settings["agent"] = {"max_turns": 77, "fixture_preference": "owner choice"}
@@ -387,6 +388,7 @@ def test_an_infrastructure_update_and_an_abrupt_kill_keep_the_owners_state(layou
         layout.managed["agent"]["max_turns"] = 24
         layout.write_managed()
         (layout.root / "home/owner-memory.txt").write_text("owner fixture memory")
+        layout.hand_to("pod")
 
         running.kill_and_restart()
         running.wait_ready(HEALTH)

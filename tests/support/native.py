@@ -90,8 +90,12 @@ class Layout:
         self.root = directory
         directory.chmod(0o755)
         for part in ["home", "workspace", "owner", "init", "credentials", "trust"]:
-            (directory / part).mkdir(mode=0o755)
-            os.chown(directory / part, 1000, 1000)
+            # The Pod's UID writes only home and workspace. The runner may not chown
+            # to UID 1000, so those two are opened to every user instead, and the
+            # rest stays owned by the runner.
+            path = directory / part
+            path.mkdir(mode=0o755)
+            path.chmod(0o777 if part in {"home", "workspace"} else 0o755)
         self.context = {
             "schemaVersion": 1,
             "installationId": str(uuid.uuid4()),
@@ -135,11 +139,41 @@ class Layout:
         # Kubelet projects a writable file at terminationMessagePath: exercise
         # the actual bind-mount EBUSY behaviour, not an ordinary file.
         self.result = directory / "init-result.json"
-        self.result.touch(mode=0o600)
-        os.chown(self.result, 1000, 1000)
+        self.result.touch()
+        self.result.chmod(0o666)
 
     def write_managed(self):
         (self.root / "trust/config.yaml").write_text(json.dumps(self.managed))
+
+    def hand_to(self, owner):
+        """Give `home` to the runner ("runner") or back to the Pod's UID ("pod").
+
+        The Pod writes its files as UID 1000, and a runner with another UID can
+        neither edit nor read them. A root helper container makes the change.
+        """
+        identity = f"{os.getuid()}:{os.getgid()}" if owner == "runner" else "1000:1000"
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "0:0",
+                "--entrypoint",
+                "chown",
+                "--mount",
+                f"type=bind,src={self.root / 'home'},dst=/target",
+                image(),
+                "-R",
+                identity,
+                "/target",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
 
     def common(self):
         """Arguments every container of the instance shares."""

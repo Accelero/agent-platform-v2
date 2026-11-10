@@ -64,7 +64,9 @@ def test_upstream_login_keeps_the_terminal_selector_and_home_binding(personal_na
     layout = shared.layouts[0]
     context = layout.root / "owner/context.json"
     receipt = layout.root / "home/.agent-platform/native-init-receipt.json"
+    layout.hand_to("runner")
     original, proof = context.read_bytes(), receipt.read_bytes()
+    layout.hand_to("pod")
     foreign = json.loads(original)
     foreign["owner"]["subject"] = "foreign-owner"
     try:

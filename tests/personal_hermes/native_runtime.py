@@ -75,6 +75,34 @@ for operation in [
     )
 
 
+def chown_fixture(path, owner="1000:1000"):
+    """Give a host-built fixture to a UID through a root helper container.
+
+    The Pod runs as UID 1000. A runner with another UID may not chown files to
+    it, but root inside Docker can, so the change is made by the image itself.
+    """
+    run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "chown",
+            "--mount",
+            f"type=bind,src={path},dst=/fixture",
+            IMAGE,
+            "-R",
+            owner,
+            "/fixture",
+        ],
+        timeout=120,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", action="store_true")
@@ -96,12 +124,15 @@ def main():
             )
     missing_instance_policies_are_refused()
     name = "personal-hermes-runtime-" + uuid.uuid4().hex[:12]
-    with tempfile.TemporaryDirectory(prefix="personal-hermes-native-") as directory:
+    # While the containers run, the fixture belongs to the Pod's UID, which the
+    # runner may be unable to remove. Cleanup errors must not hide a test result.
+    with tempfile.TemporaryDirectory(
+        prefix="personal-hermes-native-", ignore_cleanup_errors=True
+    ) as directory:
         fixture = Path(directory)
         fixture.chmod(0o755)
         for part in ["home", "workspace", "owner", "init", "credentials", "trust"]:
             (fixture / part).mkdir(mode=0o755)
-            os.chown(fixture / part, 1000, 1000)
         context = {
             "schemaVersion": 1,
             "installationId": str(uuid.uuid4()),
@@ -168,7 +199,8 @@ def main():
         # the actual bind-mount EBUSY behavior, not an ordinary temporary file.
         result_file = fixture / "init-result.json"
         result_file.touch(mode=0o600)
-        os.chown(result_file, 1000, 1000)
+        # Every host-side write is done; the Pod's UID now owns the fixture.
+        chown_fixture(fixture)
         common = [
             "--network",
             "none",
@@ -234,6 +266,8 @@ def main():
             ],
             timeout=60,
         )
+        # The Pod's UID wrote the result; the runner reads it back as its own file.
+        chown_fixture(result_file, owner=f"{os.getuid()}:{os.getgid()}")
         assert json.loads(result_file.read_text())["record"]["complete"] is True
         try:
             run(
@@ -434,6 +468,8 @@ assert all(p.read_bytes().count(b'BEGIN CERTIFICATE')>1 for p in bundles)
                 if attempt == 0:
                     # Dashboard writes belong to the retained user layer. An
                     # infrastructure update must override only managed leaves.
+                    # The runner edits the fixture here; the Pod's UID gets it back.
+                    chown_fixture(fixture, owner=f"{os.getuid()}:{os.getgid()}")
                     settings_path = fixture / "home/config.yaml"
                     settings = json.loads(settings_path.read_text())
                     settings["agent"] = {
@@ -446,6 +482,7 @@ assert all(p.read_bytes().count(b'BEGIN CERTIFICATE')>1 for p in bundles)
                     (fixture / "home/owner-memory.txt").write_text(
                         "owner fixture memory"
                     )
+                    chown_fixture(fixture)
                     run(["docker", "kill", "--signal", "KILL", name], timeout=15)
                     run(["docker", "start", name], timeout=30)
             assert (
@@ -458,6 +495,9 @@ assert all(p.read_bytes().count(b'BEGIN CERTIFICATE')>1 for p in bundles)
             )
         finally:
             run(["docker", "rm", "--force", name], timeout=30)
+            # Files the Pod's UID created cannot be removed by the runner, so give
+            # the whole fixture back before the temporary directory is deleted.
+            chown_fixture(fixture, owner=f"{os.getuid()}:{os.getgid()}")
 
 
 if __name__ == "__main__":

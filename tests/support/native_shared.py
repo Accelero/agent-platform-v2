@@ -367,6 +367,7 @@ class SharedNative:
 
     def wait_ready(self):
         deadline = time.monotonic() + 120
+        last = None
         while True:
             if (
                 docker(
@@ -378,9 +379,10 @@ class SharedNative:
             try:
                 self.check(self.readiness, timeout=10)
                 return
-            except CommandFailed:
+            except CommandFailed as error:
+                last = error
                 if time.monotonic() >= deadline:
                     raise CommandFailed(
-                        "shared native fixture readiness deadline"
+                        f"shared native fixture readiness deadline: {last}"[:900]
                     ) from None
                 time.sleep(1)
