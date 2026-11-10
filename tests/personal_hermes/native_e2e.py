@@ -28,6 +28,7 @@ import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from html import unescape
 from pathlib import Path
@@ -1542,8 +1543,15 @@ def shared_agent_direct_and_group_members_reach_one_workspace(platform):
         assert browser.native_sign_in()["user_id"] == SUBJECTS[browser.name]
     first, second = members[0].rpc(), members[1].rpc()
     try:
-        _, first_reply = converse(first, "first shared fixture turn", 240)
-        _, second_reply = converse(second, "second shared fixture turn", 240)
+        # Concurrently: the server drops a socket that does not answer its
+        # keepalive pings, and this client answers only while it is reading.
+        with ThreadPoolExecutor(max_workers=2) as turns:
+            first_turn = turns.submit(converse, first, "first shared fixture turn", 240)
+            second_turn = turns.submit(
+                converse, second, "second shared fixture turn", 240
+            )
+            _, first_reply = first_turn.result(timeout=250)
+            _, second_reply = second_turn.result(timeout=250)
         assert first_reply == second_reply == "hello from e2e"
         assignments = admin.call("GET", "/api/v1/assignments?limit=100").json()["items"]
         assert not any(
