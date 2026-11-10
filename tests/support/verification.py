@@ -132,7 +132,7 @@ def python_cases(*, execute, profile="python"):
     recorder = PythonCases()
     arguments = (
         # One line per failure: location and exception, never captured output.
-        ["-q", "--tb=line", "--show-capture=no", "--no-summary"]
+        ["-q", "--tb=line", "--show-capture=no"]
         if execute
         else ["--collect-only", "-q"]
     )
