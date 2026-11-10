@@ -145,6 +145,36 @@ class Layout:
     def write_managed(self):
         (self.root / "trust/config.yaml").write_text(json.dumps(self.managed))
 
+    def hand_to(self, owner):
+        """Give `home` to the runner ("runner") or back to the Pod's UID ("pod").
+
+        The Pod writes its files as UID 1000, and a runner with another UID can
+        neither edit nor read them. A root helper container makes the change.
+        """
+        identity = f"{os.getuid()}:{os.getgid()}" if owner == "runner" else "1000:1000"
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                "0:0",
+                "--entrypoint",
+                "chown",
+                "--mount",
+                f"type=bind,src={self.root / 'home'},dst=/target",
+                image(),
+                "-R",
+                identity,
+                "/target",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+
     def common(self):
         """Arguments every container of the instance shares."""
         arguments = [
