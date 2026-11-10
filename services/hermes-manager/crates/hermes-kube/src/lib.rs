@@ -661,6 +661,7 @@ mod tests {
                 });
             }
         });
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let url = format!("http://{address}").parse().unwrap();
         (Client::try_from(Config::new(url)).unwrap(), requests)
     }

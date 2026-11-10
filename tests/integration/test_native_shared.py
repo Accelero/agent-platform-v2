@@ -74,7 +74,9 @@ def test_upstream_login_keeps_the_terminal_selector_and_home_binding(personal_na
         with pytest.raises(CommandFailed):
             layout.initialize()
         assert layout.result.read_text() == "native_home_owner_conflict"
+        layout.hand_to("runner")
         assert receipt.read_bytes() == proof
+        layout.hand_to("pod")
     finally:
         context.write_bytes(original)
 
