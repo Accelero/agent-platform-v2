@@ -495,6 +495,9 @@ assert all(p.read_bytes().count(b'BEGIN CERTIFICATE')>1 for p in bundles)
             )
         finally:
             run(["docker", "rm", "--force", name], timeout=30)
+            # Files the Pod's UID created cannot be removed by the runner, so give
+            # the whole fixture back before the temporary directory is deleted.
+            chown_fixture(fixture, owner=f"{os.getuid()}:{os.getgid()}")
 
 
 if __name__ == "__main__":
