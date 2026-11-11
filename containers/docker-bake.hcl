@@ -1,4 +1,4 @@
-variable "REGISTRY" { default = "ghcr.io/accelero/agent-platform" }
+variable "REGISTRY" { default = "ghcr.io/accelero/agent-platform-v2" }
 variable "IMAGE_TAG" { default = "dev" }
 variable "SOURCE_REVISION" { default = "" }
 
@@ -12,7 +12,7 @@ group "default" {
 }
 target "metadata" {
   labels = {
-    "org.opencontainers.image.source" = "https://github.com/Accelero/agent-platform"
+    "org.opencontainers.image.source" = "https://github.com/Accelero/agent-platform-v2"
     "org.opencontainers.image.revision" = SOURCE_REVISION
   }
 }

@@ -27,8 +27,11 @@ from agent_platform.command import run
 from agent_platform.privacy import chart_files, stage_contexts
 
 OUTPUT = ROOT / ".local/releases"
-REGISTRY = "ghcr.io/accelero/agent-platform"
+# agent-platform-v2 is its own product: its packages, chart and versions are
+# separate from those of the public agent-platform repository.
+REGISTRY = "ghcr.io/accelero/agent-platform-v2"
 CHART_REGISTRY = "oci://" + REGISTRY + "/charts"
+CHART = "agent-platform-v2"
 # The image each release target's tests ran, as the `images` job of `Checks`
 # builds and saves it.
 TESTED = {
@@ -245,7 +248,7 @@ def package_chart(
         ],
         timeout=60,
     )
-    return target / ("agent-platform-" + version + ".tgz")
+    return target / f"{CHART}-{version}.tgz"
 
 
 def receipt_for(version: str, revision: str, images: dict[str, str]) -> dict:
@@ -376,7 +379,7 @@ def publish(
     sys.stdout.flush()
     verify_images(TESTED)
     names = [f"{registry}/{name}" for name in TARGETS]
-    charts = chart_registry.removeprefix("oci://") + "/agent-platform"
+    charts = chart_registry.removeprefix("oci://") + "/" + CHART
     require_push_access([name.removeprefix("ghcr.io/") for name in [*names, charts]])
     images = {}
     for name in TARGETS:
@@ -413,7 +416,7 @@ def publish(
     matches = re.findall(rb"Digest:\s*(sha256:[a-f0-9]{64})", output)
     if len(matches) != 1:
         raise ValueError("Helm did not return one chart manifest digest.")
-    receipt["chart"] = chart_registry + "/agent-platform@" + matches[0].decode()
+    receipt["chart"] = f"{chart_registry}/{CHART}@{matches[0].decode()}"
     (target / "artifacts.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt
 

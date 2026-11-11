@@ -2,9 +2,9 @@
 imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 images:
-  hermes-manager: ghcr.io/accelero/agent-platform/hermes-manager:dev
-  hermes: ghcr.io/accelero/agent-platform/hermes:dev
-  agent-runtime: ghcr.io/accelero/agent-platform/agent-runtime:dev
+  hermes-manager: ghcr.io/accelero/agent-platform-v2/hermes-manager:dev
+  hermes: ghcr.io/accelero/agent-platform-v2/hermes:dev
+  agent-runtime: ghcr.io/accelero/agent-platform-v2/agent-runtime:dev
 hermesManager:
   enabled: false
   installation:

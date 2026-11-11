@@ -397,7 +397,7 @@ jobs:
           PRERELEASE=()
           case "$VERSION" in *-dev.*) PRERELEASE=(--prerelease --latest=false) ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag "${PRERELEASE[@]}" \
-            --title "Agent platform $VERSION" \
+            --title "Agent platform v2 $VERSION" \
             --notes "Self-contained application chart with pinned runtime images. The same chart package is attached here and published to GHCR. artifacts.json is informational." \
             ".local/releases/$VERSION/artifacts.json" \
-            ".local/releases/$VERSION/agent-platform-$VERSION.tgz"
+            ".local/releases/$VERSION/agent-platform-v2-$VERSION.tgz"

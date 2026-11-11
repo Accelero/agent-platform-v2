@@ -1,4 +1,4 @@
-# Agent platform
+# Agent platform v2
 
 Personal Hermes agents on Kubernetes, commissioned and governed by one Rust
 manager and installed with one Helm chart. Every assigned person gets their
@@ -67,18 +67,21 @@ wire protocol), route resolution and the gateway.
 
 ## Artifacts
 
-Source versions stay at the `0.0.0` placeholder. Stable releases are
+Agent platform v2 is released as its own product, separate from the public
+`agent-platform` repository: its images, chart and version numbers live under
+`ghcr.io/accelero/agent-platform-v2` and never reuse that repository's
+packages. Source versions stay at the `0.0.0` placeholder. Stable releases are
 `MAJOR.MINOR.PATCH`; builds of unmerged work are `MAJOR.MINOR.PATCH-dev.N`
 prereleases above the latest stable version, published through the same pipeline
 and never resolved as the latest release.
 
 | Image | Role |
 | --- | --- |
-| `ghcr.io/accelero/agent-platform/hermes-manager` | Rust manager (`api` with the dashboard, `controller`, operator commands) and `hermes-gateway` |
-| `ghcr.io/accelero/agent-platform/hermes` | Per-user Hermes image with the `managed_execution` plugin |
-| `ghcr.io/accelero/agent-platform/agent-runtime` | Default `managed-ssh-v2` terminal worker image |
+| `ghcr.io/accelero/agent-platform-v2/hermes-manager` | Rust manager (`api` with the dashboard, `controller`, operator commands) and `hermes-gateway` |
+| `ghcr.io/accelero/agent-platform-v2/hermes` | Per-user Hermes image with the `managed_execution` plugin |
+| `ghcr.io/accelero/agent-platform-v2/agent-runtime` | Default `managed-ssh-v2` terminal worker image |
 
-The chart `oci://ghcr.io/accelero/agent-platform/charts/agent-platform` pins
+The chart `oci://ghcr.io/accelero/agent-platform-v2/charts/agent-platform-v2` pins
 these images by digest. It deploys the manager roles and the gateway, the
 controller's RBAC, the static admission policies, NetworkPolicies and one-shot
 operator Jobs; the controller creates the per-user resources. See the
@@ -148,9 +151,10 @@ See [AGENTS.md](AGENTS.md) for repository guidance.
 5. It creates a GitHub Release with that chart archive and an informational
    receipt; `-dev.N` releases are prereleases. No cloud or deployment
    credentials are involved.
-6. New GHCR package names start private; an administrator makes them public
-   once. Each package must grant this repository write access under its
-   Actions access settings, or `publish` stops before the first push.
+6. A package's first push creates it, linked to this repository by the
+   images' source label and private like the repository; changing its
+   visibility is an administrator's decision. `publish` checks that GHCR
+   accepts pushes to every package before the first push.
 
 Never overwrite an existing version or recreate registry cache packages.
 

@@ -38,7 +38,7 @@ RUN cargo build --release --locked --bin hermes-manager --bin hermes-gateway \
 FROM debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 ARG VERSION=development
 ARG REVISION=unknown
-LABEL org.opencontainers.image.source="https://github.com/Accelero/agent-platform" \
+LABEL org.opencontainers.image.source="https://github.com/Accelero/agent-platform-v2" \
       org.opencontainers.image.version="$VERSION" \
       org.opencontainers.image.revision="$REVISION"
 RUN apt-get update \
