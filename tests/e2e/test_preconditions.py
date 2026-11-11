@@ -205,6 +205,73 @@ def administrator_case(platform, tag):
     )
 
 
+def new_group(platform, tag):
+    created = platform.admin.call(
+        "POST",
+        "/api/v1/access-groups",
+        {"name": f"prec-{tag}", "displayName": f"Preconditions {tag}"},
+    ).json()
+    return f"/api/v1/access-groups/{created['groupId']}"
+
+
+def member(tag):
+    return {"identity": {"issuer": scenarios.ISSUER, "subject": f"prec-{tag}"}}
+
+
+def group_case(platform, tag, operation):
+    """A group of its own. Membership changes carry the group's version."""
+    path = new_group(platform, tag)
+    etag = lambda: read(platform, path).headers["ETag"]  # noqa: E731
+
+    def state():
+        group = send(platform, "GET", path)
+        members = send(platform, "GET", f"{path}/members?limit=100")
+        return group.status_code, group.text, members.status_code, members.text
+
+    if operation == "update":
+        return Case(("PATCH", path), {"displayName": f"Changed {tag}"}, state, etag)
+    if operation == "delete":
+        return Case(("DELETE", path), None, state, etag)
+    if operation == "add":
+        return Case(("POST", f"{path}/members"), member(tag), state, etag)
+    added = send(platform, "POST", f"{path}/members", member(tag), etag=etag())
+    assert added.status_code == 202, added.text
+    (item,) = read(platform, f"{path}/members?limit=100").json()["items"]
+    return Case(("DELETE", f"{path}/members/{item['identityId']}"), None, state, etag)
+
+
+def shared_agent(platform, tag):
+    """A suspended, disabled shared agent, so that no Pods start."""
+    created = platform.admin.call(
+        "POST",
+        "/api/v1/assignments",
+        {
+            "sharedAgent": {
+                "name": f"prec-{tag}",
+                "displayName": f"Preconditions {tag}",
+                "label": f"prec-{tag}",
+                "enabled": False,
+            },
+            "spec": {
+                "access": "suspended",
+                "template": {"id": "personal", "version": platform.state.template},
+            },
+        },
+    ).json()
+    return f"/api/v1/assignments/{created['assignmentId']}"
+
+
+def shared_agent_case(platform, tag, part, body):
+    """A change to one part of a shared agent: its grants or its endpoint."""
+    path = f"{shared_agent(platform, tag)}/{part}"
+    return Case(
+        ("PUT" if part == "grants" else "PATCH", path),
+        body,
+        lambda: read(platform, path).json(),
+        lambda: read(platform, path).headers["ETag"],
+    )
+
+
 OPERATIONS = {
     "updateAssignment": lambda p, t: assignment_case(p, t, retry=False),
     "retryAssignment": lambda p, t: assignment_case(p, t, retry=True),
@@ -220,6 +287,16 @@ OPERATIONS = {
     "withdrawTerminalBackend": lambda p, t: withdraw_case(p, t, "terminal-backends"),
     "deleteSecret": secret_case,
     "updateAdministrator": administrator_case,
+    "replaceAssignmentGrants": lambda p, t: shared_agent_case(
+        p, t, "grants", {"grants": [member(t)]}
+    ),
+    "updateAssignmentEndpoint": lambda p, t: shared_agent_case(
+        p, t, "endpoint", {"label": f"moved-{t}"}
+    ),
+    "updateAccessGroup": lambda p, t: group_case(p, t, "update"),
+    "deleteAccessGroup": lambda p, t: group_case(p, t, "delete"),
+    "addAccessGroupMember": lambda p, t: group_case(p, t, "add"),
+    "removeAccessGroupMember": lambda p, t: group_case(p, t, "remove"),
 }
 
 
