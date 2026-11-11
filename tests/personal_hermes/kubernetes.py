@@ -112,10 +112,16 @@ def import_image(identifier, tag, reuse=False):
 
 
 def import_worker_image(identifier, *, uid=1000, gid=1000):
-    """Builds the requested worker identity and imports a digest reference."""
+    """Builds the requested worker identity and imports a digest reference.
+
+    The default identity is the release worker: CI's saved build of it is
+    imported as it is, so the tests run the image a release publishes.
+    """
     tag = (
         WORKER_TAG if (uid, gid) == (1000, 1000) else f"hermes-worker-{uid}-{gid}:test"
     )
+    if image_source(tag)[0] == "zstd":
+        return import_image(identifier, tag)
     build_image(
         [
             "--tag",

@@ -1,25 +1,41 @@
-"""Build and publish versioned agent artifacts without deployment credentials."""
+"""Build versioned agent artifacts locally, or publish the tested ones.
+
+A release tag runs every test job of `Checks` on images built once from the
+tagged commit; only when all of them passed does its `publish` job push those
+same images and the chart that pins their digests. No deployment credentials
+are involved.
+"""
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import os
 import re
 import sys
 import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import yaml
 
-from agent_platform.build import ROOT, TARGETS, bake_arguments
+from agent_platform.build import REPOSITORY, ROOT, TARGETS, bake_arguments
 from agent_platform.command import run
 from agent_platform.privacy import chart_files, stage_contexts
 
 OUTPUT = ROOT / ".local/releases"
-REPOSITORY = "https://github.com/Accelero/agent-platform"
 REGISTRY = "ghcr.io/accelero/agent-platform"
 CHART_REGISTRY = "oci://" + REGISTRY + "/charts"
-DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
+# The image each release target's tests ran, as the `images` job of `Checks`
+# builds and saves it.
+TESTED = {
+    "hermes": "personal-hermes-native-test:local",
+    "agent-runtime": "hermes-next-worker:test",
+    "hermes-manager": "hermes-manager:e2e",
+}
 # MAJOR.MINOR.PATCH, or a development prerelease MAJOR.MINOR.PATCH-dev.N that
 # never collides with a stable version and is never resolved as the latest one.
 VERSION = re.compile(
@@ -62,17 +78,6 @@ def verify_placeholder_source(root: Path = ROOT) -> None:
     for name, found in source_versions(root).items():
         if found != PLACEHOLDER:
             raise ValueError(f"The {name} version must stay {PLACEHOLDER}.")
-
-
-def image_references(metadata: dict, registry: str) -> dict[str, str]:
-    """Require registry manifest digests instead of local image IDs or tags."""
-    images = {}
-    for name in TARGETS:
-        digest = metadata.get(name, {}).get("containerimage.digest", "")
-        if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
-            raise ValueError("Published image metadata lacks a registry digest.")
-        images[name] = f"{registry}/{name}@{digest}"
-    return images
 
 
 def prepare_chart(
@@ -140,52 +145,22 @@ def render_chart(target: Path, chart: Path) -> None:
     (target / "reviewed-manifests.yaml").write_bytes(output)
 
 
-def build(
-    version: str,
-    revision: str,
-    *,
-    publish: bool,
-    registry: str = REGISTRY,
-    chart_registry: str = CHART_REGISTRY,
-    github_cache: bool = False,
-) -> dict:
-    """Publish images first and their self-contained versioned chart last."""
+def _require_names(version: str, revision: str, *registries: str) -> None:
     if (
         not VERSION.fullmatch(version)
         or version == PLACEHOLDER
         or not re.fullmatch(r"[a-f0-9]{40}", revision)
     ):
         raise ValueError("Use a complete semantic version and source commit SHA.")
-    if not re.fullmatch(r"ghcr\.io/[a-z0-9][a-z0-9/_-]*", registry) or not re.fullmatch(
-        r"oci://ghcr\.io/[a-z0-9][a-z0-9/_-]*", chart_registry
-    ):
+    image_registry, chart_registry = registries
+    if not re.fullmatch(
+        r"ghcr\.io/[a-z0-9][a-z0-9/_-]*", image_registry
+    ) or not re.fullmatch(r"oci://ghcr\.io/[a-z0-9][a-z0-9/_-]*", chart_registry):
         raise ValueError("Use explicit lowercase GHCR namespaces.")
-    target = OUTPUT / version
-    target.mkdir(parents=True, exist_ok=True)
-    contexts = stage_contexts(ROOT, target / "contexts")
-    metadata = target / "images-metadata.json"
-    args = [
-        *bake_arguments(github_cache=github_cache, contexts=contexts),
-        "--metadata-file",
-        str(metadata),
-        "--push" if publish else "--load",
-        "--set",
-        "*.labels.org.opencontainers.image.revision=" + revision,
-        "--set",
-        "*.labels.org.opencontainers.image.version=" + version,
-    ]
-    for name in TARGETS:
-        args.extend(["--set", f"{name}.tags={registry}/{name}:{version}"])
-    sys.stdout.write("Building agent release " + version + ".\n")
-    sys.stdout.flush()
-    run(args, cwd=ROOT, timeout=5400, diagnostics=target / "build.log")
-    images = (
-        image_references(json.loads(metadata.read_text()), registry)
-        if publish
-        else {name: f"{registry}/{name}:{version}" for name in TARGETS}
-    )
-    sys.stdout.write("Verifying built runtime images.\n")
-    sys.stdout.flush()
+
+
+def verify_images(images: dict[str, str]) -> None:
+    """The release properties of each image, checked offline before publication."""
     run(
         [
             "docker",
@@ -245,6 +220,12 @@ def build(
         ],
         timeout=60,
     )
+
+
+def package_chart(
+    target: Path, images: dict[str, str], version: str, revision: str
+) -> Path:
+    """Lint, render and package the chart that pins `images`."""
     sys.stdout.write("Validating chart.\n")
     sys.stdout.flush()
     chart = prepare_chart(target, images, version, revision)
@@ -264,14 +245,153 @@ def build(
         ],
         timeout=60,
     )
-    package = target / ("agent-platform-" + version + ".tgz")
-    receipt = {
+    return target / ("agent-platform-" + version + ".tgz")
+
+
+def receipt_for(version: str, revision: str, images: dict[str, str]) -> dict:
+    return {
         "schema": 4,
         "source": {"repository": REPOSITORY, "revision": revision},
         "version": version,
         "images": images,
     }
-    if publish:
+
+
+def build(
+    version: str,
+    revision: str,
+    *,
+    registry: str = REGISTRY,
+    chart_registry: str = CHART_REGISTRY,
+) -> dict:
+    """Build, verify and package a release locally; nothing leaves the machine."""
+    _require_names(version, revision, registry, chart_registry)
+    target = OUTPUT / version
+    target.mkdir(parents=True, exist_ok=True)
+    contexts = stage_contexts(ROOT, target / "contexts")
+    args = [
+        *bake_arguments(contexts=contexts),
+        "--load",
+        "--set",
+        "*.labels.org.opencontainers.image.revision=" + revision,
+        "--set",
+        "*.labels.org.opencontainers.image.version=" + version,
+    ]
+    for name in TARGETS:
+        args.extend(["--set", f"{name}.tags={registry}/{name}:{version}"])
+    sys.stdout.write("Building agent release " + version + ".\n")
+    sys.stdout.flush()
+    run(args, cwd=ROOT, timeout=5400, diagnostics=target / "build.log")
+    images = {name: f"{registry}/{name}:{version}" for name in TARGETS}
+    sys.stdout.write("Verifying built runtime images.\n")
+    sys.stdout.flush()
+    verify_images(images)
+    package = package_chart(target, images, version, revision)
+    receipt = receipt_for(version, revision, images)
+    receipt["chart"] = str(package.relative_to(ROOT))
+    (target / "artifacts.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    return receipt
+
+
+def require_tested_images(version: str, revision: str) -> None:
+    """Each tested image was built from this commit, labelled for this version."""
+    inspect = ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}"]
+    for name, tag in TESTED.items():
+        labels = json.loads(run([*inspect, tag], timeout=60))
+        expected = {
+            "org.opencontainers.image.source": REPOSITORY,
+            "org.opencontainers.image.revision": revision,
+            "org.opencontainers.image.version": version,
+        }
+        if any((labels or {}).get(key) != value for key, value in expected.items()):
+            raise ValueError(f"The tested {name} image is not this release's build.")
+
+
+def _ghcr(request: urllib.request.Request) -> int:
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def require_push_access(repositories: list[str]) -> None:
+    """Refuse before the first push when any one repository would refuse it.
+
+    Opening, then cancelling, a blob upload proves the push permission without
+    publishing anything, so a release is never left half published for lack
+    of access. The credential stays in the environment.
+    """
+    actor, token = os.environ.get("GITHUB_ACTOR"), os.environ.get("GHCR_TOKEN")
+    if not actor or not token:
+        raise ValueError("Publishing requires GITHUB_ACTOR and GHCR_TOKEN.")
+    basic = base64.b64encode(f"{actor}:{token}".encode()).decode()
+    for repository in repositories:
+        scope = urllib.parse.quote(f"repository:{repository}:pull,push")
+        request = urllib.request.Request(
+            f"https://ghcr.io/token?service=ghcr.io&scope={scope}",
+            headers={"Authorization": "Basic " + basic},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                bearer = json.loads(response.read())["token"]
+        except urllib.error.URLError, KeyError, ValueError:
+            raise ValueError(f"GHCR gave no push token for {repository}.") from None
+        authorization = {"Authorization": "Bearer " + bearer}
+        upload = urllib.request.Request(
+            f"https://ghcr.io/v2/{repository}/blobs/uploads/",
+            method="POST",
+            headers=authorization,
+        )
+        try:
+            with urllib.request.urlopen(upload, timeout=30) as response:
+                location = response.headers.get("Location", "")
+        except urllib.error.URLError:
+            raise ValueError(f"GHCR refuses pushes to {repository}.") from None
+        if location:
+            cancel = urllib.parse.urljoin("https://ghcr.io/", location)
+            _ghcr(
+                urllib.request.Request(cancel, method="DELETE", headers=authorization)
+            )
+
+
+def publish(
+    version: str,
+    revision: str,
+    *,
+    registry: str = REGISTRY,
+    chart_registry: str = CHART_REGISTRY,
+) -> dict:
+    """Publish the images the tests ran, and their chart last.
+
+    Nothing is rebuilt: the images are the ones the test jobs of the same run
+    loaded, and this runs only after all of them passed.
+    """
+    _require_names(version, revision, registry, chart_registry)
+    verify_release_source(version)
+    target = OUTPUT / version
+    target.mkdir(parents=True, exist_ok=True)
+    require_tested_images(version, revision)
+    sys.stdout.write("Verifying the tested runtime images.\n")
+    sys.stdout.flush()
+    verify_images(TESTED)
+    names = [f"{registry}/{name}" for name in TARGETS]
+    charts = chart_registry.removeprefix("oci://") + "/agent-platform"
+    require_push_access([name.removeprefix("ghcr.io/") for name in [*names, charts]])
+    images = {}
+    for name in TARGETS:
+        reference = f"{registry}/{name}:{version}"
+        run(["docker", "tag", TESTED[name], reference], timeout=60)
+        sys.stdout.write(f"Publishing {name} {version}.\n")
+        sys.stdout.flush()
+        output = run(["docker", "push", reference], timeout=1800)
+        digests = re.findall(rb"digest: (sha256:[a-f0-9]{64})", output)
+        if len(digests) != 1:
+            raise ValueError("The registry returned no manifest digest.")
+        images[name] = f"{registry}/{name}@{digests[0].decode()}"
+    package = package_chart(target, images, version, revision)
+    receipt = receipt_for(version, revision, images)
+    if "-dev." not in version:
         for name, image in images.items():
             run(
                 [
@@ -285,18 +405,15 @@ def build(
                 ],
                 timeout=180,
             )
-    if publish:
-        output = run(
-            ["helm", "push", str(package), chart_registry],
-            timeout=180,
-            include_stderr=True,
-        )
-        matches = re.findall(rb"Digest:\s*(sha256:[a-f0-9]{64})", output)
-        if len(matches) != 1:
-            raise ValueError("Helm did not return one chart manifest digest.")
-        receipt["chart"] = chart_registry + "/agent-platform@" + matches[0].decode()
-    else:
-        receipt["chart"] = str(package.relative_to(ROOT))
+    output = run(
+        ["helm", "push", str(package), chart_registry],
+        timeout=180,
+        include_stderr=True,
+    )
+    matches = re.findall(rb"Digest:\s*(sha256:[a-f0-9]{64})", output)
+    if len(matches) != 1:
+        raise ValueError("Helm did not return one chart manifest digest.")
+    receipt["chart"] = chart_registry + "/agent-platform@" + matches[0].decode()
     (target / "artifacts.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt
 
@@ -308,17 +425,18 @@ def main() -> int:
     parser.add_argument("--revision", required=True)
     parser.add_argument("--registry", default=REGISTRY)
     parser.add_argument("--chart-registry", default=CHART_REGISTRY)
-    parser.add_argument("--publish", action="store_true")
-    parser.add_argument("--github-cache", action="store_true")
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="push the tested images that are loaded, instead of building",
+    )
     args = parser.parse_args()
     try:
-        receipt = build(
+        receipt = (publish if args.publish else build)(
             args.version,
             args.revision,
-            publish=args.publish,
             registry=args.registry,
             chart_registry=args.chart_registry,
-            github_cache=args.github_cache,
         )
     except OSError, ValueError, RuntimeError:
         sys.stderr.write("Agent release failed; private command output suppressed.\n")

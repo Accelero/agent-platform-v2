@@ -12,19 +12,6 @@ from agent_platform import release
 pytestmark = pytest.mark.unit
 
 
-def test_requires_real_registry_manifest_digests():
-    metadata = {
-        name: {"containerimage.digest": "sha256:" + "a" * 64}
-        for name in release.TARGETS
-    }
-    images = release.image_references(metadata, release.REGISTRY)
-    assert len(images) == len(release.TARGETS) == 3
-    assert all("@sha256:" in value for value in images.values())
-    metadata["hermes"] = {"containerimage.config.digest": "sha256:" + "b" * 64}
-    with pytest.raises(ValueError, match="registry digest"):
-        release.image_references(metadata, release.REGISTRY)
-
-
 def test_packaged_chart_has_pins_and_wiring_without_modifying_source(tmp_path):
     images = {
         name: release.REGISTRY + "/" + name + "@sha256:" + "a" * 64
@@ -45,10 +32,11 @@ def test_packaged_chart_has_pins_and_wiring_without_modifying_source(tmp_path):
     "version",
     ["latest", "v0.1.0", "01.1.0", "../escape", "0.1", "0.1.0-beta", "0.7.0-dev.01"],
 )
-def test_invalid_version_never_runs_build_commands(version):
+def test_invalid_version_never_runs_build_or_publish_commands(version):
     with patch.object(release, "run") as run:
-        with pytest.raises(ValueError, match="semantic version"):
-            release.build(version, "a" * 40, publish=True)
+        for action in (release.build, release.publish):
+            with pytest.raises(ValueError, match="semantic version"):
+                action(version, "a" * 40)
         run.assert_not_called()
 
 
@@ -58,49 +46,61 @@ def test_stable_and_development_versions_are_distinct():
     assert not release.VERSION.fullmatch("0.7.0-rc.1")
 
 
-@pytest.mark.parametrize("github_cache", [False, True])
-def test_chart_is_published_last_without_a_custom_release_package(
-    tmp_path, monkeypatch, github_cache
-):
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", "fixture-runtime-credential")
-    monkeypatch.setenv("ACTIONS_RESULTS_URL", "https://fixture.invalid/cache")
-    commands = []
+LABELS = {
+    "org.opencontainers.image.source": release.REPOSITORY,
+    "org.opencontainers.image.revision": "a" * 40,
+}
+
+
+def publishing(tmp_path, version, labels=None, access=None, commands=None):
+    """Runs `publish` with Docker, Helm and GHCR replaced; returns the commands."""
+    commands = [] if commands is None else commands
 
     def run(args, **kwargs):
         commands.append(args)
-        if args[:3] == ["docker", "buildx", "bake"]:
-            metadata = Path(args[args.index("--metadata-file") + 1])
-            metadata.write_text(
-                json.dumps(
-                    {
-                        name: {"containerimage.digest": "sha256:" + "a" * 64}
-                        for name in release.TARGETS
-                    }
-                )
-            )
+        if args[:3] == ["docker", "image", "inspect"]:
+            found = labels
+            if found is None:
+                found = {**LABELS, "org.opencontainers.image.version": version}
+            return json.dumps(found).encode()
+        if args[:2] == ["docker", "push"]:
+            return f"{args[2]}: digest: sha256:{'c' * 64} size: 1234".encode()
         if args[:2] == ["helm", "push"]:
             return b"Digest: sha256:" + b"b" * 64
         return b""
 
     with (
         patch.object(release, "OUTPUT", tmp_path),
-        patch.object(release, "stage_contexts", return_value={}),
+        patch.object(release, "verify_release_source"),
         patch.object(release, "run", side_effect=run),
         patch.object(release, "render_chart"),
+        patch.object(
+            release, "require_push_access", side_effect=access or (lambda names: None)
+        ),
     ):
-        receipt = release.build(
-            "0.1.0", "a" * 40, publish=True, github_cache=github_cache
-        )
-    assert any("type=gha" in value for value in commands[0]) == github_cache
-    assert not any("type=registry" in value for value in commands[0])
+        receipt = release.publish(version, "a" * 40)
+    return receipt, commands
+
+
+def test_the_tested_images_are_pushed_and_the_chart_last(tmp_path):
+    receipt, commands = publishing(tmp_path, "0.1.0")
     assert receipt["schema"] == 4
     assert receipt["version"] == "0.1.0"
     assert receipt["source"]["repository"] == release.REPOSITORY
-    assert "contract_sha256" not in receipt
-    assert not (tmp_path / "0.1.0/contract.zip").exists()
+    assert receipt["images"] == {
+        name: f"{release.REGISTRY}/{name}@sha256:{'c' * 64}" for name in release.TARGETS
+    }
     assert commands[-1][:2] == ["helm", "push"]
-    assert not any(command[:3] == ["docker", "buildx", "build"] for command in commands)
+    tags = [command[2:] for command in commands if command[:2] == ["docker", "tag"]]
+    assert tags == [
+        [release.TESTED[name], f"{release.REGISTRY}/{name}:0.1.0"]
+        for name in release.TARGETS
+    ]
+    builds = ("build", "bake")
+    assert not any(
+        command[:2] == ["docker", "build"] or command[2:3] in [[b] for b in builds]
+        for command in commands
+    )
     promotions = [
         command
         for command in commands
@@ -112,16 +112,109 @@ def test_chart_is_published_last_without_a_custom_release_package(
     )
 
 
+def test_a_development_release_never_moves_latest(tmp_path):
+    _receipt, commands = publishing(tmp_path, "0.1.0-dev.1")
+    assert not any(
+        command[:3] == ["docker", "buildx", "imagetools"] for command in commands
+    )
+    assert commands[-1][:2] == ["helm", "push"]
+
+
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {**LABELS, "org.opencontainers.image.version": "0.0.0"},
+        {**LABELS, "org.opencontainers.image.revision": "d" * 40},
+        {},
+    ],
+    ids=["placeholder-version", "other-commit", "unlabelled"],
+)
+def test_an_image_built_from_another_source_is_never_published(tmp_path, labels):
+    with pytest.raises(ValueError, match="not this release's build"):
+        publishing(tmp_path, "0.1.0", labels=labels)
+
+
+def test_missing_push_access_stops_before_the_first_push(tmp_path):
+    def refuse(names):
+        assert len(names) == len(release.TARGETS) + 1
+        raise ValueError("GHCR refuses pushes")
+
+    commands = []
+    with pytest.raises(ValueError, match="refuses pushes"):
+        publishing(tmp_path, "0.1.0", access=refuse, commands=commands)
+    assert commands
+    assert not any(
+        command[:2] in (["docker", "push"], ["docker", "tag"]) for command in commands
+    )
+
+
+class Response:
+    def __init__(self, status, body=b"", location=""):
+        self.status, self.body, self.headers = status, body, {"Location": location}
+
+    def read(self):
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        return False
+
+
+def test_push_access_opens_and_cancels_an_upload_with_the_credential_in_headers(
+    monkeypatch,
+):
+    monkeypatch.setenv("GITHUB_ACTOR", "fixture-actor")
+    monkeypatch.setenv("GHCR_TOKEN", "fixture-registry-credential")
+    requests = []
+
+    def urlopen(request, timeout):
+        requests.append(request)
+        if "/token?" in request.full_url:
+            return Response(200, json.dumps({"token": "fixture-bearer"}).encode())
+        if request.get_method() == "POST":
+            return Response(202, location="/v2/example/upload/fixture-session")
+        return Response(204)
+
+    with patch.object(release.urllib.request, "urlopen", side_effect=urlopen):
+        release.require_push_access(["example/one", "example/two"])
+    assert [request.get_method() for request in requests] == [
+        "GET",
+        "POST",
+        "DELETE",
+    ] * 2
+    assert requests[2].full_url == "https://ghcr.io/v2/example/upload/fixture-session"
+    assert all("fixture-registry-credential" not in r.full_url for r in requests)
+    assert "push" in requests[0].full_url
+
+
+def test_a_refused_upload_refuses_the_release(monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTOR", "fixture-actor")
+    monkeypatch.setenv("GHCR_TOKEN", "fixture-registry-credential")
+
+    def urlopen(request, timeout):
+        if "/token?" in request.full_url:
+            return Response(200, json.dumps({"token": "fixture-bearer"}).encode())
+        raise release.urllib.error.HTTPError(request.full_url, 403, "denied", {}, None)
+
+    with patch.object(release.urllib.request, "urlopen", side_effect=urlopen):
+        with pytest.raises(ValueError, match="refuses pushes to example/one"):
+            release.require_push_access(["example/one"])
+
+
 def test_publishing_only_runs_for_version_tags_on_hosted_runners():
     workflow = yaml.safe_load(
-        (release.ROOT / ".github/workflows/release.yml").read_text()
+        (release.ROOT / ".github/workflows/checks.yml").read_text()
     )
+    job = workflow["jobs"]["publish"]
     assert workflow["on"]["push"]["tags"]
-    assert workflow["jobs"]["publish"]["runs-on"] == "ubuntu-latest"
-    assert workflow["permissions"]["packages"] == "write"
-    commands = "\n".join(
-        step.get("run", "") for step in workflow["jobs"]["publish"]["steps"]
-    )
+    assert "startsWith(github.ref, 'refs/tags/v')" in job["if"]
+    assert "github.event_name == 'push'" in job["if"]
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["permissions"]["packages"] == "write"
+    assert workflow["permissions"] == {"contents": "read"}
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "pulumi" not in commands.lower()
     assert "GITHUB_REF_NAME" in commands
 

@@ -1,11 +1,14 @@
-"""Share image targets and GitHub Actions cache settings across CI builds."""
+"""Share image targets, labels and GitHub Actions cache settings across builds."""
 
 from __future__ import annotations
 
 import os
+import subprocess
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY = "https://github.com/Accelero/agent-platform"
 TARGETS = (
     "hermes",
     "agent-runtime",
@@ -38,10 +41,32 @@ def _fills_github_cache() -> bool:
     )
 
 
-def bake_arguments(
-    *, github_cache: bool = False, contexts: dict[str, Path] | None = None
-) -> list[str]:
-    """The release build, optionally reading the cache that main fills."""
+def image_labels(root: Path = ROOT) -> list[str]:
+    """The source, revision and version labels of every image build.
+
+    A release publishes the very images its tests ran, so they carry the
+    labels from the start: the version is the one the source declares, the
+    tag's version on a release commit and the placeholder otherwise.
+    """
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=10,
+    ).stdout.strip()
+    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    labels = {
+        "org.opencontainers.image.source": REPOSITORY,
+        "org.opencontainers.image.revision": revision,
+        "org.opencontainers.image.version": version,
+    }
+    return [part for item in labels.items() for part in ("--label", "=".join(item))]
+
+
+def bake_arguments(*, contexts: dict[str, Path] | None = None) -> list[str]:
+    """The local release build, which never reads or writes the CI cache."""
     args = [
         "docker",
         "buildx",
@@ -56,19 +81,16 @@ def bake_arguments(
         "*.platform=linux/amd64",
     ]
     args.extend(_context_arguments(contexts or {}))
-    if github_cache:
-        for name in TARGETS:
-            args.extend(["--set", f"{name}.cache-from={_github_cache(name)}"])
     return args
 
 
 def image_build(name: str, *, github_cache: bool = False) -> list[str]:
     """The build of an image under test; in CI it reuses the cache main fills."""
     if not github_cache:
-        return ["docker", "build"]
+        return ["docker", "build", *image_labels()]
     cache = _github_cache(name)
     args = ["docker", "buildx", "build", "--load", "--cache-from", cache]
     if _fills_github_cache():
         # A cache problem costs speed; it must never fail the build.
         args.extend(["--cache-to", f"{cache},mode=max,ignore-error=true"])
-    return args
+    return [*args, *image_labels()]
