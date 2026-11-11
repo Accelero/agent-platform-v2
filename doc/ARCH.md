@@ -726,7 +726,7 @@ Current test implementation:
 | --- | --- | --- |
 | Unit | Cargo domain/application fakes, finite planner state-grid and targeted transition tests; pytest Python runtime/plugin/release/privacy units; Vitest UI logic | PRs and main commits; Cargo also runs external-dependency tests in the same workspace invocation |
 | Integration | Shared store cases on memory and PostgreSQL; actual HTTP/TLS/OIDC/SSH fixtures; binary abort tests; runtime-image checks; chart/render/golden comparisons; mocked UI browser workflows and the separate production-server CSP case | PR/main jobs; PostgreSQL and selected explicitly ignored/feature-gated tests need their dedicated commands |
-| E2E | The standalone native scenario and collected pytest cases install the chart and reach real Hermes through Keycloak and the gateway, with a fake model and private registry; restore uses a second direct-k3s cluster | PR/main Checks runs the sequential script on direct k3s. Manual Cluster scenarios runs the pytest k3d profiles, including real-browser journeys and a separate destructive platform pool |
+| E2E | The standalone native scenario and collected pytest cases install the chart and reach real Hermes through Keycloak and the gateway, with a fake model and private registry; restore uses a second direct-k3s cluster | main/tag Checks runs the sequential script on direct k3s. Its tag/dispatch cluster scenarios job runs the pytest k3d profiles, including real-browser journeys and a separate destructive platform pool |
 
 Existing mechanisms and their limits:
 
@@ -758,11 +758,10 @@ Existing mechanisms and their limits:
   and controller-process checks, and the full native system script on PRs and
   pushes to `main`. Python/Rust profiles retain sanitized JSON/JUnit reports.
   No scheduled extended/soak profile exists there.
-  The manually dispatched `Cluster scenarios` workflow runs collected k3d
-  network, acceptance, browser and destructive cases. Tag publication first
-  requires successful latest `Checks` and `Cluster scenarios` runs for the exact
-  commit, then performs separate Python/build smoke checks. Matching the tested
-  and published artifact digests remains in G20.
+  On release tags and manual dispatch, its `cluster scenarios` job runs the
+  collected k3d network, acceptance, browser and destructive cases on the same
+  image builds. On a tag, its `publish` job runs only after every test job
+  passed, and it pushes the images that were tested.
 
 The [verification commands](personal-hermes/implementation.md#verification-commands)
 are the working commands.

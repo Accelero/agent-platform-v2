@@ -739,15 +739,14 @@ scale promise. Keep external model/provider benchmarks optional and separate.
 **P0 · Extend packaging/CI integration tests · R8, R17, R18.**
 
 Current: release unit tests mock build/publish commands, and image checks smoke
-specific properties. The tag workflow's first job, `gate`, requires passing
-`Checks` and `Cluster scenarios` runs for the exact tagged commit before the
-publishing job starts (`agent_platform/release_gate.py`, with the latest run per
-workflow deciding, a run for any other commit ignored, and anything not completed
-and successful refusing); `tests/unit/tooling/test_release_gate.py` covers the decision,
-the page format of the API's answer, the workflow names, and that publication
-`needs` the gate. It does not yet compare the artifact digests those runs tested
-with the ones published, and the cluster scenarios are dispatched by hand. The
-tag workflow also
+specific properties. A version tag runs all of `Checks` on images its `images`
+job builds once, labelled with source, revision and declared version; the
+`publish` job `needs` every test job, including the cluster scenarios, and
+pushes those same images after checking their labels name the tagged commit
+and version (`agent_platform.release.publish`). `tests/unit/tooling/test_build.py`
+and `test_release.py` cover that publication waits for every test job, builds
+nothing, refuses another commit's or version's image, and stops before the
+first push when GHCR refuses any package. The tag workflow also
 requires the chart and project versions in the tagged commit to equal the tag,
 while ordinary commits keep the `0.0.0` placeholder. That rule is now
 `agent_platform.release.verify_release_source` and `verify_placeholder_source`,
@@ -764,8 +763,8 @@ and fault-injection features in the actual artifacts. Exercise a release
 binary with the fault environment set during a real command: it must not abort
 at the test hook. Add failure-path tests
 that validation errors prevent promotion/chart publication; an unrelated passing
-source revision cannot satisfy the candidate gate (done for the revision, not for
-the artifact digests). Local
+source revision cannot satisfy the candidate gate (done: the published images
+are the run's tested builds). Local
 artifact tests need no public push; publication remains separately authorized.
 
 **Done:** release eligibility refers to the tested candidate, not merely a tag
@@ -868,12 +867,12 @@ presence and a few JSON schema samples are insufficient completion criteria.
 
 Current: TESTING.md describes the implemented profile selection, direct-k3s
 and pytest/k3d fixtures, shared destructive platform pool and report contents.
-Checks runs the standalone native script on PRs/main; Cluster scenarios runs
-collected pytest/k3d cases on manual dispatch. Release publication requires
-both workflows for the exact commit. No scheduled extended/soak workflow or
+Checks runs the standalone native script on main and tags, and the collected
+pytest/k3d cases on tags and manual dispatch. Release publication waits for
+every test job of the tag's run. No scheduled extended/soak workflow or
 measured branch-coverage pipeline exists.
 
-Complete the extended/soak and exact-artifact release profiles and the remaining
+Complete the extended/soak profile and the remaining
 case/obligation reporting, keeping command documentation and `TESTS.md` in step.
 A missing dependency, zero collection or unexpected skip in a requested profile
 must fail. Any remaining scope limitation or accepted
@@ -885,10 +884,9 @@ A plain `uv run pytest -q` and the `python` profile select only tests that need
 no infrastructure; the capabilities `native`, `cluster` and `destructive` have
 their own `hermes-integration`, `e2e` and `e2e-destructive` profiles,
 which fail when their input (`HERMES_TEST_NATIVE_IMAGE` or `HERMES_TEST_K3D`) is
-absent. The k3d profiles are dispatched by hand through
-`.github/workflows/cluster.yml` and are not a PR gate; the profiles retain the
-existing PR/main system job. They do not implement the extended/soak or
-exact-artifact release profiles, and the browser, database and multi-node
+absent. The k3d profiles run in the `cluster scenarios` job of `Checks` on
+release tags and manual dispatch, not on pull requests. They do not implement
+the extended/soak profile, and the browser, database and multi-node
 capabilities have no profile of their own. TypeScript cases are not in the
 ledger.
 

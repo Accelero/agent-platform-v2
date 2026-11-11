@@ -32,7 +32,7 @@ particular candidate's profile.
 | [Native multi-user login](../../tests/integration/hermes/test_login.py), [runtime](../../tests/personal_hermes/native_runtime.py), [initializer tests](../../tests/integration/hermes/test_personal_init.py) | Realm login/session/refresh, shared home binding, missing-policy refusal, non-root startup, forced restart, retained settings, concurrent/interrupted initialization and symlink/special-file refusal | Docker/in-image checks are partly standalone scripts with aggregate pass output. Not all malformed-policy/startup combinations are tested in the installed system |
 | [System scenario](../../tests/personal_hermes/native_e2e.py) | Real chart/operator Jobs, real native chat/cron/uploads, two owners, private registry, suspension, outages and second-cluster restore | One sequential script of more than 3,000 lines. The standalone invocation stops at its first failure and shares mutable state and a process-wide DNS patch. Collected pytest wrappers provide scenario IDs/JUnit with common helpers, but do not give the script itself per-scenario reporting |
 | [UI browser fixtures](../../services/hermes-manager/ui/e2e/fixtures.ts) and [production browser case](../../services/hermes-manager/ui/e2e/production/assets.spec.ts) | Presentation workflows with mocked APIs; separate real-server CSP, write-only secret and template publication case | The production case injects cookies created by a Rust fixture and ignores browser HTTPS errors. It does not perform a real browser Keycloak login or commission an instance through the cluster dashboard |
-| [CI checks](../../.github/workflows/checks.yml) and [release](../../.github/workflows/release.yml) | PR/main jobs run native language suites, image/runtime checks, direct-k3s integrations and native system script; Python/Rust profiles enforce exact collection and passing outcomes and retain sanitized reports; manual Cluster scenarios runs pytest cluster/destructive profiles; release requires both workflows for the exact commit and runs Python/preflight/build smoke | No scheduled extended topology/soak lane or aggregate obligation-coverage gate. The source-commit gate does not compare tested and published artifact digests |
+| [CI checks and release](../../.github/workflows/checks.yml) | PR/main jobs run native language suites, image/runtime checks, direct-k3s integrations and native system script; Python/Rust profiles enforce exact collection and passing outcomes and retain sanitized reports; tag/dispatch runs add the pytest cluster/destructive profiles; on a tag, publish waits for every test job and pushes the tested images after label, image and push-access checks | No scheduled extended topology/soak lane or aggregate obligation-coverage gate. The published chart is rendered, not installed, after publication |
 
 ## Requirement-by-requirement assessment
 
@@ -117,8 +117,8 @@ production boundary. G06 owns their measurement contract.
 ## What cannot be concluded from the current green results
 
 - No measured line/branch percentage or comprehensive mutation/fuzz result exists.
-- The manually dispatched `Cluster scenarios` workflow runs the k3d network,
-  acceptance, browser and destructive profiles. They are not automatic PR gates;
+- The `cluster scenarios` job runs the k3d network, acceptance, browser and
+  destructive profiles on release tags and manual dispatch. They are not PR gates;
   a workflow definition or a source-level assertion is not a candidate result. No live NFS test and no multi-node acceptance run of the platform
   exist; the platform runs on a single node.
 - Generated manifests matching each other do not demonstrate live isolation.

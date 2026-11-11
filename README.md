@@ -117,10 +117,10 @@ uv run python -m agent_platform.privacy
 Chart tests call `helm`; it must be on `PATH`. The Rust, dashboard, k3s and
 end-to-end checks are listed in the
 [verification commands](doc/personal-hermes/implementation.md#verification-commands).
-`Checks` runs the direct-k3s and native suites on pull requests and pushes to
-`main`. The separate, manually dispatched `Cluster scenarios` workflow runs
-the collected k3d and browser scenarios. For an explicit local build without
-publishing, set `RELEASE_VERSION` to an unused SemVer release or prerelease:
+`Checks` runs the fast groups on pull requests, everything else on pushes to
+`main`, and on release tags and manual dispatch also the collected k3d and
+browser scenarios. For an explicit local build without publishing, set
+`RELEASE_VERSION` to an unused SemVer release or prerelease:
 
 ```bash
 uv run python -m agent_platform.release --version "$RELEASE_VERSION" --revision "$(git rev-parse HEAD)"
@@ -132,20 +132,25 @@ See [AGENTS.md](AGENTS.md) for repository guidance.
 
 ## Release process
 
-1. Review passing checks and set the chart (`version`, `appVersion`) and
-   `pyproject.toml` versions to the release version together; the workflow
-   rejects a tag that does not match them. The exact versioned commit must have
-   successful latest `Checks` and manually dispatched `Cluster scenarios` runs
-   before the tag release gate permits a build. Let the trusted main cache
-   workflow finish before tagging to reuse its build layers.
-2. Push an explicit immutable tag: `vMAJOR.MINOR.PATCH`, or `vMAJOR.MINOR.PATCH-dev.N`
-   for a prerelease of unmerged work.
-3. GitHub Actions builds, tests and publishes the versioned images, renders and
-   tests the chart with their exact digests, and publishes the chart last.
-4. The workflow creates a GitHub Release with that chart archive and an
-   informational receipt; `-dev.N` releases are marked as prereleases. It needs
-   no cloud or deployment credentials.
-5. New GHCR package names start private; an administrator makes them public once.
+1. Set the chart (`version`, `appVersion`) and `pyproject.toml` versions, and
+   the project entry in `uv.lock`, to the release version in one commit; the
+   workflow rejects a tag that does not match them. Let the `Checks` run of the
+   latest push to `main` finish first, so the release build reuses its layers.
+2. Push an explicit immutable tag on that commit: `vMAJOR.MINOR.PATCH`, or
+   `vMAJOR.MINOR.PATCH-dev.N` for a prerelease of unmerged work.
+3. `Checks` builds each image once, labelled with the commit and version, and
+   runs every test group, the end-to-end run and the cluster scenarios on
+   those builds.
+4. Only when every test job passed, its `publish` job checks the labels, runs
+   the image checks, confirms GHCR accepts pushes to every package, pushes the
+   tested images, then packages, renders and pushes the chart with their
+   digests. Stable versions also move `latest`.
+5. It creates a GitHub Release with that chart archive and an informational
+   receipt; `-dev.N` releases are prereleases. No cloud or deployment
+   credentials are involved.
+6. New GHCR package names start private; an administrator makes them public
+   once. Each package must grant this repository write access under its
+   Actions access settings, or `publish` stops before the first push.
 
 Never overwrite an existing version or recreate registry cache packages.
 
@@ -167,5 +172,5 @@ uv run python -m agent_platform.privacy
 
 BuildKit uses the GitHub Actions cache API v2 with one scope per image. The
 `images` job of `Checks` stores its layers on pushes to `main`; a failed upload
-does not fail the build. Runs on other refs, including the tag release build, only
-read the cache. The default 10 GB storage limit is retained.
+does not fail the build. Runs on other refs, including release tags, only read
+the cache. The default 10 GB storage limit is retained.
