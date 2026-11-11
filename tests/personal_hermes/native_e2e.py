@@ -97,6 +97,9 @@ SUBJECTS = {
     "frank": "00000000-0000-4000-8000-0000000000f0",
 }
 READY_TIMEOUT = 900
+# Requests equal limits, so these fix how many instances fit on the node. Two
+# owners run throughout and each scenario adds at most one, on a 2-CPU runner.
+HERMES_RESOURCES = {"cpuMillis": 350, "memoryMib": 1024}
 HERE = Path(__file__).resolve().parent
 # The in-cluster fake model (fake_model.py) every assistant instance uses.
 MODEL_URL = "http://fake-model.model.svc.cluster.local:8080/v1"
@@ -651,6 +654,16 @@ class Admin:
 
     def phase(self, instance_id):
         return self.call("GET", f"/api/v1/instances/{instance_id}").json()
+
+    def release(self, receipt):
+        """Stops a finished scenario's instance, returning its CPU and memory."""
+        self.set_access(receipt["assignmentId"], "suspended")
+        wait(
+            lambda: self.phase(receipt["instanceId"])["phase"] == "retained",
+            300,
+            "a finished scenario's instance did not stop",
+            interval=2,
+        )
 
 
 def keycloak_login(session, page, username, password):
@@ -1313,7 +1326,7 @@ def commission(identifier, images, ca, passwords):
     base = {
         "schemaVersion": 2,
         "image": images["hermes"],
-        "resources": {"cpuMillis": 1000, "memoryMib": 2048},
+        "resources": HERMES_RESOURCES,
         "home": {"source": "local", "sizeGib": 1},
         "mounts": {"workspace": {"mountPath": "/workspace"}},
         "defaultVolumes": {"workspace": {"source": "local", "sizeGib": 1}},
@@ -1340,7 +1353,7 @@ def commission(identifier, images, ca, passwords):
         "sshContract": "managed-ssh-v2",
         "uid": 1000,
         "gid": 1000,
-        "resources": {"cpuMillis": 500, "memoryMib": 512, "ephemeralGib": 1},
+        "resources": {"cpuMillis": 150, "memoryMib": 256, "ephemeralGib": 1},
     }
     backend = admin.publish(
         "terminal-backends",
@@ -1795,6 +1808,7 @@ def a_missing_static_directory_blocks_without_a_substitute(
         ),
         interval=5,
     )
+    admin.release(receipt)
 
 
 PLUGIN_PRELUDE = """
@@ -2179,6 +2193,7 @@ print(json.dumps(result))
         readonly,
     }
     assert all(pv["spec"]["accessModes"] == ["ReadWriteOnce"] for pv in shared)
+    admin.release(receipt)
 
 
 def namespaces(identifier):
@@ -2633,6 +2648,7 @@ else:
         if e["backend"]["id"] == bad_id
     ]
     assert failures == ["contract_failed"], failures
+    admin.release(receipt)
 
 
 CHANGE_SCRIPT = (

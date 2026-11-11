@@ -141,7 +141,9 @@ def test_initialization_leaves_a_complete_receipt_in_the_kubelet_result_file(lay
 def test_a_second_initialization_keeps_the_home_and_reports_the_same_receipt(layout):
     layout.initialize()
     first = layout.result.read_bytes()
+    layout.hand_to("runner")
     (layout.root / "home/owner-memory.txt").write_text("owner fixture memory")
+    layout.hand_to("pod")
     layout.initialize()
     assert layout.result.read_bytes() == first
     assert (layout.root / "home/owner-memory.txt").read_text() == "owner fixture memory"
