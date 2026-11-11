@@ -1,5 +1,6 @@
 """Protect cache isolation, credential handling and release publication boundaries."""
 
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -23,32 +24,50 @@ def github_runtime(monkeypatch):
 def test_github_cache_scopes_are_independent_and_credentials_stay_in_environment(
     github_runtime,
 ):
-    args = build.bake_arguments(github_cache=True)
-    imports = [value for value in args if ".cache-from=" in value]
-    assert len(imports) == len(build.TARGETS)
-    assert not any(".cache-to=" in value for value in args)
+    args = [build.image_build(name, github_cache=True) for name in build.TARGETS]
+    imports = [command[command.index("--cache-from") + 1] for command in args]
     assert len({value.split("scope=")[1] for value in imports}) == len(build.TARGETS)
     assert all("type=gha,version=2" in value for value in imports)
-    assert not any("fixture-runtime-credential" in value for value in args)
-    assert not any("fixture.invalid" in value for value in args)
+    flat = [value for command in args for value in command]
+    assert not any("fixture-runtime-credential" in value for value in flat)
+    assert not any("fixture.invalid" in value for value in flat)
     assert not any(
-        "type=registry" in value or "-cache:build" in value for value in args
+        "type=registry" in value or "-cache:build" in value for value in flat
     )
 
 
 def test_local_builds_do_not_require_runner_credentials(monkeypatch):
     monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
-    args = build.bake_arguments()
-    assert not any("cache-from=" in value or "cache-to=" in value for value in args)
+    for args in (build.bake_arguments(), build.image_build("hermes")):
+        assert not any("cache-from" in value or "cache-to" in value for value in args)
 
 
 def test_missing_cache_runtime_stops_before_external_operations(monkeypatch):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
     with pytest.raises(ValueError, match="runner runtime"):
-        build.bake_arguments(github_cache=True)
-    with pytest.raises(ValueError, match="runner runtime"):
         build.image_build("hermes", github_cache=True)
+
+
+def test_every_image_build_carries_the_source_revision_and_declared_version():
+    labels = build.image_labels()
+    pairs = dict(labels[index + 1].split("=", 1) for index in range(0, len(labels), 2))
+    assert set(labels[::2]) == {"--label"}
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    ).stdout.strip()
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    assert pairs == {
+        "org.opencontainers.image.source": release.REPOSITORY,
+        "org.opencontainers.image.revision": revision,
+        "org.opencontainers.image.version": version,
+    }
+    assert build.image_build("hermes")[-len(labels) :] == labels
 
 
 def test_the_job_that_fills_the_cache_cannot_publish_packages():
@@ -63,15 +82,35 @@ def test_the_job_that_fills_the_cache_cannot_publish_packages():
     assert not any("login-action" in step.get("uses", "") for step in job["steps"])
 
 
-def test_release_workflow_uses_the_shared_cache_configuration():
-    workflow = yaml.safe_load(
-        (build.ROOT / ".github/workflows/release.yml").read_text()
-    )
-    commands = "\n".join(
-        step.get("run", "") for step in workflow["jobs"]["publish"]["steps"]
-    )
-    assert "--publish --github-cache" in commands
-    assert release.TARGETS == build.TARGETS
+def test_a_release_publishes_the_builds_every_test_job_ran():
+    """`publish` waits for every other job of the run, builds nothing, and pushes
+    the archives the images job saved for the tests."""
+    workflow = yaml.safe_load((build.ROOT / ".github/workflows/checks.yml").read_text())
+    jobs = workflow["jobs"]
+    job = jobs["publish"]
+    assert set(job["needs"]) == set(jobs) - {"publish", "images"}
+    assert {"images"} <= {
+        need for name in job["needs"] for need in [jobs[name].get("needs")] if need
+    }
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "--publish" in commands and "docker load" in commands
+    for builder in ("docker build", "buildx build", "buildx bake", "tests.run build"):
+        assert builder not in commands
+    saved = "\n".join(step.get("run", "") for step in jobs["images"]["steps"])
+    for tag in release.TESTED.values():
+        assert f"docker save {tag} " in saved
+    assert set(release.TESTED) == set(build.TARGETS)
+
+
+def test_the_tested_images_are_the_ones_the_suites_build():
+    from tests import run
+    from tests.personal_hermes import kubernetes, native_runtime
+
+    assert release.TESTED == {
+        "hermes": native_runtime.IMAGE,
+        "agent-runtime": kubernetes.WORKER_TAG,
+        "hermes-manager": run.MANAGER_IMAGE,
+    }
 
 
 @pytest.mark.parametrize(
@@ -107,7 +146,7 @@ def test_release_images_never_build_fault_injection():
 
 
 def test_only_a_push_to_main_writes_the_image_cache(github_runtime, monkeypatch):
-    assert build.image_build("hermes") == ["docker", "build"]
+    assert build.image_build("hermes")[:2] == ["docker", "build"]
     for event, ref in (
         ("push", "refs/tags/v1.2.3"),
         ("push", "refs/heads/feature"),

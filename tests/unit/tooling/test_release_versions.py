@@ -44,11 +44,12 @@ def tree(tmp_path, *, chart="0.0.0", app="0.0.0", project="0.0.0"):
     return tmp_path
 
 
+def checks():
+    return yaml.safe_load((release.ROOT / ".github/workflows/checks.yml").read_text())
+
+
 def trigger():
-    workflow = yaml.safe_load(
-        (release.ROOT / ".github/workflows/release.yml").read_text()
-    )
-    (pattern,) = workflow["on"]["push"]["tags"]
+    (pattern,) = checks()["on"]["push"]["tags"]
     # GitHub filter patterns: `*` is any run of characters except `/`.
     expression = (
         re.escape(pattern).replace(r"\[0\-9\]", "[0-9]").replace(r"\*", "[^/]*")
@@ -131,7 +132,7 @@ def test_the_placeholder_is_not_a_release(tmp_path):
     with pytest.raises(ValueError, match="Release tag must be"):
         release.verify_release_source("0.0.0", root)
     with pytest.raises(ValueError, match="semantic version"):
-        release.build("0.0.0", "a" * 40, publish=True)
+        release.build("0.0.0", "a" * 40)
 
 
 @pytest.mark.unit
@@ -167,9 +168,7 @@ def test_this_source_tree_is_a_placeholder_tree_or_the_exact_release_commit():
 
 @pytest.mark.unit
 def test_nothing_is_authenticated_or_published_before_the_version_is_verified():
-    steps = yaml.safe_load(
-        (release.ROOT / ".github/workflows/release.yml").read_text()
-    )["jobs"]["publish"]["steps"]
+    steps = checks()["jobs"]["publish"]["steps"]
     verified = next(
         index
         for index, step in enumerate(steps)

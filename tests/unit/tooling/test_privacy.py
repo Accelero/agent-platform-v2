@@ -157,7 +157,7 @@ def test_privacy_failure_prevents_all_build_and_publication_commands(tmp_path):
         patch.object(release, "run") as run,
     ):
         with pytest.raises(privacy.PrivacyError):
-            release.build("0.1.0", "a" * 40, publish=True)
+            release.build("0.1.0", "a" * 40)
     run.assert_not_called()
 
 
@@ -168,10 +168,7 @@ def test_example_email_and_digest_references_are_not_personal_data():
 
 def test_build_attestations_do_not_copy_the_github_event_payload():
     assert "--provenance=mode=min" in build.bake_arguments()
-    for name in ("release", "checks"):
-        workflow = yaml.safe_load(
-            (build.ROOT / f".github/workflows/{name}.yml").read_text()
-        )
-        steps = [step for job in workflow["jobs"].values() for step in job["steps"]]
-        builder = next(step for step in steps if step.get("name") == "Set up BuildKit")
-        assert builder["with"]["driver-opts"] == "provenance-add-gha=false"
+    workflow = yaml.safe_load((build.ROOT / ".github/workflows/checks.yml").read_text())
+    steps = [step for job in workflow["jobs"].values() for step in job["steps"]]
+    builder = next(step for step in steps if step.get("name") == "Set up BuildKit")
+    assert builder["with"]["driver-opts"] == "provenance-add-gha=false"

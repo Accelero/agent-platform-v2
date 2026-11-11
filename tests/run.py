@@ -20,10 +20,15 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from agent_platform.build import image_build
+from agent_platform.privacy import stage_contexts
+from tests.personal_hermes.kubernetes import WORKER_TAG
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / "services/hermes-manager/ui"
@@ -120,6 +125,9 @@ class Session:
             list(pool.map(self.build_one, wanted))
 
     def build_one(self, image):
+        if image == "worker":
+            self.build_worker()
+            return
         commands = {
             "hermes": [
                 sys.executable,
@@ -140,6 +148,15 @@ class Session:
         if not execute([*commands[image], *cache]):
             raise Failed(f"building the {image} image failed")
         self._built.add(image)
+
+    def build_worker(self):
+        """The release worker, from its reviewed context, as the tests import it."""
+        with tempfile.TemporaryDirectory(prefix="worker-build-") as directory:
+            context = stage_contexts(ROOT, Path(directory) / "inputs")["agent-runtime"]
+            command = image_build("agent-runtime", github_cache=self.github_cache)
+            if not execute([*command, "--tag", WORKER_TAG, str(context)]):
+                raise Failed("building the worker image failed")
+        self._built.add("worker")
 
     def suite(self, group, suite, *, database=False, env=None):
         environment = {**os.environ, **(env or {})}
@@ -332,7 +349,7 @@ def main():
     session = Session(args.prebuilt, args.github_cache, args.part)
     try:
         if args.groups == ["build"]:
-            session.build("hermes", "manager")
+            session.build("hermes", "manager", "worker")
             return 0
         chosen, with_e2e = selection(args.groups)
         for key in chosen:

@@ -180,13 +180,10 @@ budgets, with incomplete production-boundary coverage recorded in G06.
 
 | Workflow | Trigger and execution |
 | --- | --- |
-| `Checks` (`checks.yml`) | Pull requests and pushes to main: one step per test group. Each image is built once by the `images` job, and the jobs that need it test that build. `e2e` runs in two parts on separate runners |
-| `Cluster scenarios` (`cluster.yml`) | Manual dispatch: builds fixture images, then runs `e2e` and `e2e-destructive`, including the network matrix and installed browser journeys |
-| `Release agent platform` (`release.yml`) | Explicit version tag: first requires successful latest `Checks` and `Cluster scenarios` runs for that exact commit, then validates, builds and publishes images and their matching chart |
+| `Checks` (`checks.yml`) | Pull requests run the fast groups; pushes to main run every group. Each image is built once by the `images` job, and the jobs that need it test that build. `e2e` runs in two parts on separate runners. Release tags and manual dispatch also run `cluster scenarios` (the `e2e` and `e2e-destructive` profiles, including the network matrix and installed browser journeys) on the same builds |
+| `publish release` (job of `Checks`) | Version tags only, after every test job passed: verifies the version and that the tested images carry this commit and version, checks GHCR push access, pushes those images and then their chart, and creates the GitHub Release |
 
-The manually dispatched cluster suites are not automatic PR gates. There is
-no scheduled extended/NFS/soak workflow. The release gate compares workflow runs
-by source commit; it does not compare the digests tested in those runs with the
-digests built for publication. The release builder performs its own image and
-packaged-chart validation. G20 records the remaining artifact evidence; G22
+The cluster scenarios are not pull request gates. There is no scheduled
+extended/NFS/soak workflow. A release publishes the images its own run tested;
+the publish job adds image and packaged-chart validation. G20 records the remaining artifact evidence; G22
 records the remaining profile and reporting work.

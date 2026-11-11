@@ -25,6 +25,7 @@ from tests.personal_hermes import native_e2e as e2e
 from tests.personal_hermes.kubernetes import (
     WORKER_TAG,
     command,
+    image_source,
     import_image,
 )
 from tests.support.cluster import Cluster
@@ -46,8 +47,11 @@ class PlatformUnavailable(RuntimeError):
 
 
 def require_local_images():
-    """The artifacts under test must exist locally; nothing is built here."""
+    """The artifacts under test must exist locally, or as CI's saved builds;
+    nothing is built here."""
     for tag in (e2e.MANAGER_IMAGE, e2e.HERMES_IMAGE):
+        if image_source(tag)[0] == "zstd":
+            continue
         result = command_status(["docker", "image", "inspect", tag])
         if result != 0:
             raise PlatformUnavailable(f"the image {tag} is not built")
@@ -137,17 +141,18 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
 
     command(["docker", "pull", "--quiet", e2e.KEYCLOAK_IMAGE], timeout=900)
     command(["docker", "tag", e2e.KEYCLOAK_IMAGE, "hermes-e2e-keycloak:pinned"])
-    command(
-        [
-            "docker",
-            "build",
-            "--quiet",
-            "--tag",
-            WORKER_TAG,
-            str(e2e.ROOT / "runtimes/agent-runtime"),
-        ],
-        timeout=600,
-    )
+    if image_source(WORKER_TAG)[0] != "zstd":
+        command(
+            [
+                "docker",
+                "build",
+                "--quiet",
+                "--tag",
+                WORKER_TAG,
+                str(e2e.ROOT / "runtimes/agent-runtime"),
+            ],
+            timeout=600,
+        )
     references = {}
     for key, tag in (
         ("manager", e2e.MANAGER_IMAGE),

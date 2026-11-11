@@ -95,13 +95,14 @@ Source chart and project versions stay at the `0.0.0` placeholder except in the
 tagged release commit, which sets both to the tag's version; do not add
 release numbers to documentation. A release requires an explicit
 `vMAJOR.MINOR.PATCH` tag, or `vMAJOR.MINOR.PATCH-dev.N` for a prerelease of
-unmerged work. GHCR already holds versions up to 0.6.9 under these package
-names: never overwrite or reuse an existing version. The GitHub-hosted release
-workflow first requires passing `Checks` and `Cluster scenarios` runs for the
-exact tagged commit (`agent_platform/release_gate.py`), then validates, builds
-and publishes matching images and their self-contained chart, and publishes the
-chart only after the images pass validation. Keep the source and version OCI labels and the upstream license
-notices in images. The chart owns configuration generation and exact image
+unmerged work. GHCR already holds versions up to 0.7.0 under these package
+names: never overwrite or reuse an existing version. A version tag runs all of
+`Checks`, including the cluster scenarios, on images built once from the
+tagged commit. Its `publish` job runs only after every test job passed: it
+checks that the tested images carry this commit and version, confirms GHCR
+accepts pushes to every package, pushes those same images and then their
+self-contained chart. Nothing is rebuilt for a release. Keep the source and
+version OCI labels and the upstream license notices in images. The chart owns configuration generation and exact image
 defaults.
 
 Public image layers and chart or receipt data must contain no secrets or
@@ -117,7 +118,8 @@ maintainer's approval; the existing attribution has been explicitly approved.
 Publication and repository visibility changes require user authorization.
 
 Build caches use GitHub Actions API v2 with distinct scopes per image. Only the
-`images` job on pushes to main writes them; tag-only release publishing reads them.
+`images` job on pushes to main writes them, and it holds no package permission;
+release builds only read them.
 A cache failure must not fail a build.
 Never recreate GHCR cache packages or pass cache credentials in command arguments.
 Keep the default cache storage limit unless the user authorizes paid storage.
