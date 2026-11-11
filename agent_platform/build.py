@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REPOSITORY = "https://github.com/Accelero/agent-platform"
+REPOSITORY = "https://github.com/Accelero/agent-platform-v2"
 TARGETS = (
     "hermes",
     "agent-runtime",

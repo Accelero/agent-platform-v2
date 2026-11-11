@@ -262,3 +262,28 @@ def test_reviewed_build_sources_are_complete_and_not_ignored():
         timeout=10,
     )
     assert result.returncode == 1, result.stdout.decode()
+
+
+def test_this_product_publishes_under_its_own_names():
+    """agent-platform-v2 never pushes to the public agent-platform packages."""
+    chart = yaml.safe_load(
+        (release.ROOT / "charts/agent-platform/Chart.yaml").read_text()
+    )
+    assert chart["name"] == release.CHART == "agent-platform-v2"
+    assert release.REPOSITORY == "https://github.com/Accelero/agent-platform-v2"
+    assert chart["sources"] == [release.REPOSITORY]
+    assert chart["annotations"]["org.opencontainers.image.source"] == release.REPOSITORY
+    assert release.REGISTRY == "ghcr.io/accelero/agent-platform-v2"
+    assert release.CHART_REGISTRY == f"oci://{release.REGISTRY}/charts"
+    bake = (release.ROOT / "containers/docker-bake.hcl").read_text()
+    manager = (release.ROOT / "services/hermes-manager/Dockerfile").read_text()
+    for text in (bake, manager):
+        assert release.REPOSITORY + '"' in text
+        assert 'Accelero/agent-platform"' not in text
+    assert f'default = "{release.REGISTRY}"' in bake
+    values = yaml.safe_load(
+        (release.ROOT / "charts/agent-platform/values.yaml").read_text()
+    )
+    assert all(
+        image.startswith(release.REGISTRY + "/") for image in values["images"].values()
+    )

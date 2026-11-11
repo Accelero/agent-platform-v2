@@ -1128,7 +1128,8 @@
       "tests/unit/tooling/test_release.py::test_an_image_built_from_another_source_is_never_published[unlabelled]": "unit",
       "tests/unit/tooling/test_release.py::test_missing_push_access_stops_before_the_first_push": "unit",
       "tests/unit/tooling/test_release.py::test_push_access_opens_and_cancels_an_upload_with_the_credential_in_headers": "unit",
-      "tests/unit/tooling/test_release.py::test_a_refused_upload_refuses_the_release": "unit"
+      "tests/unit/tooling/test_release.py::test_a_refused_upload_refuses_the_release": "unit",
+      "tests/unit/tooling/test_release.py::test_this_product_publishes_under_its_own_names": "unit"
     },
     "worker-integration": {
       "hermes-kube/test:cluster::a_worker_starts_with_the_instance_keys_and_answers_ssh_as_the_data_identity": "integration",

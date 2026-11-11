@@ -95,8 +95,10 @@ Source chart and project versions stay at the `0.0.0` placeholder except in the
 tagged release commit, which sets both to the tag's version; do not add
 release numbers to documentation. A release requires an explicit
 `vMAJOR.MINOR.PATCH` tag, or `vMAJOR.MINOR.PATCH-dev.N` for a prerelease of
-unmerged work. GHCR already holds versions up to 0.7.0 under these package
-names: never overwrite or reuse an existing version. A version tag runs all of
+unmerged work. This repository is its own product: it publishes only under
+`ghcr.io/accelero/agent-platform-v2` (images and the `agent-platform-v2`
+chart) with its own version line, never to the public `agent-platform`
+repository's packages. Never overwrite or reuse an existing version. A version tag runs all of
 `Checks`, including the cluster scenarios, on images built once from the
 tagged commit. Its `publish` job runs only after every test job passed: it
 checks that the tested images carry this commit and version, confirms GHCR

@@ -14,7 +14,7 @@ published versions:
 
 ```json
 {
-  "image": "ghcr.io/accelero/agent-platform/agent-runtime@sha256:<64 hex>",
+  "image": "ghcr.io/accelero/agent-platform-v2/agent-runtime@sha256:<64 hex>",
   "sshContract": "managed-ssh-v2",
   "uid": 1000,
   "gid": 1000,

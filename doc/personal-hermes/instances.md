@@ -153,7 +153,7 @@ selections but leaves existing assignments on it.
 ```json
 {
   "schemaVersion": 2,
-  "image": "ghcr.io/accelero/agent-platform/hermes@sha256:<64 hex>",
+  "image": "ghcr.io/accelero/agent-platform-v2/hermes@sha256:<64 hex>",
   "resources": { "cpuMillis": 1000, "memoryMib": 2048 },
   "home": { "source": "nvme", "sizeGib": 5 },
   "mounts": {
