@@ -16,7 +16,7 @@ import yaml
 
 pytestmark = pytest.mark.integration
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 CRATES = ROOT / "services/hermes-manager/crates"
 RENDER_GOLDEN = CRATES / "hermes-render/tests/golden"
 CONFIG_FIXTURES = {

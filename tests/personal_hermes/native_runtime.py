@@ -13,6 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
+from agent_platform.build import image_build
 from agent_platform.command import run
 from agent_platform.privacy import ROOT, stage_contexts
 
@@ -106,22 +107,25 @@ def chown_fixture(path, owner="1000:1000"):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", action="store_true")
+    parser.add_argument("--build-only", action="store_true")
+    parser.add_argument("--github-cache", action="store_true")
     args = parser.parse_args()
     if args.build:
         with tempfile.TemporaryDirectory(prefix="personal-hermes-build-") as directory:
             context = stage_contexts(ROOT, Path(directory) / "inputs")["hermes"]
             run(
                 [
-                    "docker",
-                    "build",
+                    *image_build("hermes", github_cache=args.github_cache),
                     "--file",
                     str(context / "runtimes/hermes/Dockerfile"),
                     "--tag",
                     IMAGE,
                     str(context),
                 ],
-                timeout=1200,
+                timeout=1800,
             )
+    if args.build_only:
+        return
     missing_instance_policies_are_refused()
     name = "personal-hermes-runtime-" + uuid.uuid4().hex[:12]
     # While the containers run, the fixture belongs to the Pod's UID, which the

@@ -20,8 +20,9 @@ mutable application state or deployment-specific backup scripts.
 - `runtimes/agent-runtime/`: default SSH terminal worker image.
 - `charts/agent-platform/`: self-contained application chart.
 - `examples/manager/`: nonsecret manager render fixture.
-- `tests/`: pytest suites by level (`unit/`, `integration/`, older flat
-  modules), shared `support/` including the case verifier, the reviewed case
+- `tests/`: pytest suites by level and component (`unit/<component>/`,
+  `integration/<component>/`, `e2e/`), the `run.py` entry point for every test
+  group, shared `support/` including the case verifier, the reviewed case
   ledger in `verification/`, and the standalone cluster and native drivers in
   `personal_hermes/` (k3s suite runner, native end-to-end run, fake model,
   registry proxy).
@@ -65,7 +66,7 @@ uv run ruff check agent_platform tests
 uv run ruff format --check agent_platform tests
 uv run pytest -q
 helm lint charts/agent-platform
-uv run python -m tests.support.verification run python --output .local/verification/python.json
+uv run python -m tests.run tooling chart hermes unit
 ```
 
 Every Python test carries exactly one level marker (`unit`, `integration`,
@@ -76,9 +77,8 @@ procedure in `doc/testing/gaps.md` when closing a test gap.
 
 Run the Rust checks in `services/hermes-manager/README.md` after manager edits.
 After changes to the controller, the chart, the runtime image or the gateway,
-also run the k3s suite and the native end-to-end run from the verification
-commands in `doc/personal-hermes/implementation.md`, on disposable fixtures
-only.
+also run `uv run python -m tests.run e2e` and the affected component's
+integration group, on disposable fixtures only.
 The OpenAPI contracts are the authority for every interface. Keep the plugin's
 requests conformant to `execution.openapi.yaml`; change the contract, the Rust
 handler and the plugin together.
@@ -116,7 +116,8 @@ names without matched content. Keep ordinary Git attribution only with the
 maintainer's approval; the existing attribution has been explicitly approved.
 Publication and repository visibility changes require user authorization.
 
-Build caches use GitHub Actions API v2 with distinct scopes per image. Keep the
-trusted main-branch cache workflow separate from tag-only release publishing.
+Build caches use GitHub Actions API v2 with distinct scopes per image. Only the
+`images` job on pushes to main writes them; tag-only release publishing reads them.
+A cache failure must not fail a build.
 Never recreate GHCR cache packages or pass cache credentials in command arguments.
 Keep the default cache storage limit unless the user authorizes paid storage.

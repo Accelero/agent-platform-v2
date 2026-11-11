@@ -13,7 +13,7 @@ from tests.support.native_shared import PROVIDER_SHA256, SharedNative
 from tests.support.native_shared import test_image as build_test_image
 from tests.support.ownership import Cleanup
 
-pytestmark = [pytest.mark.integration, pytest.mark.native]
+pytestmark = [pytest.mark.integration, pytest.mark.image]
 
 
 @pytest.fixture(scope="module")
@@ -22,11 +22,18 @@ def runtime_image():
         yield build_test_image(cleanup)
 
 
-@pytest.fixture
-def shared(tmp_path, runtime_image, request):
+# One Keycloak and Hermes pair per configuration, reused across its cases.
+@pytest.fixture(scope="module")
+def shared(tmp_path_factory, runtime_image):
+    with Cleanup() as cleanup:
+        yield SharedNative(tmp_path_factory.mktemp("shared"), runtime_image, cleanup)
+
+
+@pytest.fixture(scope="module")
+def rotating(tmp_path_factory, runtime_image):
     with Cleanup() as cleanup:
         yield SharedNative(
-            tmp_path, runtime_image, cleanup, rotate=getattr(request, "param", False)
+            tmp_path_factory.mktemp("rotating"), runtime_image, cleanup, rotate=True
         )
 
 
@@ -82,11 +89,11 @@ def test_upstream_login_keeps_the_terminal_selector_and_home_binding(personal_na
 
 
 @pytest.mark.parametrize(
-    "shared", [False, True], indirect=True, ids=["refresh-reuse", "refresh-rotation"]
+    "fixture", ["shared", "rotating"], ids=["refresh-reuse", "refresh-rotation"]
 )
-def test_sso_refresh_and_logout_across_two_agent_hosts(shared):
+def test_sso_refresh_and_logout_across_two_agent_hosts(fixture, request):
     """SH-N04: shared SSO, independent refresh chains and person-scoped logout."""
-    shared.check("parallel", timeout=120)
+    request.getfixturevalue(fixture).check("parallel", timeout=120)
 
 
 @pytest.mark.parametrize(

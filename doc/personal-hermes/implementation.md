@@ -40,13 +40,13 @@ nothing rolls back automatically.
 
 | Suite | Assertions exercised by the suite | Coverage limits |
 | --- | --- | --- |
-| Rust workspace (`cargo test --workspace`, with disposable PostgreSQL) | Domain planners and validators; port contract cases on the in-memory and PostgreSQL stores; contract-checked administration, execution, resolver and gateway responses over real TLS; OIDC sessions against a fake realm; gateway hygiene and revocation timing; binary roles, configuration gates and abrupt kills; with `fault-injection`, the API aborted right before and right after a commit | Behaviour on a real cluster or with real Hermes |
+| Rust workspace (`tests.run manager` and `tests.run gateway`, with disposable PostgreSQL) | Domain planners and validators; port contract cases on the in-memory and PostgreSQL stores; contract-checked administration, execution, resolver and gateway responses over real TLS; OIDC sessions against a fake realm; gateway hygiene and revocation timing; binary roles, configuration gates and abrupt kills; with `fault-injection`, the API aborted right before and right after a commit | Behaviour on a real cluster or with real Hermes |
 | `tests.personal_hermes.kubernetes` | Server-side apply, admission and RBAC as the controller's real ServiceAccount on k3s; preconditioned deletes; leader election; the controller process aborted at every controller fault point, including right after a delete; a real `agent-runtime` worker with the instance's keys; an unpullable worker image reported as `image_unavailable`; the owned objects the orphan scan lists | Real Hermes instances, Keycloak, the gateway on a cluster |
-| `tests.personal_hermes.kubernetes --native` (`native_e2e`) | The chart installed with its operator Jobs; real Hermes instances commissioned from published versions through the administration API; two owners on one hostname through the gateway with Keycloak and native realm login; denial and no enrollment without an assignment; distinct credentials; static folders shared across owners with independent read-only settings; a missing static directory blocking the instance until it exists; chat over the native WebSocket against an in-cluster fake model, with the template's and assignment's settings enforced over the owner's and the owner's own settings kept; the model key delivered only to the referencing instance and never returned; uploads in the owner's private home only, bounded by the gateway; a cron job firing without browser traffic and running its command in a terminal backend; two backends sharing the workspace, a backend-only static fixture home mounted only in one and the private home in neither; idle workers retired; a backend change during an active lease; a private registry backend with wrong credentials reported and right ones pulling; platform cookies, native tickets and forged headers checked; another native identity does not change platform routing; an email change at the provider; the manager, the database and the provider unavailable, and a person disabled at the provider, denied under the current test thresholds; suspension closing an open WebSocket and draining a pending worker; data and claims kept on re-enable; only the controller holding cluster rights, an execution credential refused by the administration API and the gateway, and no secret in any log; a restore onto a new cluster with `rebind-cluster`, static volume data and the original material; an instance missing from an older backup reported as orphans and left alone | A real model provider, NFS sources and multi-node scheduling |
-| `tests/integration/test_manager_chart.py` | The chart's admission policies and RBAC equal the renderer's; generated role configurations are the ones the Rust parsers load; pod security, NetworkPolicy peers, strict values and operator Jobs | A live installation |
+| `tests.run e2e` (`native_e2e`) | The chart installed with its operator Jobs; real Hermes instances commissioned from published versions through the administration API; two owners on one hostname through the gateway with Keycloak and native realm login; denial and no enrollment without an assignment; distinct credentials; static folders shared across owners with independent read-only settings; a missing static directory blocking the instance until it exists; chat over the native WebSocket against an in-cluster fake model, with the template's and assignment's settings enforced over the owner's and the owner's own settings kept; the model key delivered only to the referencing instance and never returned; uploads in the owner's private home only, bounded by the gateway; a cron job firing without browser traffic and running its command in a terminal backend; two backends sharing the workspace, a backend-only static fixture home mounted only in one and the private home in neither; idle workers retired; a backend change during an active lease; a private registry backend with wrong credentials reported and right ones pulling; platform cookies, native tickets and forged headers checked; another native identity does not change platform routing; an email change at the provider; the manager, the database and the provider unavailable, and a person disabled at the provider, denied under the current test thresholds; suspension closing an open WebSocket and draining a pending worker; data and claims kept on re-enable; only the controller holding cluster rights, an execution credential refused by the administration API and the gateway, and no secret in any log; a restore onto a new cluster with `rebind-cluster`, static volume data and the original material; an instance missing from an older backup reported as orphans and left alone | A real model provider, NFS sources and multi-node scheduling |
+| `tests/integration/chart/test_manager_chart.py` | The chart's admission policies and RBAC equal the renderer's; generated role configurations are the ones the Rust parsers load; pod security, NetworkPolicy peers, strict values and operator Jobs | A live installation |
 | `tests.personal_hermes.native_runtime --build` | Reviewed runtime image; non-root gateway and dashboard, private API denial, CA handling, init-only key isolation, managed configuration precedence and state after a forced restart | Cluster or provider acceptance |
-| `HERMES_TEST_NATIVE_IMAGE=… tests.support.verification run python-native` | The same installed-image properties as 13 separately collected cases (`tests/integration/test_native_runtime.py`), each with its own result | Cluster or provider acceptance |
-| `tests/integration/test_native_shared.py` (`python-native`) | Nine collected cases on the project image with the pinned upstream OIDC provider, with a disposable Keycloak and a TLS relay on an internal Docker network: two users and concurrent native WebSockets; upstream source, terminal selector and home binding; two hosts with SSO, refresh and logout under both refresh-token policies; exact callbacks and native APIs; three provider-session cases exercising native logout with no gateway client, a retained gateway client and both clients revoked | Platform authentication or routing; real browser interaction; shared gateway authentication and routing are not yet included |
+| `tests.run hermes integration` | The same installed-image properties as 13 separately collected cases (`tests/integration/hermes/test_image_runtime.py`), each with its own result | Cluster or provider acceptance |
+| `tests/integration/hermes/test_login.py` (`hermes-integration`) | Nine collected cases on the project image with the pinned upstream OIDC provider, with a disposable Keycloak and a TLS relay on an internal Docker network: two users and concurrent native WebSockets; upstream source, terminal selector and home binding; two hosts with SSO, refresh and logout under both refresh-token policies; exact callbacks and native APIs; three provider-session cases exercising native logout with no gateway client, a retained gateway client and both clients revoked | Platform authentication or routing; real browser interaction; shared gateway authentication and routing are not yet included |
 | `hermes-kube/tests/admission.rs` | The real admission and RBAC matrix as the controller's ServiceAccount: a positive control and one-field negatives for Pods, namespaces, volumes, Services and RoleBindings, each refused by the intended policy or Pod Security layer, worker-labelled Pods with another non-zero identity, strict Hermes identity and container override refusals, plus escalation and impersonation refusals | Real traffic, NetworkPolicy enforcement, multi-node scheduling |
 | Dashboard (`ui`) | Unit tests, Chromium presentation workflows with mocked APIs, and a separate real-server production-build/CSP browser case | The native UI as a rendered application |
 | `tests/e2e/test_browser.py` | Chromium (Python Playwright) on the installed chart through Keycloak's login form, trusting the fixture CA: cookie scope, owner-only instance and files, dashboard-driven commissioning of a working instance, stale-revision refusal, administrator revocation, foreign-origin requests, logout and session replay, hostile text shown as text | Native chat, history and WebSocket views; template rollout in the browser |
@@ -72,12 +72,11 @@ changes. These documents distinguish required test-system behaviour from
 features that are already implemented.
 
 `uv run pytest -q` selects infrastructure-free Python tests. Independently
-collected cases under `tests/e2e/` run through the `python-cluster` and
-`python-destructive` profiles. Their fixtures use k3d: the network matrix has
+collected cases under `tests/e2e/` run through the `e2e` and
+`e2e-destructive` profiles. Their fixtures use k3d: the network matrix has
 one server and two agents; the installed platform runs on a separate single
 node. The manually dispatched `Cluster scenarios` workflow runs these profiles.
-The PR/main `Checks` workflow also runs the sequential native script through
-the direct-k3s driver. Its restore helper creates a second direct-k3s cluster,
+The PR/main `Checks` workflow runs the sequential platform script as `e2e`. Its restore helper creates a second direct-k3s cluster,
 including when invoked from pytest.
 
 These suites cover selected examples rather than every clause and security
@@ -124,20 +123,18 @@ uv run python -m agent_platform.privacy
 cd services/hermes-manager
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-cargo test -p hermes-manager --features fault-injection --test process --locked
 cd ../..
-uv run python -m tests.personal_hermes.native_runtime --build
-HERMES_TEST_NATIVE_IMAGE=personal-hermes-native-test:local \
-  uv run python -m tests.support.verification run python-native --output .local/verification/python-native.json
-uv run python -m agent_platform.manager_build --tag hermes-manager:e2e
-uv run python -m tests.personal_hermes.kubernetes --native --postgres-container personal-hermes-manager-tests
+uv run python -m tests.run all
 ```
+
+`tests.run` provisions its own PostgreSQL, cluster and images. Run one group with,
+for example, `uv run python -m tests.run manager integration`; see
+[the test groups](../TESTING.md#test-groups).
 
 The dashboard checks are in the [dashboard guide](dashboard.md). The Kubernetes
 runner starts its own digest-pinned k3s container with a temporary kubeconfig,
 never reads an existing kubecontext, and removes the container afterwards.
-`--native` adds the end-to-end run, which needs the two images built above and
+The end-to-end run needs the two images, which `tests.run` builds, and
 Helm. It installs the chart with an in-cluster Keycloak and a fake
 OpenAI-compatible model (`fake_model.py`), runs a digest-pinned registry
 behind basic authentication (`registry_proxy.py`) next to the cluster, pauses

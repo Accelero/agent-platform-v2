@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 LOCAL = {"tests", "agent_platform"}
 # These scripts run inside the Hermes image against its own packages.
 IMAGE_SIDE = {

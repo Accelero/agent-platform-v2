@@ -15,6 +15,7 @@ import re
 import signal
 import subprocess
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree
@@ -23,53 +24,202 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = ROOT / "services/hermes-manager"
 CATALOGUE = ROOT / "tests/verification/cases.json"
 LEVELS = {"unit", "integration", "e2e"}
-CARGO_PROFILES = {
-    "rust": ["--workspace"],
-    "rust-faults": [
-        "-p",
-        "hermes-manager",
-        "--features",
-        "fault-injection",
-        "--test",
-        "process",
-    ],
-    "rust-browser": ["-p", "hermes-http", "--test", "dashboard_browser"],
-    "rust-cluster": [
-        "-p",
-        "hermes-kube",
-        "--test",
-        "cluster",
-        "--test",
-        "admission",
-    ],
-    "rust-controller": [
-        "-p",
-        "hermes-manager",
-        "--features",
-        "fault-injection",
-        "--test",
-        "controller_process",
-    ],
-}
-IGNORED_PROFILES = {"rust-browser", "rust-cluster", "rust-controller"}
-# The default Python profile never needs infrastructure; a test that does
-# carries a capability marker and belongs to the profile that provides it.
-PYTHON_PROFILES = {
-    "python": "not (cluster or database or native or browser or destructive "
-    "or multi_node or soak)",
-    "python-native": "native",
-    "python-cluster": "cluster and not destructive",
-    "python-destructive": "destructive",
-}
-PROFILE_INPUTS = {
-    "python-cluster": ("HERMES_TEST_K3D",),
-    "python-destructive": ("HERMES_TEST_K3D",),
-    "python-native": ("HERMES_TEST_NATIVE_IMAGE",),
-    "rust": ("DATABASE_URL",),
-    "rust-faults": ("DATABASE_URL",),
-    "rust-browser": ("DATABASE_URL", "MANAGER_UI_DIST"),
-    "rust-cluster": ("HERMES_TEST_KUBECONFIG",),
-    "rust-controller": ("DATABASE_URL", "HERMES_TEST_KUBECONFIG"),
+# What a run without infrastructure may select; `pyproject.toml` uses the same.
+NO_INFRASTRUCTURE = (
+    "not (cluster or database or image or browser or destructive or multi_node or soak)"
+)
+# Library tests of hermes-native that reach real sockets or processes.
+NATIVE_IO_CASES = (
+    "probe::tests::",
+    "the_real_initializer_receipt_verifies_for_exactly_its_owner_and_key",
+    "a_worker_is_ready_only_with_its_pinned_host_key_and_the_declared_identity",
+    "a_worker_that_accepts_the_key_but_never_opens_a_session_breaks_the_contract",
+    "a_session_refused_less_often_than_the_attempts_is_a_blip",
+    "unusable_inputs_and_unreachable_workers_are_not_ready_yet",
+)
+WORKER_CASES = (
+    "a_worker_starts_with_the_instance_keys_and_answers_ssh_as_the_data_identity",
+    "a_worker_whose_image_cannot_be_pulled_is_reported_as_unavailable",
+)
+
+
+@dataclass(frozen=True)
+class CargoRun:
+    """One cargo invocation. `only` and `skip` are libtest substring filters."""
+
+    arguments: tuple[str, ...]
+    ignored: bool = False
+    only: tuple[str, ...] = ()
+    skip: tuple[str, ...] = ()
+    threads: int | None = None
+
+    def selects(self, name):
+        return (not self.only or any(part in name for part in self.only)) and not any(
+            part in name for part in self.skip
+        )
+
+    def test_arguments(self):
+        arguments = ["--color=never"]
+        if self.ignored:
+            arguments.append("--ignored")
+        if self.threads:
+            arguments.extend(["--test-threads", str(self.threads)])
+        for part in self.skip:
+            arguments.extend(["--skip", part])
+        return [*arguments, *self.only]
+
+
+@dataclass(frozen=True)
+class Suite:
+    """The cases of one component at one level, and what they need to run."""
+
+    tests: tuple[str, ...] = ()
+    marker: str = ""
+    cargo: tuple[CargoRun, ...] = ()
+    inputs: tuple[str, ...] = ()
+
+
+def packages(*names):
+    return tuple(part for name in names for part in ("-p", name))
+
+
+FAULTS = ("-p", "hermes-manager", "--features", "fault-injection")
+# Named `<component>-<level>`; a `-cluster` suite needs a Kubernetes fixture.
+SUITES = {
+    "manager-unit": Suite(
+        tests=("tests/unit/manager",),
+        marker="unit",
+        cargo=(
+            CargoRun(
+                (
+                    *packages(
+                        "hermes-architecture",
+                        "hermes-core",
+                        "hermes-http",
+                        "hermes-identity",
+                        "hermes-kube",
+                        "hermes-manager",
+                        "hermes-native",
+                        "hermes-render",
+                        "hermes-wire",
+                    ),
+                    "--lib",
+                    "--bins",
+                    "--test",
+                    "architecture",
+                    "--test",
+                    "traceability",
+                    "--test",
+                    "contract",
+                    "--test",
+                    "render",
+                ),
+                skip=NATIVE_IO_CASES,
+            ),
+        ),
+    ),
+    "manager-integration": Suite(
+        cargo=(
+            CargoRun(("-p", "hermes-store", "--lib")),
+            CargoRun(("-p", "hermes-native", "--lib"), only=NATIVE_IO_CASES),
+            CargoRun(
+                (
+                    *packages("hermes-http", "hermes-identity", "hermes-native"),
+                    "--test",
+                    "admin_api",
+                    "--test",
+                    "admin_auth",
+                    "--test",
+                    "execution_api",
+                    "--test",
+                    "resolver_api",
+                    "--test",
+                    "wire_boundaries",
+                    "--test",
+                    "browser",
+                    "--test",
+                    "directory",
+                    "--test",
+                    "tokens",
+                )
+            ),
+            CargoRun((*FAULTS, "--test", "process")),
+        ),
+        inputs=("DATABASE_URL",),
+    ),
+    "manager-integration-cluster": Suite(
+        cargo=(
+            CargoRun(
+                ("-p", "hermes-kube", "--test", "cluster", "--test", "admission"),
+                ignored=True,
+                skip=WORKER_CASES,
+                threads=2,
+            ),
+            # Each case installs cluster-scoped admission objects for its own
+            # control namespace; two at once would overwrite each other's.
+            CargoRun(
+                (*FAULTS, "--test", "controller_process"), ignored=True, threads=1
+            ),
+        ),
+        inputs=("DATABASE_URL", "HERMES_TEST_KUBECONFIG"),
+    ),
+    "gateway-unit": Suite(cargo=(CargoRun(("-p", "hermes-proxy", "--lib")),)),
+    "gateway-integration": Suite(
+        cargo=(
+            CargoRun(
+                (
+                    *packages("hermes-proxy", "hermes-gateway", "hermes-http"),
+                    "--test",
+                    "gateway",
+                    "--test",
+                    "gateway_tls",
+                    "--test",
+                    "resolver_client",
+                )
+            ),
+        ),
+        inputs=("DATABASE_URL",),
+    ),
+    "dashboard-integration": Suite(
+        cargo=(
+            CargoRun(
+                ("-p", "hermes-http", "--test", "dashboard_browser"), ignored=True
+            ),
+        ),
+        inputs=("DATABASE_URL", "MANAGER_UI_DIST"),
+    ),
+    "worker-integration": Suite(
+        cargo=(
+            CargoRun(
+                ("-p", "hermes-kube", "--test", "cluster"),
+                ignored=True,
+                only=WORKER_CASES,
+                threads=2,
+            ),
+        ),
+        inputs=("HERMES_TEST_KUBECONFIG",),
+    ),
+    "hermes-unit": Suite(tests=("tests/unit/hermes",), marker="unit"),
+    "hermes-integration": Suite(
+        tests=("tests/integration/hermes",),
+        marker="integration",
+        inputs=("HERMES_TEST_NATIVE_IMAGE",),
+    ),
+    "chart-integration": Suite(
+        tests=("tests/integration/chart",), marker="integration"
+    ),
+    "tooling-unit": Suite(tests=("tests/unit/tooling",), marker="unit"),
+    "tooling-integration": Suite(
+        tests=("tests/integration/tooling",), marker="integration"
+    ),
+    "e2e": Suite(
+        tests=("tests/e2e",),
+        marker="cluster and not destructive",
+        inputs=("HERMES_TEST_K3D",),
+    ),
+    "e2e-destructive": Suite(
+        tests=("tests/e2e",), marker="destructive", inputs=("HERMES_TEST_K3D",)
+    ),
 }
 
 
@@ -126,7 +276,7 @@ class PythonCases:
                 case["status"] = "passed"
 
 
-def python_cases(*, execute, profile="python"):
+def python_cases(suite, *, execute):
     import pytest
 
     recorder = PythonCases()
@@ -136,7 +286,9 @@ def python_cases(*, execute, profile="python"):
         if execute
         else ["--collect-only", "-q"]
     )
-    code = pytest.main([*arguments, "-m", PYTHON_PROFILES[profile]], plugins=[recorder])
+    code = pytest.main(
+        [*arguments, *suite.tests, "-m", suite.marker], plugins=[recorder]
+    )
     return int(code), recorder.cases
 
 
@@ -172,14 +324,8 @@ def listed_cases(output):
     }
 
 
-def cargo_collection(profile):
-    arguments = [
-        "cargo",
-        "test",
-        *CARGO_PROFILES[profile],
-        "--locked",
-        "--message-format=json",
-    ]
+def cargo_collection(run):
+    arguments = ["cargo", "test", *run.arguments, "--locked", "--message-format=json"]
     code, output = capture([*arguments, "--no-run"], cwd=WORKSPACE, timeout=1800)
     if code:
         raise RuntimeError("Cargo collection build failed")
@@ -198,9 +344,8 @@ def cargo_collection(profile):
         if code or ignored_code:
             raise RuntimeError("Cargo test listing failed")
         all_names, ignored_names = listed_cases(listing), listed_cases(ignored)
-        selected = (
-            ignored_names if profile in IGNORED_PROFILES else all_names - ignored_names
-        )
+        available = ignored_names if run.ignored else all_names - ignored_names
+        selected = {name for name in available if run.selects(name)}
         prefix = artifact_key(artifact)
         excluded.update(f"{prefix}::{name}" for name in all_names - selected)
         for name in selected:
@@ -216,20 +361,7 @@ def rust_level(target, name):
     package, kind = target.split("/", 1)
     if package == "hermes-store":
         return "integration"
-    if package == "hermes-native" and (
-        name.startswith("probe::tests::")
-        or name.endswith(
-            "the_real_initializer_receipt_verifies_for_exactly_its_owner_and_key"
-        )
-        or name.endswith(
-            "a_worker_is_ready_only_with_its_pinned_host_key_and_the_declared_identity"
-        )
-        or name.endswith(
-            "a_worker_that_accepts_the_key_but_never_opens_a_session_breaks_the_contract"
-        )
-        or name.endswith("a_session_refused_less_often_than_the_attempts_is_a_blip")
-        or name.endswith("unusable_inputs_and_unreachable_workers_are_not_ready_yet")
-    ):
+    if package == "hermes-native" and any(part in name for part in NATIVE_IO_CASES):
         return "integration"
     if kind.startswith("test:") and package not in {
         "hermes-architecture",
@@ -267,47 +399,39 @@ def cargo_results(output, artifacts):
     return results
 
 
-def rust_cases(profile, *, execute):
-    arguments, artifacts, cases, excluded = cargo_collection(profile)
-    if not execute:
-        return 0, cases
-    print(f"verification: running {len(cases)} collected {profile} cases", flush=True)
-    test_arguments = ["--color=never"]
-    if profile in IGNORED_PROFILES:
-        test_arguments.append("--ignored")
-    if profile == "rust-cluster":
-        test_arguments.extend(["--test-threads", "2"])
-    if profile == "rust-controller":
-        # Each case installs the cluster-scoped admission objects for its own
-        # control namespace; two at once would overwrite each other's.
-        test_arguments.extend(["--test-threads", "1"])
-    code, output = capture(
-        [*arguments, "--no-fail-fast", "--", *test_arguments],
-        cwd=WORKSPACE,
-        timeout=2400,
-    )
-    results = cargo_results(output, artifacts)
-    if any(status == "failed" for status in results.values()):
-        # The reports keep only identities and outcomes. Print the libtest failure
-        # section so a failure on a runner can be diagnosed from the job log.
-        failures = output.split("\nfailures:\n", 1)
-        print("verification: cargo failure output (bounded)", flush=True)
-        print(failures[-1][-20000:], flush=True)
-    for identity, status in results.items():
-        if identity in excluded:
+def rust_cases(suite, *, execute):
+    code, cases = 0, {}
+    for run in suite.cargo:
+        arguments, artifacts, collected, excluded = cargo_collection(run)
+        cases.update(collected)
+        if not execute:
             continue
-        if identity not in cases:
-            raise ValueError("Uncollected Cargo execution outcome")
-        cases[identity]["status"] = status
+        print(f"verification: running {len(collected)} cargo cases", flush=True)
+        run_code, output = capture(
+            [*arguments, "--no-fail-fast", "--", *run.test_arguments()],
+            cwd=WORKSPACE,
+            timeout=2400,
+        )
+        code = code or run_code
+        results = cargo_results(output, artifacts)
+        if any(status == "failed" for status in results.values()):
+            # The reports keep only identities and outcomes. Print the libtest
+            # failure section so a runner failure can be diagnosed from its log.
+            failures = output.split("\nfailures:\n", 1)
+            print("verification: cargo failure output (bounded)", flush=True)
+            print(failures[-1][-20000:], flush=True)
+        for identity, status in results.items():
+            if identity in excluded:
+                continue
+            if identity not in cases:
+                raise ValueError("Uncollected Cargo execution outcome")
+            cases[identity]["status"] = status
     return code, cases
 
 
 def read_catalogue(path=CATALOGUE):
     document = json.loads(path.read_text())
-    if document["schemaVersion"] != 1 or set(document["profiles"]) != {
-        *PYTHON_PROFILES,
-        *CARGO_PROFILES,
-    }:
+    if document["schemaVersion"] != 1 or set(document["profiles"]) != set(SUITES):
         raise ValueError("Unsupported case catalogue")
     for cases in document["profiles"].values():
         if not cases or any(level not in LEVELS for level in cases.values()):
@@ -463,26 +587,29 @@ def write_junit(path, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["inventory", "run"])
-    parser.add_argument("profile", choices=[*PYTHON_PROFILES, *CARGO_PROFILES])
+    parser.add_argument("profile", choices=list(SUITES))
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     started = datetime.now(UTC).isoformat()
     source = source_state()
     catalogue = read_catalogue()
     execute = args.action == "run"
+    suite = SUITES[args.profile]
     print(f"verification: {args.profile} {args.action}", flush=True)
     cases = {}
     problems = [
         f"missing_input:{name}"
-        for name in PROFILE_INPUTS.get(args.profile, ())
+        for name in suite.inputs
         if execute and not os.environ.get(name)
     ]
     try:
         if not problems:
-            if args.profile in PYTHON_PROFILES:
-                code, cases = python_cases(execute=execute, profile=args.profile)
-            else:
-                code, cases = rust_cases(args.profile, execute=execute)
+            code = 0
+            if suite.tests:
+                code, cases = python_cases(suite, execute=execute)
+            if suite.cargo:
+                rust_code, rust = rust_cases(suite, execute=execute)
+                code, cases = code or rust_code, {**cases, **rust}
             problems = gate(catalogue["profiles"][args.profile], cases, execute=execute)
             if code:
                 problems.append("runner_failed")

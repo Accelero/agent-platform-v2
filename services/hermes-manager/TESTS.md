@@ -215,7 +215,7 @@ are implemented and executed; accelerated timings do not prove production deadli
 These tests exercise the project runtime image described in
 [the shared-agent plan](../../doc/shared-hermes-agents.md#native-runtime).
 They do not by themselves prove platform routing. The collected
-`python-native` profile supplies a real disposable Keycloak, isolated DNS and TLS,
+`hermes-integration` profile supplies a real disposable Keycloak, isolated DNS and TLS,
 and non-root native instances with read-only roots and managed configuration.
 
 | Case | Tests | Level | Status |

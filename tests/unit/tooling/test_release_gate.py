@@ -9,7 +9,7 @@ from agent_platform.release_gate import REQUIRED, problems, runs_of
 
 pytestmark = pytest.mark.unit
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 SHA = "a" * 40
 OTHER = "b" * 40
 

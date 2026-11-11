@@ -14,7 +14,6 @@ directory.
 from __future__ import annotations
 
 import secrets
-import tempfile
 import uuid
 from contextlib import ExitStack
 from pathlib import Path
@@ -150,17 +149,16 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         timeout=600,
     )
     references = {}
-    with tempfile.TemporaryDirectory(prefix="platform-images-") as scratch:
-        for key, tag in (
-            ("manager", e2e.MANAGER_IMAGE),
-            ("hermes", e2e.HERMES_IMAGE),
-            ("worker", WORKER_TAG),
-            ("keycloak", "hermes-e2e-keycloak:pinned"),
-        ):
-            pinned = {import_image(node, tag, scratch) for node in cluster.nodes}
-            if len(pinned) != 1:
-                raise PlatformUnavailable(f"{tag} differs between nodes")
-            references[key] = pinned.pop()
+    for key, tag in (
+        ("manager", e2e.MANAGER_IMAGE),
+        ("hermes", e2e.HERMES_IMAGE),
+        ("worker", WORKER_TAG),
+        ("keycloak", "hermes-e2e-keycloak:pinned"),
+    ):
+        pinned = {import_image(node, tag) for node in cluster.nodes}
+        if len(pinned) != 1:
+            raise PlatformUnavailable(f"{tag} differs between nodes")
+        references[key] = pinned.pop()
     images = {name: references[name] for name in ("manager", "hermes", "worker")}
 
     node_ip = e2e.container_ip(server, network)

@@ -10,7 +10,7 @@ from openapi_spec_validator import validate
 
 pytestmark = pytest.mark.unit
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS = ROOT / "contracts/hermes-manager"
 
 

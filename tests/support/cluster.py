@@ -17,7 +17,6 @@ import json
 import os
 import socket
 import subprocess
-import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -241,9 +240,8 @@ def import_probe_image(cluster: Cluster):
     """Imports the pinned probe image into every node; returns its reference."""
     run(["docker", "tag", PROBE_SOURCE, PROBE_TAG])
     references = set()
-    with tempfile.TemporaryDirectory(prefix="probe-image-") as temporary:
-        for node in cluster.nodes:
-            references.add(import_image(node, PROBE_TAG, temporary))
+    for node in cluster.nodes:
+        references.add(import_image(node, PROBE_TAG))
     if len(references) != 1:
         raise ClusterUnavailable("the probe image differs between nodes")
     cluster.probe_image = references.pop()

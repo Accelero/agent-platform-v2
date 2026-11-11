@@ -35,7 +35,7 @@ Rust library test target.
 | --- | --- | --- |
 | Unit | Cargo, pytest and Vitest | Pure validators, planners, state transitions, command decisions with fakes, configuration and UI logic |
 | Integration | Cargo and pytest; TypeScript Playwright for presentation workflows | Store contracts, real protocol listeners, process failures, runtime images, chart/render comparisons, admission/RBAC and production dashboard/CSP |
-| E2E | Independently collected pytest cases and the standalone native script | Helm-installed manager, gateway, Hermes, workers, PostgreSQL and Keycloak, with a fake model and fixture registry |
+| E2E | Independently collected pytest cases and the standalone platform script | Helm-installed manager, gateway, Hermes, workers, PostgreSQL and Keycloak, with a fake model and fixture registry |
 
 One shared Rust contract suite runs against both the in-memory and PostgreSQL
 stores. Adapter-specific suites exercise other ports. There is no generic
@@ -43,35 +43,55 @@ conformance suite for every port. Finite planner state-grid and deterministic
 command-sequence tests exist; no `proptest`, fuzzing or measured branch-coverage
 pipeline is configured.
 
-## Execution profiles
+## Test groups
 
-The verifier supports these profiles from the repository root:
+Tests are organized by component and level. `tests.run` runs any of these from
+the repository root, provisions what they need once per invocation, and reports
+one line per group, so a failure reads as `manager integration` or `e2e`:
 
-| Profile | Selection and prerequisites |
-| --- | --- |
-| `python` | Tests without infrastructure capability markers; Helm is needed by chart tests |
-| `python-native` | `native` cases against `HERMES_TEST_NATIVE_IMAGE` |
-| `python-cluster` | `cluster and not destructive`; `HERMES_TEST_K3D` names the pinned k3d binary; browser cases also need Chromium and NSS `certutil` |
-| `python-destructive` | `destructive` cases on a separate platform pool; requires `HERMES_TEST_K3D` |
-| `rust` | Non-ignored workspace tests, including PostgreSQL integrations; requires disposable `DATABASE_URL` |
-| `rust-faults` | Feature-enabled API process abort cases; requires disposable PostgreSQL |
-| `rust-browser` | Ignored production dashboard/CSP case; requires PostgreSQL, `MANAGER_UI_DIST`, UI dependencies and Chromium |
-| `rust-cluster` | Ignored Kubernetes adapter/admission cases; the cluster driver supplies `HERMES_TEST_KUBECONFIG` and worker-image inputs |
-| `rust-controller` | Ignored feature-enabled controller process cases; the driver supplies PostgreSQL and Kubernetes fixture inputs |
+```bash
+uv run python -m tests.run manager unit
+uv run python -m tests.run manager integration worker integration
+uv run python -m tests.run manager
+uv run python -m tests.run e2e
+uv run python -m tests.run e2e --part 1
+uv run python -m tests.run all
+```
+
+| Component | What it covers | Unit | Integration |
+| --- | --- | --- | --- |
+| `manager` | API and controller crates; published contracts | Cargo, pytest | PostgreSQL, processes, a disposable Kubernetes API |
+| `gateway` | `hermes-proxy`, `hermes-gateway`, gateway TLS | Cargo | PostgreSQL and real listeners |
+| `dashboard` | React and TypeScript in `services/hermes-manager/ui` | Vitest | Playwright, and the production build under the real CSP |
+| `hermes` | What the project adds to the upstream image | pytest | The built image, and real Keycloak login behaviour the design depends on |
+| `worker` | The `agent-runtime` image | — | The worker image on a disposable Kubernetes API |
+| `chart` | `charts/agent-platform` | — | Helm render against the renderer's output |
+| `tooling` | `agent_platform/` and the test harness | pytest | Docker ownership and the verifier's own runner |
+
+`e2e` is one suite over everything: the Helm-installed platform on a disposable
+cluster. Upstream Hermes has no unit tests here; it is used as released, and
+what the project changes in its image is tested.
+
+`--part 1` and `--part 2` each run half of the `e2e` scenarios on a platform of
+their own, and CI runs them on two runners. The log and credential checks run in
+both parts.
+
+Each group is backed by one or more verifier suites named `<component>-<level>`.
+A suite ending in `-cluster` needs a Kubernetes fixture, which `tests.run`
+provides. `e2e-destructive` needs a platform of its own.
 
 `inventory` checks collection only. `run` also requires every reviewed case to
 pass and the underlying runner to exit successfully. Empty collection,
 missing/unexpected cases, wrong levels, skips, xfail/xpass and fixture failures
-fail the profile. Rust inventory compiles and lists test binaries without
+fail the suite. Rust inventory compiles and lists test binaries without
 starting their external fixtures. Required execution inputs are checked before
-running a profile.
+running a suite.
 
-A plain `uv run pytest -q` uses the same infrastructure-free selection as
-`python`. Every Python test has exactly one level marker; collection rejects
+A plain `uv run pytest -q` selects every Python test that needs no
+infrastructure. Every Python test has exactly one level marker; collection rejects
 missing or ambiguous levels. `pyproject.toml` registers capability markers and
 enables strict marker/configuration checks. Requirement/case markers are not
-comprehensively mapped. Browser, database and multi-node capabilities have no
-separate verifier profiles.
+comprehensively mapped.
 
 ## Cluster fixtures
 
@@ -160,11 +180,11 @@ budgets, with incomplete production-boundary coverage recorded in G06.
 
 | Workflow | Trigger and execution |
 | --- | --- |
-| `Checks` (`checks.yml`) | Pull requests and pushes to main: Python/chart/privacy, Rust and shared-store profiles, dashboard unit/browser/build checks, manager image checks, runtime checks, direct-k3s adapter/controller profiles and the full standalone native scenario |
-| `Cluster scenarios` (`cluster.yml`) | Manual dispatch: builds fixture images, then runs `python-cluster` and `python-destructive`, including the network matrix and installed browser journeys |
+| `Checks` (`checks.yml`) | Pull requests and pushes to main: one step per test group. Each image is built once by the `images` job, and the jobs that need it test that build. `e2e` runs in two parts on separate runners |
+| `Cluster scenarios` (`cluster.yml`) | Manual dispatch: builds fixture images, then runs `e2e` and `e2e-destructive`, including the network matrix and installed browser journeys |
 | `Release agent platform` (`release.yml`) | Explicit version tag: first requires successful latest `Checks` and `Cluster scenarios` runs for that exact commit, then validates, builds and publishes images and their matching chart |
 
-The manually dispatched cluster profiles are not automatic PR gates. There is
+The manually dispatched cluster suites are not automatic PR gates. There is
 no scheduled extended/NFS/soak workflow. The release gate compares workflow runs
 by source commit; it does not compare the digests tested in those runs with the
 digests built for publication. The release builder performs its own image and
