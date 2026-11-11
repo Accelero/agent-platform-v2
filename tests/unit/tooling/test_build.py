@@ -2,7 +2,6 @@
 
 import tomllib
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -11,7 +10,7 @@ from agent_platform import build, release
 
 pytestmark = pytest.mark.unit
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture
@@ -26,10 +25,10 @@ def test_github_cache_scopes_are_independent_and_credentials_stay_in_environment
 ):
     args = build.bake_arguments(github_cache=True)
     imports = [value for value in args if ".cache-from=" in value]
-    exports = [value for value in args if ".cache-to=" in value]
-    assert len(imports) == len(exports) == len(build.TARGETS)
+    assert len(imports) == len(build.TARGETS)
+    assert not any(".cache-to=" in value for value in args)
     assert len({value.split("scope=")[1] for value in imports}) == len(build.TARGETS)
-    assert all("type=gha,version=2" in value for value in imports + exports)
+    assert all("type=gha,version=2" in value for value in imports)
     assert not any("fixture-runtime-credential" in value for value in args)
     assert not any("fixture.invalid" in value for value in args)
     assert not any(
@@ -46,42 +45,22 @@ def test_local_builds_do_not_require_runner_credentials(monkeypatch):
 def test_missing_cache_runtime_stops_before_external_operations(monkeypatch):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
-    with patch.object(build, "run") as run:
-        with pytest.raises(ValueError, match="runner runtime"):
-            build.warm_cache()
-        run.assert_not_called()
+    with pytest.raises(ValueError, match="runner runtime"):
+        build.bake_arguments(github_cache=True)
+    with pytest.raises(ValueError, match="runner runtime"):
+        build.image_build("hermes", github_cache=True)
 
 
-def test_main_cache_build_never_pushes_or_loads_images(github_runtime, tmp_path):
-    def run(args, **kwargs):
-        kwargs["diagnostics"].write_bytes(b"#1 CACHED\n#2 CACHED\n")
-        return b""
-
-    with (
-        patch.object(build, "ROOT", tmp_path),
-        patch.object(build, "stage_contexts", return_value={}),
-        patch.object(build, "run", side_effect=run) as command,
-    ):
-        build.warm_cache()
-    args = command.call_args.args[0]
-    assert "*.output=type=cacheonly" in args
-    assert "--push" not in args
-    assert "--load" not in args
-    assert not any(".tags=" in value for value in args)
-    assert command.call_count == 1
-
-
-def test_cache_workflow_is_main_only_and_cannot_publish_packages():
-    workflow = yaml.safe_load((build.ROOT / ".github/workflows/cache.yml").read_text())
-    assert workflow["on"]["push"]["branches"] == ["main"]
-    assert workflow["jobs"]["cache"]["if"] == "github.ref == 'refs/heads/main'"
+def test_the_job_that_fills_the_cache_cannot_publish_packages():
+    workflow = yaml.safe_load((build.ROOT / ".github/workflows/checks.yml").read_text())
     assert workflow["permissions"] == {"contents": "read"}
-    steps = workflow["jobs"]["cache"]["steps"]
-    commands = "\n".join(step.get("run", "") for step in steps)
-    assert "python -m agent_platform.build" in commands
+    job = workflow["jobs"]["images"]
+    assert job["if"] == "github.event_name != 'pull_request'"
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "tests.run build --github-cache" in commands
     assert "--publish" not in commands
     assert "--push" not in commands
-    assert not any("login-action" in step.get("uses", "") for step in steps)
+    assert not any("login-action" in step.get("uses", "") for step in job["steps"])
 
 
 def test_release_workflow_uses_the_shared_cache_configuration():
@@ -125,3 +104,25 @@ def test_release_images_never_build_fault_injection():
     )["features"]
     assert features["fault-injection"] == []
     assert "fault-injection" not in features.get("default", [])
+
+
+def test_only_a_push_to_main_writes_the_image_cache(github_runtime, monkeypatch):
+    assert build.image_build("hermes") == ["docker", "build"]
+    for event, ref in (
+        ("push", "refs/tags/v1.2.3"),
+        ("push", "refs/heads/feature"),
+        ("pull_request", "refs/heads/main"),
+    ):
+        monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+        monkeypatch.setenv("GITHUB_REF", ref)
+        cached = build.image_build("hermes-manager", github_cache=True)
+        assert "--cache-from" in cached and "--load" in cached
+        assert "scope=agent-platform-hermes-manager-amd64" in " ".join(cached)
+        assert "--cache-to" not in cached
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    cached = build.image_build("hermes-manager", github_cache=True)
+    written = cached[cached.index("--cache-to") + 1]
+    assert "scope=agent-platform-hermes-manager-amd64" in written
+    assert "ignore-error=true" in written
+    assert "--push" not in cached

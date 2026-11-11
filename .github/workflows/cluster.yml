@@ -40,9 +40,9 @@ jobs:
           uv run python -m tests.personal_hermes.native_runtime --build
           uv run python -m agent_platform.manager_build --tag hermes-manager:e2e
       - name: Network isolation and independent acceptance cases
-        run: HERMES_TEST_K3D=/usr/local/bin/k3d uv run python -m tests.support.verification run python-cluster --output .local/verification/python-cluster.json
+        run: HERMES_TEST_K3D=/usr/local/bin/k3d uv run python -m tests.support.verification run e2e --output .local/verification/e2e.json
       - name: Destructive scenarios, each on a platform of its own
-        run: HERMES_TEST_K3D=/usr/local/bin/k3d uv run python -m tests.support.verification run python-destructive --output .local/verification/python-destructive.json
+        run: HERMES_TEST_K3D=/usr/local/bin/k3d uv run python -m tests.support.verification run e2e-destructive --output .local/verification/e2e-destructive.json
       - name: Upload sanitized case reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

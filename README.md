@@ -165,7 +165,7 @@ uv run python -m agent_platform.privacy
 
 ## Build cache
 
-BuildKit uses the GitHub Actions cache API v2 with one scope per image. Trusted
-`main` pushes warm the caches with `type=cacheonly`; the tag release job restores
-them with `--github-cache`. Cache warming publishes nothing, and the default 10 GB
-storage limit is retained.
+BuildKit uses the GitHub Actions cache API v2 with one scope per image. The
+`images` job of `Checks` stores its layers on pushes to `main`; a failed upload
+does not fail the build. Runs on other refs, including the tag release build, only
+read the cache. The default 10 GB storage limit is retained.

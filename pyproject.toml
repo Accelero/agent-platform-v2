@@ -22,14 +22,14 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 # A plain run needs no infrastructure; a profile selects its capability with -m.
-addopts = "--strict-config --strict-markers -m 'not (cluster or database or native or browser or destructive or multi_node or soak)'"
+addopts = "--strict-config --strict-markers -m 'not (cluster or database or image or browser or destructive or multi_node or soak)'"
 markers = [
     "unit: no external service or cluster",
     "integration: a real dependency, image or process boundary",
     "e2e: the Helm-installed system",
     "cluster: requires a disposable cluster",
     "database: requires a disposable PostgreSQL fixture",
-    "native: requires native runtime artifacts",
+    "image: requires a built runtime image",
     "browser: requires a real browser",
     "security: verifies an authorization or isolation boundary",
     "destructive: requires exclusive disposable infrastructure",

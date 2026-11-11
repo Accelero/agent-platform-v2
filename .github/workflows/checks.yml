@@ -1,15 +1,22 @@
 name: Checks
 
+# Each step is one test group: `tests.run <component> <level>` runs the same
+# group locally. Every image is built once, by the `images` job; the jobs that
+# need one test exactly that build. Those jobs, the slowest, run on main and on
+# release tags, not on every pull request. A push to main also stores the image
+# layers in the build cache; every other run only reads them.
 'on':
   push:
     branches: [main]
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  checks:
+  tooling-chart-hermes-unit:
+    name: tooling, chart and hermes unit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -27,8 +34,6 @@ jobs:
       - run: uv run ruff check agent_platform tests
       - run: uv run ruff format --check agent_platform tests
       - run: uv run python -m agent_platform.privacy
-      - name: Verify collected and executed Python cases
-        run: uv run python -m tests.support.verification run python --output .local/verification/python.json
       - run: helm lint charts/agent-platform
       - name: Render manager deployment
         run: |
@@ -39,11 +44,19 @@ jobs:
           output.mkdir(parents=True)
           render_chart(output, ROOT / "charts/agent-platform")
           PY
+      - name: tooling unit
+        run: uv run python -m tests.run tooling unit
+      - name: tooling integration
+        run: uv run python -m tests.run tooling integration
+      - name: chart integration
+        run: uv run python -m tests.run chart integration
+      - name: hermes unit
+        run: uv run python -m tests.run hermes unit
       - name: Upload sanitized case reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: python-case-reports
+          name: tooling-case-reports
           path: |
             .local/verification/*.json
             .local/verification/*.xml
@@ -51,30 +64,13 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  hermes-manager:
+  manager-gateway-dashboard-worker:
+    name: manager, gateway, dashboard and worker
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    defaults:
-      run:
-        working-directory: services/hermes-manager
-    services:
-      postgres:
-        image: postgres@sha256:2a0d0fe14825b0939f78a8cad5cd4e6aa68bf94d0e5dd96e24b6d23af4315545
-        env:
-          POSTGRES_USER: hermes_test
-          POSTGRES_DB: hermes_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --label agent-platform.io/fixture=personal-hermes-postgres
-          --health-cmd "pg_isready -U hermes_test -d hermes_test"
-          --health-interval 5s --health-timeout 3s --health-retries 10
+    timeout-minutes: 45
     env:
-      DATABASE_URL: postgres://hermes_test@127.0.0.1:5432/hermes_test
       # Hosted runners have limited free disk. Incremental caches and full debug
-      # info for every test profile filled it on main, and the verifier then
-      # reported 132 failed cases while the disk was nearly full.
+      # info for every test profile filled it.
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
@@ -82,10 +78,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Free runner disk before the Rust build
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
-          df -h /
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -93,44 +86,40 @@ jobs:
           node-version-file: services/hermes-manager/ui/.node-version
           cache: npm
           cache-dependency-path: services/hermes-manager/ui/package-lock.json
-      - name: Build and check the dashboard against its contract
-        working-directory: services/hermes-manager/ui
-        run: |
-          npm ci --ignore-scripts
-          npm run check:generated
-          npm run check:schemas
-          npm run format:check
-          npm test
-          npm run build
-      - name: Test the dashboard in Chromium
-        working-directory: services/hermes-manager/ui
-        run: |
-          npx --no-install playwright install --with-deps chromium
-          npm run test:e2e
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
           python-version: '3.14'
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: 'v3.22.1'
       - run: uv sync --locked
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Verify collected and executed Rust workspace cases
-        working-directory: .
-        run: uv run python -m tests.support.verification run rust --output .local/verification/rust.json
-      - name: Abort the API process around a commit
-        working-directory: .
-        run: uv run python -m tests.support.verification run rust-faults --output .local/verification/rust-faults.json
-      - name: Check the built dashboard under the real authentication and CSP
-        working-directory: .
-        run: MANAGER_UI_DIST="$PWD/services/hermes-manager/ui/dist" uv run python -m tests.support.verification run rust-browser --output .local/verification/rust-browser.json
-      - name: Test the controller with a disposable Kubernetes API server
-        working-directory: .
-        run: uv run python -m tests.personal_hermes.kubernetes --postgres-container '${{ job.services.postgres.id }}'
+      - name: cargo fmt
+        working-directory: services/hermes-manager
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        working-directory: services/hermes-manager
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: manager unit
+        run: uv run python -m tests.run manager unit
+      - name: gateway unit
+        run: uv run python -m tests.run gateway unit
+      - name: dashboard unit
+        run: uv run python -m tests.run dashboard unit
+      - name: gateway integration
+        run: uv run python -m tests.run gateway integration
+      - name: manager and worker integration
+        run: uv run python -m tests.run manager integration worker integration
+      - name: Install Chromium for the dashboard
+        working-directory: services/hermes-manager/ui
+        run: npx --no-install playwright install --with-deps chromium
+      - name: dashboard integration
+        run: uv run python -m tests.run dashboard integration
       - name: Upload sanitized case reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: rust-case-reports
+          name: manager-case-reports
           path: |
             .local/verification/*.json
             .local/verification/*.xml
@@ -138,42 +127,69 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  hermes-manager-image:
+  images:
+    name: build images
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # A cold build followed by the cache upload, for the two images in turn.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Free runner disk for the image builds
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
           python-version: '3.14'
       - run: uv sync --locked
-      - name: Build Rust and Vite from reviewed inputs without publication
-        run: uv run python -m agent_platform.manager_build
-      - name: Verify non-root runtime and production assets
+      - name: Set up BuildKit
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: provenance-add-gha=false
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 2
+      - name: Expose the cache runtime to the build command
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[name];
+              if (!value) throw new Error(`Missing GitHub cache runtime variable: ${name}`);
+              core.setSecret(value);
+              core.exportVariable(name, value);
+            }
+      - name: Build each image once
+        run: uv run python -m tests.run build --github-cache
+      - name: Verify the manager image runs non-root with its production assets
         run: |
           docker run --rm --network none --read-only --cap-drop ALL \
-            --entrypoint sh hermes-manager:local -c \
+            --entrypoint sh hermes-manager:e2e -c \
             'test "$(id -u)" = 10001 && test -s /usr/share/hermes-manager/ui/index.html && test -x /usr/local/bin/hermes-manager && test -x /usr/local/bin/hermes-gateway && ! command -v node'
+      - name: Save the images for the jobs that test them
+        shell: bash
+        run: |
+          # The builder's own copy of the layers is no longer needed.
+          docker buildx rm
+          mkdir images
+          docker save personal-hermes-native-test:local | zstd -T0 -3 -o images/personal-hermes-native-test_local.tar.zst
+          docker save hermes-manager:e2e | zstd -T0 -3 -o images/hermes-manager_e2e.tar.zst
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: images
+          path: images/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
-  hermes-personal-native-runtime:
+  hermes-integration:
+    name: hermes integration
+    needs: images
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    services:
-      postgres:
-        image: postgres@sha256:2a0d0fe14825b0939f78a8cad5cd4e6aa68bf94d0e5dd96e24b6d23af4315545
-        env:
-          POSTGRES_USER: hermes_test
-          POSTGRES_DB: hermes_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --label agent-platform.io/fixture=personal-hermes-postgres
-          --health-cmd "pg_isready -U hermes_test -d hermes_test"
-          --health-interval 5s --health-timeout 3s --health-retries 10
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -183,27 +199,56 @@ jobs:
           version: '0.13.0'
           python-version: '3.14'
       - run: uv sync --locked
-      - name: Install the pinned Rust toolchain for native commissioning
-        run: rustup toolchain install 1.99.1 --profile minimal
-      - name: Build reviewed context and verify non-root native startup and crash recovery
-        run: uv run python -m tests.personal_hermes.native_runtime --build
-      - name: Verify the installed image as collected cases
-        run: HERMES_TEST_NATIVE_IMAGE=personal-hermes-native-test:local uv run python -m tests.support.verification run python-native --output .local/verification/python-native.json
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          version: 'v3.22.1'
-      - name: Build the manager image for the end-to-end run
-        run: uv run python -m agent_platform.manager_build --tag hermes-manager:e2e
-      - name: Install the chart and reach real native instances through the gateway with Keycloak
-        run: uv run python -m tests.personal_hermes.kubernetes --native --postgres-container '${{ job.services.postgres.id }}'
-      - name: Upload sanitized adapter case reports
+          name: images
+          path: images
+      - name: Load the image under test
+        shell: bash
+        run: zstd -dc images/personal-hermes-native-test_local.tar.zst | docker load
+      - name: hermes integration
+        run: uv run python -m tests.run hermes integration --prebuilt
+      - name: Upload sanitized case reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: native-adapter-case-reports
+          name: hermes-case-reports
           path: |
             .local/verification/*.json
             .local/verification/*.xml
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+
+  e2e:
+    name: e2e part ${{ matrix.part }}
+    needs: images
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ['1', '2']
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Free runner disk for the cluster
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.0'
+          python-version: '3.14'
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: 'v3.22.1'
+      - run: uv sync --locked
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: images
+          path: images
+      - name: e2e
+        env:
+          HERMES_TEST_IMAGE_ARCHIVES: ${{ github.workspace }}/images
+        run: uv run python -m tests.run e2e --prebuilt --part ${{ matrix.part }}

@@ -226,21 +226,7 @@ pub async fn apply_objects(client: &Client, objects: &[Object]) -> Result<(), Cl
         if object.kind == "PersistentVolume" && timed(api.get_opt(&object.name)).await?.is_some() {
             continue;
         }
-        let applied = tokio::time::timeout(
-            CALL_DEADLINE,
-            api.patch(&object.name, &params, &Patch::Apply(&object.body)),
-        )
-        .await
-        .map_err(|_| ClusterError::Unavailable)?;
-        // Names what was refused. Never the server's message: a validation
-        // message can echo the values of the refused object.
-        if let Err(kube::Error::Api(status)) = &applied {
-            eprintln!(
-                "kubernetes_apply_refused kind={} name={} status={} reason={}",
-                object.kind, object.name, status.code, status.reason
-            );
-        }
-        applied.map_err(cluster_error)?;
+        timed(api.patch(&object.name, &params, &Patch::Apply(&object.body))).await?;
         if object.kind == "RoleBinding"
             && object.name == CONTROLLER_BINDING
             && let Some(namespace) = &object.namespace
@@ -661,6 +647,7 @@ mod tests {
                 });
             }
         });
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let url = format!("http://{address}").parse().unwrap();
         (Client::try_from(Config::new(url)).unwrap(), requests)
     }

@@ -200,7 +200,7 @@ unknown fields.
 - **Delegated work.** Subagents join a live parent lease (`parent_lease`) in
   the same environment.
 
-`tests/unit/test_managed_execution_selection.py` validates every plugin request
+`tests/unit/hermes/test_managed_execution_selection.py` validates every plugin request
 against the contract. Change the contract, the manager handler and the
 plugin together.
 

@@ -82,7 +82,7 @@ def test_a_requested_database_profile_fails_before_running_without_its_fixture(
             "-m",
             "tests.support.verification",
             "run",
-            "rust-faults",
+            "manager-integration",
             "--output",
             str(output),
         ],

@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from agent_platform.build import image_build
 from agent_platform.command import run
 from agent_platform.privacy import ROOT, context_files, policy
 
@@ -14,6 +15,11 @@ from agent_platform.privacy import ROOT, context_files, policy
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", default="hermes-manager:local")
+    parser.add_argument(
+        "--github-cache",
+        action="store_true",
+        help="use the build cache the main branch fills",
+    )
     args = parser.parse_args()
     definition = policy(ROOT)["development_contexts"]["hermes-manager"]
     files = context_files(ROOT, definition)
@@ -33,8 +39,7 @@ def main() -> None:
             path.write_bytes(content)
         run(
             [
-                "docker",
-                "build",
+                *image_build("hermes-manager", github_cache=args.github_cache),
                 "--file",
                 "services/hermes-manager/Dockerfile",
                 "--build-arg",
@@ -44,7 +49,7 @@ def main() -> None:
                 str(context),
             ],
             cwd=context,
-            timeout=1200,
+            timeout=1800,
             diagnostics=ROOT / ".local/hermes-manager-build.log",
         )
     print("Built the manager and protected dashboard image locally.")

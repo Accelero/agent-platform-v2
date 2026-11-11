@@ -72,7 +72,7 @@ multi-node storage placement belongs to G16). The private-registry scenario is n
 one node's hosts file, so it needs per-node registry configuration first.
 
 The installed-image checks of `native_runtime.py` are collected as 13
-`python-native` cases (`tests/integration/test_native_runtime.py`, mechanics in
+`hermes-integration` cases (`tests/integration/hermes/test_image_runtime.py`, mechanics in
 `tests/support/native.py`); the script stays until the scenarios below have
 collected equivalents; one end-to-end helper remains uncollected.
 
@@ -99,7 +99,7 @@ node, a private kubeconfig and no change to the default context. Its teardown is
 registered the moment the cluster exists and removes exactly the labelled nodes.
 It imports the pinned probe and platform images into every node by digest, waits
 for CoreDNS, and proves NetworkPolicy enforcement with a functional allow/deny
-probe before a case runs. The `python-cluster` and `python-destructive` profiles
+probe before a case runs. The `e2e` and `e2e-destructive` profiles
 require `HERMES_TEST_K3D` (k3d v5.9.0). The Rust adapter fixtures, the standalone
 runner and the restore's second cluster still use direct k3s containers, per-node
 registry mirror and authentication are not configured, and the Python DNS
@@ -192,7 +192,7 @@ workers cannot reset or pause each other's database/cluster.
 
 Current: `pyproject.toml` declares every direct host-side import (`requests`,
 `urllib3`, `websocket-client`, `cryptography`, `jsonschema`) at its locked
-version, and `tests/unit/test_dependencies.py` fails when a test or tooling
+version, and `tests/unit/tooling/test_dependencies.py` fails when a test or tooling
 module imports an undeclared third-party package. Local mutable image tags are
 imported into fixtures; there is no shared candidate/test configuration receipt,
 and browser tooling is not yet declared.
@@ -436,12 +436,12 @@ is no non-personal mode and no environment marker that selects one. Unit and
 in-image checks refuse missing policies, environment pins and shadow plugins;
 `runtime-init.py` refuses to start without the managed policy. Initializer
 tests cover interrupted/concurrent writes, symlinks and tampered receipts, and
-`tests/integration/test_personal_init_inputs.py` drives the initializer entry
+`tests/integration/hermes/test_personal_init_inputs.py` drives the initializer entry
 point with 68 malformed mounted inputs (context, configuration, key, input
 file kind and home root): each is refused with one fixed message that echoes
 nothing and leaves the home untouched, and the same inputs with one field
-corrected initialize. `tests/integration/test_native_runtime.py` (profile
-`python-native`) starts the built image as a Pod does and collects: refusal of
+corrected initialize. `tests/integration/hermes/test_image_runtime.py` (profile
+`hermes-integration`) starts the built image as a Pod does and collects: refusal of
 unowned authentication and execution without the mounted policies, managed
 precedence and the unredirectable policy directory, the terminal lock for every
 scope and backend, shadow-plugin refusal, profile overrides, native dashboard
@@ -743,7 +743,7 @@ specific properties. The tag workflow's first job, `gate`, requires passing
 `Checks` and `Cluster scenarios` runs for the exact tagged commit before the
 publishing job starts (`agent_platform/release_gate.py`, with the latest run per
 workflow deciding, a run for any other commit ignored, and anything not completed
-and successful refusing); `tests/unit/test_release_gate.py` covers the decision,
+and successful refusing); `tests/unit/tooling/test_release_gate.py` covers the decision,
 the page format of the API's answer, the workflow names, and that publication
 `needs` the gate. It does not yet compare the artifact digests those runs tested
 with the ones published, and the cluster scenarios are dispatched by hand. The
@@ -752,7 +752,7 @@ requires the chart and project versions in the tagged commit to equal the tag,
 while ordinary commits keep the `0.0.0` placeholder. That rule is now
 `agent_platform.release.verify_release_source` and `verify_placeholder_source`,
 called by the tag workflow before any login or publication, and
-`tests/unit/test_release_versions.py` covers the version grammar including
+`tests/unit/tooling/test_release_versions.py` covers the version grammar including
 `-dev.N`, the trigger pattern against it, each of chart and project being stale,
 the placeholder never being a release, and this tree being a placeholder tree or
 the exact release commit.
@@ -883,7 +883,7 @@ The Python/Rust baseline profiles and strict level/marker checks are
 implemented and described in the [execution ledger](../../tests/verification/README.md).
 A plain `uv run pytest -q` and the `python` profile select only tests that need
 no infrastructure; the capabilities `native`, `cluster` and `destructive` have
-their own `python-native`, `python-cluster` and `python-destructive` profiles,
+their own `hermes-integration`, `e2e` and `e2e-destructive` profiles,
 which fail when their input (`HERMES_TEST_NATIVE_IMAGE` or `HERMES_TEST_K3D`) is
 absent. The k3d profiles are dispatched by hand through
 `.github/workflows/cluster.yml` and are not a PR gate; the profiles retain the

@@ -1,6 +1,6 @@
 """The installed Hermes image, started as a Pod starts it: non-root, a read-only
 root, no network and only scoped mounts. The image under test is named by
-`HERMES_TEST_NATIVE_IMAGE` (the `python-native` profile)."""
+`HERMES_TEST_NATIVE_IMAGE` (the `hermes integration` group)."""
 
 import json
 import textwrap
@@ -18,7 +18,7 @@ from tests.support.native import (
 )
 from tests.support.ownership import Cleanup
 
-pytestmark = [pytest.mark.integration, pytest.mark.native]
+pytestmark = [pytest.mark.integration, pytest.mark.image]
 
 HEALTH = textwrap.dedent(
     """
@@ -141,7 +141,9 @@ def test_initialization_leaves_a_complete_receipt_in_the_kubelet_result_file(lay
 def test_a_second_initialization_keeps_the_home_and_reports_the_same_receipt(layout):
     layout.initialize()
     first = layout.result.read_bytes()
+    layout.hand_to("runner")
     (layout.root / "home/owner-memory.txt").write_text("owner fixture memory")
+    layout.hand_to("pod")
     layout.initialize()
     assert layout.result.read_bytes() == first
     assert (layout.root / "home/owner-memory.txt").read_text() == "owner fixture memory"

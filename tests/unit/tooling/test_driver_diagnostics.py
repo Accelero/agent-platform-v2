@@ -1,10 +1,12 @@
 """Failures of the cluster driver name what failed, never the output that could
 hold a credential, and stay bounded where they do show an error."""
 
+import socket
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import websocket
 
 from tests.personal_hermes import kubernetes as driver
 from tests.personal_hermes import native_e2e as e2e
@@ -53,3 +55,26 @@ def test_a_failed_fixture_command_names_no_output():
             driver.command(["docker", "inspect", "anything"])
     assert CANARY not in str(error.value)
     assert str(error.value) == "Disposable Kubernetes fixture command failed"
+
+
+def test_a_close_frame_disconnects_and_a_timeout_stays_connected():
+    local, server = socket.socketpair()
+    connection = websocket.WebSocket()
+    connection.sock, connection.connected = local, True
+    try:
+        e2e.closed_within(connection, 0.05)
+        assert connection.connected, "silence is not a close"
+        server.sendall(b"\x88\x00")
+        assert e2e.closed_within(connection, 5) < 5
+        assert not connection.connected
+    finally:
+        server.close()
+        local.close()
+
+
+def test_a_reset_connection_counts_as_closed():
+    connection = websocket.WebSocket()
+    connection.sock, connection.connected = socket.socket(), True
+    with patch.object(connection, "recv_data", side_effect=ConnectionResetError):
+        e2e.closed_within(connection, 5)
+    assert not connection.connected

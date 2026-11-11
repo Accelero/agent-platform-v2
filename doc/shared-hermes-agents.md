@@ -588,9 +588,9 @@ evidence exists.
 ### Phase 0: native login for several users
 
 **Verified:** SH-N01, SH-N02, SH-N04 and SH-N05 pass in the collected
-`python-native` profile, together with the supplemental provider-session cases.
+`hermes-integration` profile, together with the supplemental provider-session cases.
 
-The collected `tests/integration/test_native_shared.py` cases exercise the project
+The collected `tests/integration/hermes/test_login.py` cases exercise the project
 image with a disposable Keycloak and TLS relay for
 [SH-N01, SH-N02, SH-N04 and SH-N05](#native-runtime).
 
@@ -648,12 +648,12 @@ and revocation behavior are covered. Per-host gateway forwarding remains planned
 Owner pin removal, v2 context, init and run branches, rendering and managed configuration.
 
 **Verified:** SH-N01 to SH-N05, SH-I01 to SH-I03 and SH-C01 to SH-C03
-have collected tests. The rebuilt native image passed the 23-case native profile;
+have collected tests. The rebuilt native image passed the 23-case `hermes integration` group;
 the disposable k3s and native end-to-end runs passed with that image, including
 the compatibility check that platform routing is independent of native identity.
 
 **Gate:** rebuild the image with `tests.personal_hermes.native_runtime --build`, then
-SH-N01 to SH-N05 on the built image (the `python-native` profile);
+SH-N01 to SH-N05 on the built image (the `hermes integration` group);
 SH-I01 to SH-I03; SH-C01 to SH-C03; the k3s suite on disposable fixtures.
 
 ### Phase 5: gateway sessions and forwarding
@@ -692,7 +692,7 @@ scenarios marked **(S)**.
 
 ### Native runtime
 
-Level: integration, `tests/integration/test_native_shared.py` in the `python-native`
+Level: integration, `tests/integration/hermes/test_login.py` in the `hermes-integration`
 profile. Run the image with its real user, read-only root and rendered managed
 configuration, on an isolated network with a disposable Keycloak.
 
@@ -706,7 +706,7 @@ configuration, on an isolated network with a disposable Keycloak.
 
 ### Home initialization
 
-Level: integration, `tests/integration/test_personal_init.py`.
+Level: integration, `tests/integration/hermes/test_personal_init.py`.
 
 | ID | Scenario | Pass when |
 | --- | --- | --- |
@@ -779,7 +779,7 @@ with a fake resolver and fake instances, unless stated.
 | SH-C03 | Probe | Integration | The unchanged probe accepts a shared instance, and refuses an extra provider, password support and an open `/api/sessions` |
 | SH-H01 | Values | Integration, `test_manager_chart.py` | Strict schema; generated role configurations are the ones the Rust parsers load |
 | SH-H02 | Service | Integration | `loadBalancerClass`, annotations and ingress peers render as set; with defaults, the rendered output is unchanged |
-| SH-H03 | Inputs | Unit, `tests/unit/test_release.py` | `release-policy.json` no longer lists the removed pin files and the build still has the terminal selector; the privacy check passes |
+| SH-H03 | Inputs | Unit, `tests/unit/tooling/test_release.py` | `release-policy.json` no longer lists the removed pin files and the build still has the terminal selector; the privacy check passes |
 
 ### Dashboard
 

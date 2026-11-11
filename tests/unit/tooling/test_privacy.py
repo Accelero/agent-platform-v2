@@ -168,7 +168,7 @@ def test_example_email_and_digest_references_are_not_personal_data():
 
 def test_build_attestations_do_not_copy_the_github_event_payload():
     assert "--provenance=mode=min" in build.bake_arguments()
-    for name in ("release", "cache"):
+    for name in ("release", "checks"):
         workflow = yaml.safe_load(
             (build.ROOT / f".github/workflows/{name}.yml").read_text()
         )

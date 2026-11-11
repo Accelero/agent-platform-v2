@@ -7,43 +7,38 @@ profiles. It is a baseline inventory of existing examples. Full specification
 clause, actor, response, header and timing coverage remains tracked in
 [G03](../../doc/testing/gaps.md#g03--trace-executed-obligations-not-function-names).
 
-Run from the repository root with Python 3.14 and `uv sync --locked`:
+Run a group with `uv run python -m tests.run <component> <level>`; see
+[the test groups](../../doc/TESTING.md#test-groups). The verifier underneath takes
+one suite at a time, named `<component>-<level>`:
 
 ```bash
-uv run python -m tests.support.verification inventory python --output .local/verification/python-collection.json
-uv run python -m tests.support.verification inventory rust --output .local/verification/rust-collection.json
-uv run python -m tests.support.verification run python --output .local/verification/python.json
-HERMES_TEST_NATIVE_IMAGE=personal-hermes-native-test:local uv run python -m tests.support.verification run python-native --output .local/verification/python-native.json
-HERMES_TEST_K3D=/path/to/k3d PATH=$PATH:/path/to/helm uv run python -m tests.support.verification run python-cluster --output .local/verification/python-cluster.json
-HERMES_TEST_K3D=/path/to/k3d PATH=$PATH:/path/to/helm uv run python -m tests.support.verification run python-destructive --output .local/verification/python-destructive.json
-uv run python -m tests.support.verification run rust --output .local/verification/rust.json
-uv run python -m tests.support.verification run rust-faults --output .local/verification/rust-faults.json
-MANAGER_UI_DIST="$PWD/services/hermes-manager/ui/dist" uv run python -m tests.support.verification run rust-browser --output .local/verification/rust-browser.json
+uv run python -m tests.support.verification inventory manager-unit --output .local/verification/manager-unit-collection.json
+uv run python -m tests.support.verification run tooling-unit --output .local/verification/tooling-unit.json
 ```
 
-Python execution needs Helm on `PATH` for the chart cases. The `python` profile
-and a plain `uv run pytest -q` select only tests that need no infrastructure:
+Python execution needs Helm on `PATH` for the chart cases. A plain
+`uv run pytest -q` selects only tests that need no infrastructure:
 a test that needs a cluster, database, native image, browser or exclusive
-infrastructure carries that capability marker and belongs to the profile that
-provides it. `python-native` needs `HERMES_TEST_NATIVE_IMAGE` to name the image
-under test; `python-cluster` needs `HERMES_TEST_K3D` to name a k3d binary at the
+infrastructure carries that capability marker and belongs to the suite that
+provides it. `hermes-integration` needs `HERMES_TEST_NATIVE_IMAGE` to name the image
+under test; `e2e` needs `HERMES_TEST_K3D` to name a k3d binary at the
 pinned version, uses a three-node fixture for the network matrix and a separate single-node
 installed platform for acceptance/browser cases. The network fixture proves
 policy enforcement before its cases run; browser journeys also
 need Playwright's Chromium for the locked version (`uv run playwright install
-chromium`) and the NSS `certutil` tool. `python-destructive` runs the cases that break their platform on one of their own. All fail rather than skip
+chromium`) and the NSS `certutil` tool. `e2e-destructive` runs the cases that break their platform on one of their own. All fail rather than skip
 when their input is absent. Rust inventory needs
 the pinned toolchain and compiles test targets, then asks their actual libtest
 binaries for their collected names. Collection does not create infrastructure
 or need a running database, browser or Docker daemon. Rust execution needs the
 disposable PostgreSQL fixture in the
 [implementation guide](../../doc/personal-hermes/implementation.md#verification-commands).
-The browser profile also needs the production UI build, installed UI dependencies
+The `dashboard-integration` suite also needs the production UI build, installed UI dependencies
 and Playwright Chromium, as described in the
 [dashboard guide](../../doc/personal-hermes/dashboard.md).
 
-The native profile also collects the shared-agent Phase 0 prerequisites in
-`tests/integration/test_native_shared.py`. It builds a local derivative of the
+The `hermes integration` group also collects the shared-agent Phase 0 prerequisites in
+`tests/integration/hermes/test_login.py`. It builds a local derivative of the
 supplied image that restores only the digest-pinned upstream OIDC provider, and
 starts the pinned Keycloak on an internal Docker network with throwaway TLS.
 It publishes no ports and removes its labelled containers, network and test
@@ -55,9 +50,9 @@ gateway client and both clients revoked. They create no platform session and do
 not replace SH-N04's refresh, cross-host revocation and sign-in requirements.
 
 The existing `tests.personal_hermes.kubernetes` driver supplies disposable
-cluster prerequisites and runs `rust-cluster` and `rust-controller`. Invoking
+cluster prerequisites and runs the suites named with `--suite`. Invoking
 either profile directly requires its fixture environment; absent prerequisites
-fail. These Rust profiles use direct k3s by default; the driver also accepts `--k3d`.
+fail. These Rust suites use direct k3s by default; the driver also accepts `--k3d`.
 The independently collected E2E scenarios use the separate Python cluster and
 destructive profiles.
 

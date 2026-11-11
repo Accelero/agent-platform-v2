@@ -42,10 +42,53 @@ def command(args, timeout=30):
     return result.stdout
 
 
+def build_image(args):
+    """`docker build` of a fixture image; its log holds no secret, so a failure
+    shows the end of it."""
+    result = subprocess.run(
+        ["docker", "build", "--quiet", *args],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert result.returncode == 0, (
+        "building a fixture image failed: " + (result.stderr[-800:])
+    )
+
+
 WORKER_TAG = "hermes-next-worker:test"
 
 
-def import_image(identifier, tag, temporary, reuse=False):
+def image_source(tag):
+    """The command that writes the image's archive: CI's saved build, or Docker."""
+    directory = os.environ.get("HERMES_TEST_IMAGE_ARCHIVES")
+    if directory:
+        name = tag.replace("/", "_").replace(":", "_") + ".tar.zst"
+        if (Path(directory) / name).exists():
+            return ["zstd", "-dc", str(Path(directory) / name)]
+    return ["docker", "save", tag]
+
+
+def stream_into_cluster(identifier, tag):
+    """Imports the image without an intermediate copy on either side."""
+    with subprocess.Popen(
+        image_source(tag), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    ) as reader:
+        try:
+            result = subprocess.run(
+                ["docker", "exec", "-i", identifier, "ctr", "images", "import", "-"],
+                stdin=reader.stdout,
+                capture_output=True,
+                timeout=900,
+            )
+            status = reader.wait(timeout=60)
+        finally:
+            reader.kill()
+    if result.returncode or status:
+        raise RuntimeError(f"importing {tag} into the cluster failed")
+
+
+def import_image(identifier, tag, reuse=False):
     """Imports a local Docker image into k3s; returns its digest reference.
 
     With `reuse`, an image the cluster already has under `tag` is kept, for
@@ -57,15 +100,7 @@ def import_image(identifier, tag, temporary, reuse=False):
         for line in listing.splitlines():
             if line.split()[0] == reference:
                 return reference.rsplit(":", 1)[0] + "@" + line.split()[2]
-    archive = Path(temporary) / (tag.replace("/", "_").replace(":", "_") + ".tar")
-    command(["docker", "save", "--output", str(archive), tag], timeout=600)
-    name = "/tmp/" + archive.name
-    command(["docker", "cp", str(archive), f"{identifier}:{name}"], timeout=600)
-    archive.unlink()
-    command(
-        ["docker", "exec", identifier, "ctr", "images", "import", name], timeout=900
-    )
-    command(["docker", "exec", identifier, "rm", name])
+    stream_into_cluster(identifier, tag)
     listing = command(["docker", "exec", identifier, "ctr", "images", "list"])
     digest = next(
         line.split()[2] for line in listing.splitlines() if line.split()[0] == reference
@@ -76,16 +111,13 @@ def import_image(identifier, tag, temporary, reuse=False):
     return pinned
 
 
-def import_worker_image(identifier, temporary, *, uid=1000, gid=1000):
+def import_worker_image(identifier, *, uid=1000, gid=1000):
     """Builds the requested worker identity and imports a digest reference."""
     tag = (
         WORKER_TAG if (uid, gid) == (1000, 1000) else f"hermes-worker-{uid}-{gid}:test"
     )
-    command(
+    build_image(
         [
-            "docker",
-            "build",
-            "--quiet",
             "--tag",
             tag,
             "--build-arg",
@@ -93,10 +125,9 @@ def import_worker_image(identifier, temporary, *, uid=1000, gid=1000):
             "--build-arg",
             f"HOST_GID={gid}",
             str(ROOT / "runtimes/agent-runtime"),
-        ],
-        timeout=600,
+        ]
     )
-    return import_image(identifier, tag, temporary)
+    return import_image(identifier, tag)
 
 
 FIXED_ENTRYPOINT = """#!/bin/sh
@@ -113,16 +144,12 @@ def import_fixed_worker_image(identifier, temporary):
     with (1000:1000) and never binds the account to the identity it runs as;
     returns its digest reference."""
     base, tag = "hermes-worker-fixed-base:test", "hermes-worker-fixed:test"
-    command(
+    build_image(
         [
-            "docker",
-            "build",
-            "--quiet",
             "--tag",
             base,
             str(ROOT / "runtimes/agent-runtime"),
-        ],
-        timeout=600,
+        ]
     )
     context = Path(temporary) / "fixed-worker"
     context.mkdir()
@@ -131,8 +158,8 @@ def import_fixed_worker_image(identifier, temporary):
         "RUN chmod 755 /entrypoint.sh\nUSER worker\n"
     )
     (context / "entrypoint.sh").write_text(FIXED_ENTRYPOINT)
-    command(["docker", "build", "--quiet", "--tag", tag, str(context)], timeout=600)
-    return import_image(identifier, tag, temporary)
+    build_image(["--tag", tag, str(context)])
+    return import_image(identifier, tag)
 
 
 def start_k3s(network, name, run):
@@ -263,9 +290,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--postgres-container", default="personal-hermes-manager-tests")
     parser.add_argument(
-        "--native",
-        action="store_true",
-        help="Also commission real cached native images inside Kubernetes",
+        "--suite",
+        action="append",
+        required=True,
+        help="a verification suite to run on this cluster; repeatable",
     )
     parser.add_argument(
         "--k3d",
@@ -355,50 +383,28 @@ def main():
             # The rewrite's adapter tests run in-process as the controller's
             # real ServiceAccount; no binary is needed. The worker test
             # needs the repository's terminal backend image in the cluster.
-            environment["HERMES_TEST_WORKER_IMAGE"] = import_worker_image(
-                identifier, temporary
-            )
+            environment["HERMES_TEST_WORKER_IMAGE"] = import_worker_image(identifier)
             environment["HERMES_TEST_K3S_CONTAINER"] = identifier
             environment["HERMES_TEST_POSTGRES_CONTAINER"] = args.postgres_container
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "tests.support.verification",
-                    "run",
-                    "rust-cluster",
-                    "--output",
-                    ".local/verification/rust-cluster.json",
-                ],
-                cwd=ROOT,
-                env=environment,
-                timeout=600,
-            )
-            assert result.returncode == 0, "Real Kubernetes adapter test failed"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "tests.support.verification",
-                    "run",
-                    "rust-controller",
-                    "--output",
-                    ".local/verification/rust-controller.json",
-                ],
-                cwd=ROOT,
-                env=environment,
-                timeout=600,
-            )
-            assert result.returncode == 0, "Controller process test failed"
-            print(
-                "PASS: server-side apply, admission and RBAC under the real "
-                "ServiceAccount, preconditioned delete, leader election, "
-                "controller aborts at every fault point"
-            )
-            if args.native:
-                from tests.personal_hermes.native_e2e import run_e2e
-
-                run_e2e(identifier, temporary, environment)
+            failed = []
+            for suite in args.suite:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "tests.support.verification",
+                        "run",
+                        suite,
+                        "--output",
+                        f".local/verification/{suite}.json",
+                    ],
+                    cwd=ROOT,
+                    env=environment,
+                    timeout=1200,
+                )
+                if result.returncode:
+                    failed.append(suite)
+            assert not failed, f"failed: {failed}"
 
 
 if __name__ == "__main__":

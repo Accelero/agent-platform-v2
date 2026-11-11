@@ -13,7 +13,7 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-SOURCE = Path(__file__).resolve().parents[2] / "runtimes/hermes/personal-init.py"
+SOURCE = Path(__file__).resolve().parents[3] / "runtimes/hermes/personal-init.py"
 
 
 def module():
@@ -345,7 +345,7 @@ def test_another_failure_leaves_no_code_and_clears_an_earlier_one(
 def test_the_refusal_codes_are_the_ones_the_manager_blocks_on(fixture):
     initializer = fixture[0]
     rust = (
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[3]
         / "services/hermes-manager/crates/hermes-core/src/domain/instances.rs"
     ).read_text()
     block = rust.split("pub const HOME_REFUSALS: &[&str] = &[", 1)[1].split("];", 1)[0]

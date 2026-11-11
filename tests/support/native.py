@@ -29,6 +29,7 @@ MOUNTS = [
     ("credentials", "/run/hermes/credentials"),
 ]
 READ_ONLY = {"owner", "credentials", "trust"}
+POD_IDENTITY = "1000:1000"
 
 
 def image():
@@ -83,6 +84,42 @@ def openssl_ca(directory: Path, target: Path):
     )
 
 
+# A running instance creates and removes files while the tree is walked; a file
+# that vanished needs no owner. Any other failure is one.
+GIVE = (
+    'test -e /target && { errors=$(chown -R "$0" /target 2>&1) || '
+    '! printf "%s\\n" "$errors" | grep -qv "No such file or directory"; }'
+)
+
+
+def give_to(path: Path, identity: str):
+    """Changes owner through a root container: a runner with another UID cannot."""
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "sh",
+            "--mount",
+            f"type=bind,src={path},dst=/target",
+            image(),
+            "-c",
+            GIVE,
+            identity,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode:
+        raise CommandFailed(f"chown {identity} failed: {result.stderr[-400:]}")
+
+
 class Layout:
     """The mounted directories of one instance, owned by the data identity."""
 
@@ -90,12 +127,7 @@ class Layout:
         self.root = directory
         directory.chmod(0o755)
         for part in ["home", "workspace", "owner", "init", "credentials", "trust"]:
-            # The Pod's UID writes only home and workspace. The runner may not chown
-            # to UID 1000, so those two are opened to every user instead, and the
-            # rest stays owned by the runner.
-            path = directory / part
-            path.mkdir(mode=0o755)
-            path.chmod(0o777 if part in {"home", "workspace"} else 0o755)
+            (directory / part).mkdir(mode=0o755)
         self.context = {
             "schemaVersion": 1,
             "installationId": str(uuid.uuid4()),
@@ -139,8 +171,10 @@ class Layout:
         # Kubelet projects a writable file at terminationMessagePath: exercise
         # the actual bind-mount EBUSY behaviour, not an ordinary file.
         self.result = directory / "init-result.json"
-        self.result.touch()
-        self.result.chmod(0o666)
+        self.result.touch(mode=0o644)
+        # As in production, what the Pod writes belongs to its UID.
+        for path in (directory / "home", directory / "workspace", self.result):
+            give_to(path, POD_IDENTITY)
 
     def write_managed(self):
         (self.root / "trust/config.yaml").write_text(json.dumps(self.managed))
@@ -151,29 +185,8 @@ class Layout:
         The Pod writes its files as UID 1000, and a runner with another UID can
         neither edit nor read them. A root helper container makes the change.
         """
-        identity = f"{os.getuid()}:{os.getgid()}" if owner == "runner" else "1000:1000"
-        subprocess.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--user",
-                "0:0",
-                "--entrypoint",
-                "chown",
-                "--mount",
-                f"type=bind,src={self.root / 'home'},dst=/target",
-                image(),
-                "-R",
-                identity,
-                "/target",
-            ],
-            check=True,
-            capture_output=True,
-            timeout=120,
-        )
+        identity = f"{os.getuid()}:{os.getgid()}" if owner == "runner" else POD_IDENTITY
+        give_to(self.root / "home", identity)
 
     def common(self):
         """Arguments every container of the instance shares."""

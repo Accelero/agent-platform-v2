@@ -28,7 +28,8 @@ import tempfile
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from html import unescape
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,6 +86,9 @@ KEYCLOAK_IMAGE = (
 )
 MANAGER_IMAGE = "hermes-manager:e2e"
 HERMES_IMAGE = "personal-hermes-native-test:local"
+REGISTRY_PROXY_IMAGE = (
+    "python@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90"
+)
 NODE_PORTS = {"keycloak": 30843, "gateway": 30443, "admin": 30444}
 # Exact Keycloak subjects, fixed in the imported realm.
 SUBJECTS = {
@@ -96,6 +100,9 @@ SUBJECTS = {
     "frank": "00000000-0000-4000-8000-0000000000f0",
 }
 READY_TIMEOUT = 900
+# Requests equal limits, so these fix how many instances fit on the node. Two
+# owners run throughout and each scenario adds at most one, on a 2-CPU runner.
+HERMES_RESOURCES = {"cpuMillis": 350, "memoryMib": 1024}
 HERE = Path(__file__).resolve().parent
 # The in-cluster fake model (fake_model.py) every assistant instance uses.
 MODEL_URL = "http://fake-model.model.svc.cluster.local:8080/v1"
@@ -651,6 +658,16 @@ class Admin:
     def phase(self, instance_id):
         return self.call("GET", f"/api/v1/instances/{instance_id}").json()
 
+    def release(self, receipt):
+        """Stops a finished scenario's instance, returning its CPU and memory."""
+        self.set_access(receipt["assignmentId"], "suspended")
+        wait(
+            lambda: self.phase(receipt["instanceId"])["phase"] == "retained",
+            300,
+            "a finished scenario's instance did not stop",
+            interval=2,
+        )
+
 
 def keycloak_login(session, page, username, password):
     """Submits Keycloak's login form from `page`; follows to the end."""
@@ -869,11 +886,15 @@ def closed_within(connection, seconds):
     connection.settimeout(seconds)
     try:
         while True:
-            frame = connection.recv()
-            if frame in ("", b"", None):
+            opcode, _data = connection.recv_data()
+            if opcode == websocket.ABNF.OPCODE_CLOSE:
                 break
+    except websocket.WebSocketTimeoutException:
+        return time.monotonic() - started
     except websocket.WebSocketException, OSError:
         pass
+    # The client still reports `connected` after a close frame or a reset.
+    connection.shutdown()
     return time.monotonic() - started
 
 
@@ -1132,20 +1153,18 @@ def run_e2e(identifier, temporary, environment):
     worker = environment.get("HERMES_TEST_WORKER_IMAGE")
     if not worker:
         worker = (
-            import_image(identifier, WORKER_TAG, temporary, reuse)
+            import_image(identifier, WORKER_TAG, reuse)
             if reuse
-            else import_worker_image(identifier, temporary)
+            else import_worker_image(identifier)
         )
     images = {
-        "manager": import_image(identifier, MANAGER_IMAGE, temporary, reuse),
-        "hermes": import_image(identifier, HERMES_IMAGE, temporary, reuse),
+        "manager": import_image(identifier, MANAGER_IMAGE, reuse),
+        "hermes": import_image(identifier, HERMES_IMAGE, reuse),
         "worker": worker,
     }
     command(["docker", "pull", "--quiet", KEYCLOAK_IMAGE], timeout=900)
     command(["docker", "tag", KEYCLOAK_IMAGE, "hermes-e2e-keycloak:pinned"])
-    keycloak_image = import_image(
-        identifier, "hermes-e2e-keycloak:pinned", temporary, reuse
-    )
+    keycloak_image = import_image(identifier, "hermes-e2e-keycloak:pinned", reuse)
 
     run = environment["HERMES_TEST_RUN"]
     database = "hermes_e2e_" + uuid.uuid4().hex[:8]
@@ -1268,27 +1287,34 @@ def e2e_on_database(
             shared_domain=SHARED_DOMAIN,
         )
         run = environment["HERMES_TEST_RUN"]
-        with private_registry(
-            identifier, network, temporary, passwords["registry"], run
-        ) as image:
+        part = environment.get("HERMES_TEST_PART")
+        registry = (
+            nullcontext()
+            if part == "1"
+            else private_registry(
+                identifier, network, temporary, passwords["registry"], run
+            )
+        )
+        with registry as image:
             images["private"] = image
             assignments = published_versions_commission_ready_instances_from_the_api(
-                identifier, images, ca, passwords, postgres
+                identifier, images, ca, passwords, postgres, part
             )
-        restore_on_a_new_cluster_rebinds_without_adoption(
-            identifier,
-            postgres,
-            network,
-            database,
-            temporary,
-            tls,
-            ca,
-            passwords,
-            owned,
-            assignments,
-            run,
-            shared_domain=SHARED_DOMAIN,
-        )
+        if part != "1":
+            restore_on_a_new_cluster_rebinds_without_adoption(
+                identifier,
+                postgres,
+                network,
+                database,
+                temporary,
+                tls,
+                ca,
+                passwords,
+                owned,
+                assignments,
+                run,
+                shared_domain=SHARED_DOMAIN,
+            )
 
 
 def commission(identifier, images, ca, passwords):
@@ -1312,7 +1338,7 @@ def commission(identifier, images, ca, passwords):
     base = {
         "schemaVersion": 2,
         "image": images["hermes"],
-        "resources": {"cpuMillis": 1000, "memoryMib": 2048},
+        "resources": HERMES_RESOURCES,
         "home": {"source": "local", "sizeGib": 1},
         "mounts": {"workspace": {"mountPath": "/workspace"}},
         "defaultVolumes": {"workspace": {"source": "local", "sizeGib": 1}},
@@ -1339,7 +1365,7 @@ def commission(identifier, images, ca, passwords):
         "sshContract": "managed-ssh-v2",
         "uid": 1000,
         "gid": 1000,
-        "resources": {"cpuMillis": 500, "memoryMib": 512, "ephemeralGib": 1},
+        "resources": {"cpuMillis": 150, "memoryMib": 256, "ephemeralGib": 1},
     }
     backend = admin.publish(
         "terminal-backends",
@@ -1542,8 +1568,15 @@ def shared_agent_direct_and_group_members_reach_one_workspace(platform):
         assert browser.native_sign_in()["user_id"] == SUBJECTS[browser.name]
     first, second = members[0].rpc(), members[1].rpc()
     try:
-        _, first_reply = converse(first, "first shared fixture turn", 240)
-        _, second_reply = converse(second, "second shared fixture turn", 240)
+        # Concurrently: the server drops a socket that does not answer its
+        # keepalive pings, and this client answers only while it is reading.
+        with ThreadPoolExecutor(max_workers=2) as turns:
+            first_turn = turns.submit(converse, first, "first shared fixture turn", 240)
+            second_turn = turns.submit(
+                converse, second, "second shared fixture turn", 240
+            )
+            _, first_reply = first_turn.result(timeout=250)
+            _, second_reply = second_turn.result(timeout=250)
         assert first_reply == second_reply == "hello from e2e"
         assignments = admin.call("GET", "/api/v1/assignments?limit=100").json()["items"]
         assert not any(
@@ -1642,88 +1675,100 @@ def shared_agent_direct_and_group_members_reach_one_workspace(platform):
 
 
 def published_versions_commission_ready_instances_from_the_api(
-    identifier, images, ca, passwords, postgres
+    identifier, images, ca, passwords, postgres, part=None
 ):
+    """The scenarios in order. `part` runs one half on its own commissioned
+    platform; the log and credential checks run in both, over what each did."""
     state = commission(identifier, images, ca, passwords)
     admin, assignments = state.admin, state.assignments
     template, terminal = state.template, state.terminal
     versions, worker = state.versions, state.worker
+    checked = assignments
 
-    a_missing_static_directory_blocks_without_a_substitute(
-        identifier, admin, template, terminal
-    )
-    owners_share_a_static_folder(identifier, admin, assignments, template, terminal)
-    two_owners_reach_their_own_native_instances_through_the_gateway(
-        identifier, admin, ca, passwords, assignments
-    )
-    a_hermes_without_browser_traffic_acquires_a_terminal_backend(
-        identifier, admin, assignments
-    )
-    chat_settings_and_the_admin_secret_reach_only_the_referencing_instance(
-        identifier, admin, ca, passwords, assignments
-    )
-    uploads_reach_only_the_owners_private_home(
-        identifier, admin, ca, passwords, assignments
-    )
-    a_cron_job_fires_without_browser_traffic_and_acquires_a_terminal(
-        identifier, admin, ca, passwords, assignments
-    )
-    bobs_backends_share_the_workspace_and_idle_workers_retire(
-        identifier, admin, assignments
-    )
-    a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
-        identifier, admin, template, worker
-    )
-    a_backend_change_keeps_active_leases_and_drains_superseded_environments(
-        identifier, admin, assignments, worker, versions
-    )
-    a_private_backend_pulls_with_its_registry_secret_and_reports_failures(
-        identifier, admin, assignments, images, passwords, worker
-    )
-    platform_routing_ignores_native_identity_and_refuses_foreign_tickets(ca, passwords)
-    an_email_change_keeps_ownership_and_the_old_email_gets_nothing(
-        ca, passwords, assignments
-    )
-    outages_and_provider_revocation_fail_closed_within_the_bounds(
-        identifier, postgres, admin, ca, passwords, assignments
-    )
-    suspension_closes_open_connections_and_reenabling_keeps_data(
-        identifier, admin, ca, passwords, assignments
-    )
-    shared = shared_agent_direct_and_group_members_reach_one_workspace(
-        SimpleNamespace(
-            admin=admin,
-            ca=ca,
-            passwords=passwords,
-            state=state,
-            shared_hosts=tuple(f"{label}.{SHARED_DOMAIN}" for label in SHARED_LABELS),
-            identifier=identifier,
+    if part != "2":
+        a_missing_static_directory_blocks_without_a_substitute(
+            identifier, admin, template, terminal
         )
-    )
+        owners_share_a_static_folder(identifier, admin, assignments, template, terminal)
+        two_owners_reach_their_own_native_instances_through_the_gateway(
+            identifier, admin, ca, passwords, assignments
+        )
+        a_hermes_without_browser_traffic_acquires_a_terminal_backend(
+            identifier, admin, assignments
+        )
+        chat_settings_and_the_admin_secret_reach_only_the_referencing_instance(
+            identifier, admin, ca, passwords, assignments
+        )
+        uploads_reach_only_the_owners_private_home(
+            identifier, admin, ca, passwords, assignments
+        )
+        a_cron_job_fires_without_browser_traffic_and_acquires_a_terminal(
+            identifier, admin, ca, passwords, assignments
+        )
+        bobs_backends_share_the_workspace_and_idle_workers_retire(
+            identifier, admin, assignments
+        )
+        a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
+            identifier, admin, template, worker
+        )
+        a_backend_change_keeps_active_leases_and_drains_superseded_environments(
+            identifier, admin, assignments, worker, versions
+        )
+        # Compares the histories of the chats above.
+        platform_routing_ignores_native_identity_and_refuses_foreign_tickets(
+            ca, passwords
+        )
+        print(
+            "PASS: chart install with operator Jobs; two owners commissioned and "
+            "reached through the gateway with Keycloak; native realm login; denial "
+            "without assignment or enrollment; a missing static directory blocks, "
+            "then recovers; static folders shared with independent read-only mounts; "
+            "chat, settings precedence and the admin secret only where referenced; "
+            "uploads isolated per owner; a cron job fired without browser traffic "
+            "and acquired a terminal; a second backend with the private home only "
+            "there; idle workers retired; a backend change kept the active lease; "
+            "platform routing independent of native identity; foreign tickets refused"
+        )
+    shared = None
+    if part != "1":
+        a_private_backend_pulls_with_its_registry_secret_and_reports_failures(
+            identifier, admin, assignments, images, passwords, worker
+        )
+        an_email_change_keeps_ownership_and_the_old_email_gets_nothing(
+            ca, passwords, assignments
+        )
+        outages_and_provider_revocation_fail_closed_within_the_bounds(
+            identifier, postgres, admin, ca, passwords, assignments
+        )
+        suspension_closes_open_connections_and_reenabling_keeps_data(
+            identifier, admin, ca, passwords, assignments
+        )
+        shared = shared_agent_direct_and_group_members_reach_one_workspace(
+            SimpleNamespace(
+                admin=admin,
+                ca=ca,
+                passwords=passwords,
+                state=state,
+                shared_hosts=tuple(
+                    f"{label}.{SHARED_DOMAIN}" for label in SHARED_LABELS
+                ),
+                identifier=identifier,
+            )
+        )
+        checked = {**assignments, "shared": shared}
     only_the_controller_holds_kubernetes_credentials_and_logs_hold_no_secrets(
-        identifier, admin, ca, passwords, {**assignments, "shared": shared}
+        identifier, admin, ca, passwords, checked
     )
-    admin.set_access(shared["assignmentId"], "suspended")
-    print(
-        "PASS: shared agent grants, native identity, simultaneous WebSockets "
-        "and revocation"
-    )
-    print(
-        "PASS: chart install with operator Jobs; two owners commissioned and reached "
-        "through the gateway with Keycloak; native realm login; denial "
-        "without assignment or enrollment; a missing static directory blocks, then "
-        "recovers; static folders shared with independent read-only mounts; "
-        "chat, settings precedence and the "
-        "admin secret only where referenced; uploads isolated per owner; a cron "
-        "job fired without browser traffic and acquired a terminal; a second "
-        "backend with the private home only there; idle workers retired; a backend "
-        "change kept the active lease; a private registry with pull failures "
-        "reported; platform routing independent of native identity; foreign tickets "
-        "refused; an email change kept "
-        "ownership; outages and provider revocation failed closed; suspension "
-        "closed connections and drained a pending worker; data kept on re-enable; "
-        "only the controller holds cluster rights; no secret in any log"
-    )
+    if shared:
+        admin.set_access(shared["assignmentId"], "suspended")
+        print(
+            "PASS: a private registry with pull failures reported; an email "
+            "change kept ownership; outages and provider revocation failed closed; "
+            "suspension closed connections and drained a pending worker; data kept "
+            "on re-enable; shared agent grants, native identity, simultaneous "
+            "WebSockets and revocation"
+        )
+    print("PASS: only the controller holds cluster rights; no secret in any log")
     return assignments
 
 
@@ -1787,6 +1832,7 @@ def a_missing_static_directory_blocks_without_a_substitute(
         ),
         interval=5,
     )
+    admin.release(receipt)
 
 
 PLUGIN_PRELUDE = """
@@ -2171,6 +2217,7 @@ print(json.dumps(result))
         readonly,
     }
     assert all(pv["spec"]["accessModes"] == ["ReadWriteOnce"] for pv in shared)
+    admin.release(receipt)
 
 
 def namespaces(identifier):
@@ -2506,7 +2553,7 @@ def a_backend_identity_controls_its_workers_and_keeps_the_hermes_home_private(
     takes any identity and a specialized image bakes one; a custom image that
     ignores the identity it runs as fails."""
     with tempfile.TemporaryDirectory(prefix="hermes-other-identity-") as temporary:
-        baked = import_worker_image(identifier, temporary, uid=2000, gid=3000)
+        baked = import_worker_image(identifier, uid=2000, gid=3000)
         fixed = import_fixed_worker_image(identifier, temporary)
     folder = "other-user-" + uuid.uuid4().hex[:8]
     command(
@@ -2625,6 +2672,7 @@ else:
         if e["backend"]["id"] == bad_id
     ]
     assert failures == ["contract_failed"], failures
+    admin.release(receipt)
 
 
 CHANGE_SCRIPT = (
@@ -2808,6 +2856,7 @@ def private_registry(identifier, network, temporary, password, run):
         f"{RUN}={run}",
     ]
     command(["docker", "pull", "--quiet", REGISTRY_IMAGE], timeout=600)
+    command(["docker", "pull", "--quiet", REGISTRY_PROXY_IMAGE], timeout=600)
     with Cleanup() as cleanup:
         command(
             [
@@ -2844,10 +2893,10 @@ def private_registry(identifier, network, temporary, password, run):
                 "--volume",
                 f"{HERE / 'registry_proxy.py'}:/proxy/registry_proxy.py:ro",
                 "--entrypoint",
-                "/opt/hermes/.venv/bin/python",
+                "python",
                 "--publish",
                 "127.0.0.1::5000",
-                HERMES_IMAGE,
+                REGISTRY_PROXY_IMAGE,
                 "/proxy/registry_proxy.py",
             ]
         )
@@ -3432,11 +3481,11 @@ def restore_on_a_new_cluster_rebinds_without_adoption(
             check=True,
         )
         images = {
-            "manager": import_image(second, MANAGER_IMAGE, temporary),
-            "hermes": import_image(second, HERMES_IMAGE, temporary),
-            "worker": import_image(second, WORKER_TAG, temporary),
+            "manager": import_image(second, MANAGER_IMAGE),
+            "hermes": import_image(second, HERMES_IMAGE),
+            "worker": import_image(second, WORKER_TAG),
         }
-        keycloak_image = import_image(second, "hermes-e2e-keycloak:pinned", temporary)
+        keycloak_image = import_image(second, "hermes-e2e-keycloak:pinned")
         shared_hosts = (
             tuple(f"{label}.{shared_domain}" for label in SHARED_LABELS)
             if shared_domain
@@ -3620,6 +3669,11 @@ def main():
     parser.add_argument(
         "--reuse", metavar="CONTAINER", help="Reset and reuse a kept fixture cluster"
     )
+    parser.add_argument(
+        "--part",
+        choices=("1", "2"),
+        help="Run one half of the scenarios, on its own cluster",
+    )
     args = parser.parse_args()
     # Both containers are injected into and reset: prove they are fixtures.
     require_fixture(args.postgres_container, POSTGRES)
@@ -3648,6 +3702,8 @@ def main():
             environment["HERMES_TEST_KUBECONFIG"] = str(path)
             environment["HERMES_TEST_POSTGRES_CONTAINER"] = args.postgres_container
             environment["HERMES_TEST_RUN"] = run
+            if args.part:
+                environment["HERMES_TEST_PART"] = args.part
             if args.keep:
                 environment["HERMES_TEST_KEEP"] = "1"
             if args.reuse:

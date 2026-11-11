@@ -71,11 +71,11 @@ cargo test --workspace --locked
 cargo test -p hermes-manager --features fault-injection --test process --locked
 ```
 
-CI runs these test commands through the
+CI runs the tests as groups, through the
 [collected-case verifier](../../tests/verification/README.md), which checks exact
-compiled identities and passing outcomes against the reviewed ledger. The
-production browser and cluster cases have separate required profiles. The
-commands above remain available for direct diagnosis.
+compiled identities and passing outcomes against the reviewed ledger. Run a group
+locally with, for example, `uv run python -m tests.run manager unit` from the
+repository root. The commands above remain available for direct diagnosis.
 
 The `fault-injection` build aborts the process at the fault point named by
 `HERMES_FAULT_POINT`; the process tests use it to kill the API around a

@@ -9,17 +9,29 @@ COPY contracts/hermes-manager/schemas/ /src/contracts/hermes-manager/schemas/
 COPY services/hermes-manager/ui/ ./
 RUN npm run generate && npm run check:schemas && npm test && npm run build
 
+# Empty crates with the real manifests: unchanged unless a dependency changes.
+FROM rust@sha256:a24e292b4af7bdee351a31d3a6379972a5652f0ea22a1b6d6883324ac4f5097c AS rust-manifests
+WORKDIR /plan
+COPY services/hermes-manager/Cargo.toml services/hermes-manager/Cargo.lock services/hermes-manager/rust-toolchain.toml ./
+COPY services/hermes-manager/crates/ ./crates/
+RUN find crates -type f ! -name Cargo.toml -delete \
+ && for crate in crates/*; do mkdir -p "$crate/src" && touch "$crate/src/lib.rs"; done \
+ && rm crates/hermes-manager/src/lib.rs \
+ && echo 'fn main() {}' > crates/hermes-manager/src/main.rs \
+ && echo 'fn main() {}' > crates/hermes-gateway/src/main.rs
+
 FROM rust@sha256:a24e292b4af7bdee351a31d3a6379972a5652f0ea22a1b6d6883324ac4f5097c AS rust
 WORKDIR /src/services/hermes-manager
-COPY services/hermes-manager/Cargo.toml services/hermes-manager/Cargo.lock services/hermes-manager/rust-toolchain.toml ./
+COPY --from=rust-manifests /plan/ ./
+# The dependencies alone, kept as a layer; the empty crates' output is discarded.
+RUN cargo build --release --locked --bin hermes-manager --bin hermes-gateway \
+ && rm -rf target/release/.fingerprint/hermes-* target/release/build/hermes-* \
+    target/release/deps/*hermes* target/release/hermes-*
 # The server embeds the definition schemas it validates against.
 COPY contracts/hermes-manager/schemas/ /src/contracts/hermes-manager/schemas/
 COPY services/hermes-manager/crates/ ./crates/
 # Only the two binaries; test features such as fault injection stay off.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/src/services/hermes-manager/target \
-    cargo build --release --locked --bin hermes-manager --bin hermes-gateway \
+RUN cargo build --release --locked --bin hermes-manager --bin hermes-gateway \
  && mkdir /out \
  && cp target/release/hermes-manager target/release/hermes-gateway /out/
 

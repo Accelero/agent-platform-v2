@@ -239,12 +239,11 @@ def test_a_plain_pytest_run_selects_exactly_the_default_python_profile():
             "ini_options"
         ]["addopts"]
     )
-    assert options[options.index("-m") + 1] == verify.PYTHON_PROFILES["python"]
+    assert options[options.index("-m") + 1] == verify.NO_INFRASTRUCTURE
 
 
 def test_infrastructure_capabilities_are_outside_the_default_profile():
-    capabilities = {"cluster", "database", "native", "browser", "destructive"}
+    capabilities = {"cluster", "database", "image", "browser", "destructive"}
     capabilities |= {"multi_node", "soak"}
-    assert all(name in verify.PYTHON_PROFILES["python"] for name in capabilities)
-    assert verify.PYTHON_PROFILES["python-native"] == "native"
-    assert verify.PROFILE_INPUTS["python-native"] == ("HERMES_TEST_NATIVE_IMAGE",)
+    assert all(name in verify.NO_INFRASTRUCTURE for name in capabilities)
+    assert verify.SUITES["hermes-integration"].inputs == ("HERMES_TEST_NATIVE_IMAGE",)
