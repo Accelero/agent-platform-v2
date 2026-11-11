@@ -42,6 +42,20 @@ def command(args, timeout=30):
     return result.stdout
 
 
+def build_image(args):
+    """`docker build` of a fixture image; its log holds no secret, so a failure
+    shows the end of it."""
+    result = subprocess.run(
+        ["docker", "build", "--quiet", *args],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert result.returncode == 0, (
+        "building a fixture image failed: " + (result.stderr[-800:])
+    )
+
+
 WORKER_TAG = "hermes-next-worker:test"
 
 
@@ -102,11 +116,8 @@ def import_worker_image(identifier, *, uid=1000, gid=1000):
     tag = (
         WORKER_TAG if (uid, gid) == (1000, 1000) else f"hermes-worker-{uid}-{gid}:test"
     )
-    command(
+    build_image(
         [
-            "docker",
-            "build",
-            "--quiet",
             "--tag",
             tag,
             "--build-arg",
@@ -114,8 +125,7 @@ def import_worker_image(identifier, *, uid=1000, gid=1000):
             "--build-arg",
             f"HOST_GID={gid}",
             str(ROOT / "runtimes/agent-runtime"),
-        ],
-        timeout=600,
+        ]
     )
     return import_image(identifier, tag)
 
@@ -134,16 +144,12 @@ def import_fixed_worker_image(identifier, temporary):
     with (1000:1000) and never binds the account to the identity it runs as;
     returns its digest reference."""
     base, tag = "hermes-worker-fixed-base:test", "hermes-worker-fixed:test"
-    command(
+    build_image(
         [
-            "docker",
-            "build",
-            "--quiet",
             "--tag",
             base,
             str(ROOT / "runtimes/agent-runtime"),
-        ],
-        timeout=600,
+        ]
     )
     context = Path(temporary) / "fixed-worker"
     context.mkdir()
@@ -152,7 +158,7 @@ def import_fixed_worker_image(identifier, temporary):
         "RUN chmod 755 /entrypoint.sh\nUSER worker\n"
     )
     (context / "entrypoint.sh").write_text(FIXED_ENTRYPOINT)
-    command(["docker", "build", "--quiet", "--tag", tag, str(context)], timeout=600)
+    build_image(["--tag", tag, str(context)])
     return import_image(identifier, tag)
 
 

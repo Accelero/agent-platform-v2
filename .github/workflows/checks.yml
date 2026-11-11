@@ -137,6 +137,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Free runner disk for the image builds
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: '0.13.0'
@@ -167,7 +169,10 @@ jobs:
             --entrypoint sh hermes-manager:e2e -c \
             'test "$(id -u)" = 10001 && test -s /usr/share/hermes-manager/ui/index.html && test -x /usr/local/bin/hermes-manager && test -x /usr/local/bin/hermes-gateway && ! command -v node'
       - name: Save the images for the jobs that test them
+        shell: bash
         run: |
+          # The builder's own copy of the layers is no longer needed.
+          docker buildx rm
           mkdir images
           docker save personal-hermes-native-test:local | zstd -T0 -3 -o images/personal-hermes-native-test_local.tar.zst
           docker save hermes-manager:e2e | zstd -T0 -3 -o images/hermes-manager_e2e.tar.zst
@@ -199,6 +204,7 @@ jobs:
           name: images
           path: images
       - name: Load the image under test
+        shell: bash
         run: zstd -dc images/personal-hermes-native-test_local.tar.zst | docker load
       - name: hermes integration
         run: uv run python -m tests.run hermes integration --prebuilt
