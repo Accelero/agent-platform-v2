@@ -84,9 +84,17 @@ def openssl_ca(directory: Path, target: Path):
     )
 
 
+# A running instance creates and removes files while the tree is walked; a file
+# that vanished needs no owner. Any other failure is one.
+GIVE = (
+    'test -e /target && { errors=$(chown -R "$0" /target 2>&1) || '
+    '! printf "%s\\n" "$errors" | grep -qv "No such file or directory"; }'
+)
+
+
 def give_to(path: Path, identity: str):
     """Changes owner through a root container: a runner with another UID cannot."""
-    subprocess.run(
+    result = subprocess.run(
         [
             "docker",
             "run",
@@ -96,18 +104,20 @@ def give_to(path: Path, identity: str):
             "--user",
             "0:0",
             "--entrypoint",
-            "chown",
+            "sh",
             "--mount",
             f"type=bind,src={path},dst=/target",
             image(),
-            "-R",
+            "-c",
+            GIVE,
             identity,
-            "/target",
         ],
-        check=True,
         capture_output=True,
+        text=True,
         timeout=120,
     )
+    if result.returncode:
+        raise CommandFailed(f"chown {identity} failed: {result.stderr[-400:]}")
 
 
 class Layout:
