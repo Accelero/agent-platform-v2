@@ -39,3 +39,21 @@ def test_a_fixture_costs_its_setup_once_per_part():
 def test_a_malformed_shard_is_refused(value):
     with pytest.raises(pytest.UsageError):
         parse(value)
+
+
+def test_the_shared_platform_and_the_destructive_pool_get_parts_of_their_own():
+    files = {
+        "shared-a": (500, {"platform"}),
+        "shared-b": (400, {"platform"}),
+        "breaks-a": (300, {"destructive_pool"}),
+        "breaks-b": (200, {"destructive_pool"}),
+        "matrix": (100, {"cluster"}),
+    }
+    for part in split(files, 3):
+        held = {name for file in part for name in files[file][1]}
+        assert not {"platform", "destructive_pool"} <= held, part
+
+
+def test_with_one_part_everything_still_runs():
+    files = {"shared": (10, {"platform"}), "breaks": (10, {"destructive_pool"})}
+    assert split(files, 1) == [{"shared", "breaks"}]

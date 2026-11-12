@@ -451,36 +451,56 @@ def node_port_service(name, namespace, selector, port, node_port):
     }
 
 
+# Every installed platform's routes, the active one last. Platforms use the same
+# hostnames, so one process resolves them for one platform at a time.
+ROUTES = []
+SYSTEM_GETADDRINFO = socket.getaddrinfo
+
+
+def resolve(host, port, *args, **kwargs):
+    if ROUTES:
+        node_ip, targets = ROUTES[-1]["node"], ROUTES[-1]["targets"]
+        target = targets.get((host, int(port) if port is not None else None))
+        if target is not None:
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    (node_ip, target),
+                )
+            ]
+    return SYSTEM_GETADDRINFO(host, port, *args, **kwargs)
+
+
 @contextmanager
 def routed(node_ip, shared_hosts=()):
-    """Resolves the fixture's hostnames to their node ports, for this process."""
+    """Resolves the fixture's hostnames to this node's ports, for this process,
+    until it ends or another platform's route is made active; yields the
+    route, which `activate` makes active again."""
     targets = {
         (KEYCLOAK, 8443): NODE_PORTS["keycloak"],
         (PUBLIC, 443): NODE_PORTS["gateway"],
         (ADMIN, 443): NODE_PORTS["admin"],
     }
     targets.update({(host, 443): NODE_PORTS["gateway"] for host in shared_hosts})
-    original = socket.getaddrinfo
-
-    def getaddrinfo(host, port, *args, **kwargs):
-        target = targets.get((host, int(port) if port is not None else None))
-        if target is None:
-            return original(host, port, *args, **kwargs)
-        return [
-            (
-                socket.AF_INET,
-                socket.SOCK_STREAM,
-                socket.IPPROTO_TCP,
-                "",
-                (node_ip, target),
-            )
-        ]
-
-    socket.getaddrinfo = getaddrinfo
+    route = {"node": node_ip, "targets": targets}
+    ROUTES.append(route)
+    socket.getaddrinfo = resolve
     try:
-        yield
+        yield route
     finally:
-        socket.getaddrinfo = original
+        ROUTES[:] = [other for other in ROUTES if other is not route]
+        if not ROUTES:
+            socket.getaddrinfo = SYSTEM_GETADDRINFO
+
+
+def activate(route):
+    """Makes an installed platform's route the one its hostnames resolve to."""
+    if not any(other is route for other in ROUTES):
+        raise RuntimeError("the platform's route has ended")
+    ROUTES[:] = [other for other in ROUTES if other is not route] + [route]
 
 
 def wait(condition, timeout, message, interval=3.0):

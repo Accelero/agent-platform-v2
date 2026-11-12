@@ -11,6 +11,7 @@ import time
 import pytest
 
 from tests.support import cluster as cluster_support
+from tests.support import system
 from tests.support.ownership import Cleanup
 
 
@@ -90,6 +91,16 @@ def reclaim(platform, timeout=180):
 
 
 @pytest.fixture(autouse=True)
+def routed_to_its_platform(request):
+    """Every platform answers to the same hostnames: a case reaches the one it
+    uses, whichever platform was installed or used last."""
+    for name in ("destructive_platform", "platform"):
+        if name in request.fixturenames:
+            system.activate(request.getfixturevalue(name).route)
+            break
+
+
+@pytest.fixture(autouse=True)
 def reclaimed(request):
     """Stops the instances a case created on the shared platform once it ends.
 
@@ -111,7 +122,6 @@ def chromium(platform, tmp_path_factory):
     """A real Chromium that trusts the fixture CA and reaches the platform's
     hostnames only; each case takes a context of its own."""
     from tests.support import browser as browser_support
-    from tests.support import system
 
     home = tmp_path_factory.mktemp("chromium-home")
     home.chmod(0o700)

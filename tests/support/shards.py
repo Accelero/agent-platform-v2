@@ -21,6 +21,9 @@ DURATIONS = Path(__file__).resolve().parents[1] / "e2e/durations.json"
 DEFAULT_CASE_SECONDS = 60
 # The setup each fixture costs once per part that uses it.
 SETUP_SECONDS = {"platform": 240, "destructive_pool": 240, "cluster": 150}
+# Fixtures that never share a part when there are parts enough: each is a whole
+# installed platform, and a CI runner holds one.
+EXCLUSIVE = ({"platform"}, {"destructive_pool"})
 
 
 def pytest_addoption(parser):
@@ -48,8 +51,15 @@ def split(files, count):
         new = fixtures - part["fixtures"]
         return part["seconds"] + seconds + sum(SETUP_SECONDS[name] for name in new)
 
+    def allowed(part, file):
+        """A part that holds one exclusive fixture takes no file needing another."""
+        held = [group for group in EXCLUSIVE if group & part["fixtures"]]
+        wanted = [group for group in EXCLUSIVE if group & files[file][1]]
+        return not held or all(group in held for group in wanted)
+
     for file in sorted(files, key=lambda name: (-files[name][0], name)):
-        part = min(parts, key=lambda candidate: cost(candidate, file))
+        candidates = [part for part in parts if allowed(part, file)] or parts
+        part = min(candidates, key=lambda candidate: cost(candidate, file))
         part["seconds"] = cost(part, file)
         part["fixtures"] |= files[file][1]
         part["files"].add(file)

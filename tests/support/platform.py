@@ -179,7 +179,7 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         )
     stack = ExitStack()
     cleanup.add("name routing", stack.close)
-    stack.enter_context(system.routed(node_ip, shared_hosts))
+    route = stack.enter_context(system.routed(node_ip, shared_hosts))
     system.wait(
         lambda: (
             requests.get(
@@ -223,4 +223,5 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         tls=tls,
         owned=owned,
         shared_hosts=shared_hosts,
+        route=route,
     )
