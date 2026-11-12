@@ -40,10 +40,20 @@ def person(platform, prefix, spec):
     ).json()
 
 
+def current(instance):
+    """Ready at the desired state: right after a change the phase still reads
+    `ready` from before it, while the Pod that is about to be replaced runs."""
+    return (
+        instance["phase"] == "ready"
+        and instance["observedGeneration"] == instance["desiredGeneration"]
+    )
+
+
 def ready(platform, receipt):
-    """Waits for the instance to be ready; returns its namespace."""
+    """Waits for the instance to be ready at its desired state; returns its
+    namespace."""
     scenarios.wait(
-        lambda: platform.admin.phase(receipt["instanceId"])["phase"] == "ready",
+        lambda: current(platform.admin.phase(receipt["instanceId"])),
         scenarios.READY_TIMEOUT,
         lambda: platform.admin.phase(receipt["instanceId"]),
         interval=5,

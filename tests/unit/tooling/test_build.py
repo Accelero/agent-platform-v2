@@ -83,12 +83,19 @@ def test_the_job_that_fills_the_cache_cannot_publish_packages():
 
 
 def test_a_release_publishes_the_builds_every_test_job_ran():
-    """`publish` waits for every other job of the run, builds nothing, and pushes
-    the archives the images job saved for the tests."""
+    """`publish` waits for every test job a tag runs, builds nothing, and pushes
+    the archives the images job saved for the tests. The cluster scenarios run
+    only when dispatched by hand."""
     workflow = yaml.safe_load((build.ROOT / ".github/workflows/checks.yml").read_text())
     jobs = workflow["jobs"]
     job = jobs["publish"]
-    assert set(job["needs"]) == set(jobs) - {"publish", "images"}
+    by_hand = {
+        name
+        for name, definition in jobs.items()
+        if definition.get("if") == "github.event_name == 'workflow_dispatch'"
+    }
+    assert by_hand == {"cluster-scenarios"}
+    assert set(job["needs"]) == set(jobs) - {"publish", "images"} - by_hand
     assert {"images"} <= {
         need for name in job["needs"] for need in [jobs[name].get("needs")] if need
     }

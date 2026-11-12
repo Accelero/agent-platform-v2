@@ -328,7 +328,19 @@
       "tests/e2e/test_unknown_resources.py::test_an_identifier_that_names_nothing_is_not_found_and_changes_nothing[withdrawTerminalBackend-malformed]": "e2e",
       "tests/e2e/test_unknown_resources.py::test_an_identifier_that_names_nothing_is_not_found_and_changes_nothing[withdrawTerminalBackend-unknown]": "e2e",
       "tests/e2e/test_unknown_resources.py::test_the_set_of_addressed_operations_is_the_contracts": "e2e",
-      "tests/e2e/test_worker_loss.py::test_a_worker_lost_mid_command_is_not_replayed_or_replaced_and_keeps_its_data": "e2e"
+      "tests/e2e/test_worker_loss.py::test_a_worker_lost_mid_command_is_not_replayed_or_replaced_and_keeps_its_data": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[replaceAssignmentGrants-stale]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[replaceAssignmentGrants-missing]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[updateAccessGroup-stale]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[updateAccessGroup-missing]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[deleteAccessGroup-stale]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[deleteAccessGroup-missing]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[addAccessGroupMember-stale]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[addAccessGroupMember-missing]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[removeAccessGroupMember-stale]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[removeAccessGroupMember-missing]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[updateAssignmentEndpoint-stale]": "e2e",
+      "tests/e2e/test_preconditions.py::test_a_stale_or_missing_precondition_is_refused_and_changes_nothing[updateAssignmentEndpoint-missing]": "e2e"
     },
     "e2e-destructive": {
       "tests/e2e/test_execution.py::test_a_backend_change_keeps_active_leases_and_drains_superseded_environments": "e2e",

@@ -741,7 +741,8 @@ scale promise. Keep external model/provider benchmarks optional and separate.
 Current: release unit tests mock build/publish commands, and image checks smoke
 specific properties. A version tag runs all of `Checks` on images its `images`
 job builds once, labelled with source, revision and declared version; the
-`publish` job `needs` every test job, including the cluster scenarios, and
+`publish` job `needs` every test job a tag runs (the cluster scenarios run
+only by hand) and
 pushes those same images after checking their labels name the tagged commit
 and version (`agent_platform.release.publish`). `tests/unit/tooling/test_build.py`
 and `test_release.py` cover that publication waits for every test job, builds
@@ -867,8 +868,8 @@ presence and a few JSON schema samples are insufficient completion criteria.
 
 Current: TESTING.md describes the implemented profile selection, direct-k3s
 and pytest/k3d fixtures, shared destructive platform pool and report contents.
-Checks runs the standalone native script on main and tags, and the collected
-pytest/k3d cases on tags and manual dispatch. Release publication waits for
+Checks runs the standalone native script on release tags and manual dispatch,
+and the collected pytest/k3d cases on manual dispatch only. Release publication waits for
 every test job of the tag's run. No scheduled extended/soak workflow or
 measured branch-coverage pipeline exists.
 
@@ -885,7 +886,7 @@ no infrastructure; the capabilities `native`, `cluster` and `destructive` have
 their own `hermes-integration`, `e2e` and `e2e-destructive` profiles,
 which fail when their input (`HERMES_TEST_NATIVE_IMAGE` or `HERMES_TEST_K3D`) is
 absent. The k3d profiles run in the `cluster scenarios` job of `Checks` on
-release tags and manual dispatch, not on pull requests. They do not implement
+manual dispatch only, not on pull requests or release tags. They do not implement
 the extended/soak profile, and the browser, database and multi-node
 capabilities have no profile of their own. TypeScript cases are not in the
 ledger.

@@ -51,6 +51,7 @@ from tests.personal_hermes.kubernetes import (
     ROOT,
     WORKER_TAG,
     command,
+    image_source,
     import_fixed_worker_image,
     import_image,
     import_worker_image,
@@ -2792,7 +2793,7 @@ def push_image(tag, base, repository, credentials):
     """Uploads a local image's linux/amd64 manifest and blobs through the
     registry API (Docker refuses plain HTTP pushes); returns its digest."""
     archive = subprocess.run(
-        ["docker", "save", tag], capture_output=True, timeout=600, check=True
+        image_source(tag), capture_output=True, timeout=600, check=True
     ).stdout
     bundle = tarfile.open(fileobj=io.BytesIO(archive))
 
@@ -3020,9 +3021,17 @@ def platform_routing_ignores_native_identity_and_refuses_foreign_tickets(ca, pas
         timeout=30,
     )
     assert foreign.status_code == 200 and foreign.json()["user_id"] == SUBJECTS["carol"]
-    bob_history = bob.get("/api/sessions").json()
-    carol_history = carol.get("/api/sessions").json()
-    assert bob_history != carol_history
+    # A turn of Bob's own, so the two histories differ whatever ran before.
+    # A history is compared by its sessions and their owners: a new session's
+    # title is written after its turn, so other fields move between reads.
+    bob.chat("routing")
+
+    def sessions(reply):
+        return [(item["id"], item["user_id"]) for item in reply.json()["sessions"]]
+
+    bob_history = sessions(bob.get("/api/sessions"))
+    carol_history = sessions(carol.get("/api/sessions"))
+    assert bob_history and bob_history != carol_history
     mixed = raw.get(
         f"https://{PUBLIC}/api/sessions",
         headers={
@@ -3031,7 +3040,7 @@ def platform_routing_ignores_native_identity_and_refuses_foreign_tickets(ca, pas
         timeout=30,
     )
     assert mixed.status_code == 200
-    assert mixed.json() == bob_history
+    assert sessions(mixed) == bob_history
     alone = raw.get(
         f"https://{PUBLIC}/api/auth/me",
         headers={"Cookie": cookie_header(carol, True), "Accept": "text/html"},

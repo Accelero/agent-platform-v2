@@ -35,6 +35,7 @@ STATE = (
     "/api/v1/templates?limit=100",
     "/api/v1/terminal-backends?limit=100",
     "/api/v1/administrators?limit=100",
+    "/api/v1/access-groups?limit=100",
 )
 ADDRESSED = [
     (operation, method, path)
@@ -59,6 +60,11 @@ def body(operation, platform):
         "editTemplateDraft": {"definition": template(platform)},
         "editTerminalBackendDraft": {"definition": backend(platform)},
         "updateAdministrator": {"active": True, "canManageAdministrators": False},
+        "replaceAssignmentGrants": {"grants": []},
+        "updateAccessGroup": {"displayName": "Nobody"},
+        "addAccessGroupMember": {
+            "identity": {"issuer": scenarios.ISSUER, "subject": "no-such-person"}
+        },
     }.get(operation, {} if operation != "deleteSecret" else None)
 
 
@@ -66,6 +72,7 @@ def filled(path, malformed):
     values = {
         "identityId": ("not-a-uuid", str(uuid.uuid4())),
         "assignmentId": ("not-a-uuid", str(uuid.uuid4())),
+        "groupId": ("not-a-uuid", str(uuid.uuid4())),
         "instanceId": ("not-a-uuid", str(uuid.uuid4())),
         "eventId": ("not-a-uuid", str(uuid.uuid4())),
         "catalogId": ("Bad_Name", "no-such-name"),
