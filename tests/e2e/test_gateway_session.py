@@ -19,11 +19,11 @@ import re
 import pytest
 import requests
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.security]
 
-BASE = f"https://{scenarios.PUBLIC}"
+BASE = f"https://{system.PUBLIC}"
 SESSION, PROOF = "__Host-hermes-platform", "__Host-hermes-platform-browser"
 HANDLE = re.compile(r"^[a-f0-9]{64}$")
 UNAUTHENTICATED = {"error": "invalid_identity_evidence"}
@@ -34,12 +34,12 @@ class Held:
     """One signed-in browser's platform cookies, replayed by hand."""
 
     def __init__(self, platform, name):
-        browser = scenarios.signed_in(platform.ca, name, platform.passwords)
+        browser = system.signed_in(platform.ca, name, platform.passwords)
         self.platform = platform
         self.cookies = {
             cookie.name: cookie.value
             for cookie in browser.session.cookies
-            if cookie.domain.lstrip(".") == scenarios.PUBLIC
+            if cookie.domain.lstrip(".") == system.PUBLIC
         }
         self.csrf = self.call("GET", "/_platform/me").json()["csrfToken"]
 
@@ -69,8 +69,8 @@ def test_a_session_reports_its_owner_and_its_csrf_token_and_nothing_else(platfor
     body = reply.json()
     assert set(body) == {"identity", "csrfToken"}
     assert body["identity"] == {
-        "issuer": scenarios.ISSUER,
-        "subject": scenarios.SUBJECTS["bob"],
+        "issuer": system.ISSUER,
+        "subject": system.SUBJECTS["bob"],
     }
     assert HANDLE.match(body["csrfToken"])
     # The token belongs to this session; nothing of the provider or of the

@@ -1,41 +1,84 @@
 # Testing
 
-The repository runs Rust, Python and TypeScript tests, plus disposable Kubernetes
-and browser fixtures. [SPEC.md](SPEC.md), [ARCH.md](ARCH.md) and the
+The repository has one pytest suite. Rust, TypeScript and browser tests keep
+their own runners (Cargo, Vitest, Playwright), and pytest runs them through
+thin wrappers, so one command and one marker expression select any test.
+[SPEC.md](SPEC.md), [ARCH.md](ARCH.md) and the
 [OpenAPI contracts](../contracts/hermes-manager/) define product behaviour.
 The [coverage assessment](testing/coverage.md) records the evidence and its
 limits; the [gap register](testing/gaps.md) holds test work still to do.
 
-The runnable commands are in the
-[implementation guide](personal-hermes/implementation.md#verification-commands),
-the [dashboard guide](personal-hermes/dashboard.md#frontend-development-and-checks) and the
-[case verifier guide](../tests/verification/README.md). These commands use
-fixtures, never deployment data or a deployment kubecontext.
+Tests use disposable fixtures only, never deployment data or a deployment
+kubecontext.
 
-## Evidence records
+## Running tests
 
-| Record | Contents | Enforcement |
-| --- | --- | --- |
-| [`TESTS.md`](../services/hermes-manager/TESTS.md) | Requirement, acceptance, bound and composite contract-operation rows; named tests, levels and status | Architecture tests compare row sets with the specification and contracts and check that named functions exist |
-| [`cases.json`](../tests/verification/cases.json) | Exact Python and compiled Rust test identities, proving levels and execution profiles; explicitly uncollected helpers | `tests.support.verification` compares actual collection and execution against the reviewed inventory |
+```bash
+uv run pytest                                   # no infrastructure or toolchain
+uv run pytest -m unit                           # every unit test, Rust and Vitest too
+uv run pytest -m "manager and integration"
+uv run pytest -m "manager or gateway or dashboard or worker"
+uv run pytest -m "hermes and image"
+uv run pytest -m e2e                            # the installed platform
+uv run pytest -m e2e --shard 2/5                # one of five balanced parts
+```
 
-A `pass` traceability row identifies cited examples. It is neither exhaustive
-clause coverage nor an execution receipt for a candidate. JSON and JUnit reports
-from the verifier record the outcomes of a particular profile run. The coverage
-assessment and gap register review these records rather than duplicating the
-case inventory.
+A plain `uv run pytest` runs every test that needs no Docker fixture, no
+cluster and no Rust or Node toolchain. A `-m` expression replaces that default
+selection. Rust and dashboard tests also run with their own tools in their
+service directories (`cargo test`, `npm test`), as the
+[manager guide](../services/hermes-manager/README.md) and the
+[dashboard guide](personal-hermes/dashboard.md#frontend-development-and-checks)
+describe.
 
-## Levels and ownership
+## Layout
 
-Tests are classified by the boundary they exercise. Real PostgreSQL, TLS, SSH,
-process, browser and Kubernetes tests are integrations even when they live in a
-Rust library test target.
+Unit and integration tests belong to their component and live with it.
+`tests/` holds what spans components: the end-to-end suite, shared fixtures,
+the pytest wrappers for other languages and the tests of the harness itself.
 
-| Level | Implementation | Boundary |
-| --- | --- | --- |
-| Unit | Cargo, pytest and Vitest | Pure validators, planners, state transitions, command decisions with fakes, configuration and UI logic |
-| Integration | Cargo and pytest; TypeScript Playwright for presentation workflows | Store contracts, real protocol listeners, process failures, runtime images, chart/render comparisons, admission/RBAC and production dashboard/CSP |
-| E2E | Independently collected pytest cases and the standalone platform script | Helm-installed manager, gateway, Hermes, workers, PostgreSQL and Keycloak, with a fake model and fixture registry |
+| Component | Marker | Unit | Integration |
+| --- | --- | --- | --- |
+| Manager API and controller | `manager` | Rust crate tests (`tests/services/test_manager.py`); contract checks in `contracts/hermes-manager/tests/` | Rust tests on PostgreSQL, real listeners and processes, and on a disposable k3s |
+| Gateway | `gateway` | `hermes-proxy` (`tests/services/test_gateway.py`) | Gateway, resolver client and TLS on PostgreSQL |
+| Dashboard | `dashboard` | Vitest and the generated-code checks (`tests/services/test_dashboard.py`) | Playwright workflows, and the production build under the manager's CSP |
+| Hermes image additions | `hermes` | `runtimes/hermes/tests/unit/` | `runtimes/hermes/tests/integration/`: the initializer, and the built image with real Keycloak login |
+| Worker image | `worker` | — | The worker on a disposable k3s (`tests/services/test_worker.py`) |
+| Chart | `chart` | — | `charts/tests/`: Helm render against the renderer |
+| Tooling | `tooling` | `agent_platform/tests/`, `tests/harness/` | Docker fixture ownership (`tests/harness/`) |
+
+`tests/e2e/` covers the whole installed system and carries no component
+marker. Upstream Hermes is used as released; only what the project changes in
+its image is tested.
+
+## Markers and collection rules
+
+Every test carries exactly one level marker: `unit` (no external service),
+`integration` (a real dependency, image or process boundary) or `e2e` (the
+Helm-installed system). Unit and integration tests belong to exactly one
+component; a test that lives with its component gets the marker from its
+location, and a wrapper names its own. Collection fails otherwise.
+
+Capability markers say what a test needs: `database`, `cluster`, `image`,
+`browser`, `destructive` (exclusive disposable infrastructure), `rust` and
+`node` (the toolchains). `security` marks authorization and isolation
+boundaries.
+
+A skipped, xfailed or xpassed test fails the run, and so does an empty
+selection: a test whose fixture is missing has not passed.
+
+A Rust wrapper case is one `cargo test` target. It passes only when Cargo
+succeeds, at least one Rust test ran and libtest ignored none: tests marked
+`#[ignore]` for needing a fixture run with `--include-ignored` where the
+fixture exists. A failure shows libtest's failure section, which names the
+Rust test.
+
+[`TESTS.md`](../services/hermes-manager/TESTS.md) maps requirement,
+acceptance, bound and contract-operation rows to named tests. The
+`hermes-architecture` traceability tests compare its row sets with the
+specification and contracts and check that every named test exists in the
+Rust sources or the Python test directories. A `pass` row identifies cited
+examples, not exhaustive clause coverage.
 
 One shared Rust contract suite runs against both the in-memory and PostgreSQL
 stores. Adapter-specific suites exercise other ports. There is no generic
@@ -43,87 +86,53 @@ conformance suite for every port. Finite planner state-grid and deterministic
 command-sequence tests exist; no `proptest`, fuzzing or measured branch-coverage
 pipeline is configured.
 
-## Test groups
+## Fixtures
 
-Tests are organized by component and level. `tests.run` runs any of these from
-the repository root, provisions what they need once per invocation, and reports
-one line per group, so a failure reads as `manager integration` or `e2e`:
+The session fixtures in `tests/support/fixtures.py` start when the first test
+that needs them runs and are removed at the end of the session:
 
-```bash
-uv run python -m tests.run manager unit
-uv run python -m tests.run manager integration worker integration
-uv run python -m tests.run manager
-uv run python -m tests.run e2e
-uv run python -m tests.run e2e --part 1
-uv run python -m tests.run all
-```
+| Fixture | Provides |
+| --- | --- |
+| `hermes_image`, `manager_image`, `worker_image` | The images under test, each built once from its reviewed release context (`tests/support/images.py`). With `--prebuilt`, the images already built or saved in `HERMES_TEST_IMAGE_ARCHIVES` are tested and nothing is built |
+| `postgres` | A disposable PostgreSQL published on loopback |
+| `kubernetes` | A direct single-server k3s next to that PostgreSQL, with the release worker imported, for the Rust cluster tests |
+| `ui_dependencies`, `ui_dist` | The dashboard's locked dependencies, installed with the pinned Node, and its production build |
 
-| Component | What it covers | Unit | Integration |
-| --- | --- | --- | --- |
-| `manager` | API and controller crates; published contracts | Cargo, pytest | PostgreSQL, processes, a disposable Kubernetes API |
-| `gateway` | `hermes-proxy`, `hermes-gateway`, gateway TLS | Cargo | PostgreSQL and real listeners |
-| `dashboard` | React and TypeScript in `services/hermes-manager/ui` | Vitest | Playwright, and the production build under the real CSP |
-| `hermes` | What the project adds to the upstream image | pytest | The built image, and real Keycloak login behaviour the design depends on |
-| `worker` | The `agent-runtime` image | — | The worker image on a disposable Kubernetes API |
-| `chart` | `charts/agent-platform` | — | Helm render against the renderer's output |
-| `tooling` | `agent_platform/` and the test harness | pytest | Docker ownership and the verifier's own runner |
+The end-to-end fixtures in `tests/e2e/conftest.py` use run-owned k3d clusters
+(`tests/support/cluster.py`). k3d v5.9.0 is named explicitly by
+`HERMES_TEST_K3D`, and changes to the default kubeconfig are disabled.
 
-`e2e` is one suite over everything: the Helm-installed platform on a disposable
-cluster. Upstream Hermes has no unit tests here; it is used as released, and
-what the project changes in its image is tested.
+- `cluster` has one server and two agents. It proves NetworkPolicy
+  enforcement with a working allowed connection and a denied connection
+  before handing the cluster to a case.
+- `platform` is the installed platform with two commissioned owners, on a
+  single-node cluster of its own, because its local static volumes and
+  dynamic storage must be mountable together on one node
+  (`tests/support/platform.py`, built from `tests/support/system.py`).
+- `destructive_platform` takes a platform from a pool that destructive cases
+  share in turn. After each case the pool checks health and replaces a failed
+  or unusable platform before another case takes it.
+- `chromium` is a real browser that trusts the fixture CA in a private NSS
+  database and reaches only the platform's hostnames through explicit resolver
+  rules; it disables Chromium's Local Network Access checks for the private
+  fixture address.
 
-`--part 1` and `--part 2` each run half of the `e2e` scenarios on a platform of
-their own, and CI runs them on two runners. The log and credential checks run in
-both parts.
+The non-destructive cases share one commissioned platform and create further
+assignments as needed. Teardown suspends the extra assignments to free Pods
+while keeping their data; the cases have no separate installation or database
+state. `HERMES_TEST_ORDER=reverse` reverses the collection order to show that
+cases do not depend on each other.
 
-Each group is backed by one or more verifier suites named `<component>-<level>`.
-A suite ending in `-cluster` needs a Kubernetes fixture, which `tests.run`
-provides. `e2e-destructive` needs a platform of its own.
+The restore case creates a second, direct-k3s cluster. It restores a
+PostgreSQL dump and an archive of static fixture storage, runs
+`rebind-cluster`, and checks identity/material retention and orphan reporting.
+It does not establish recovery of dynamic private-home data across
+provisioners. No live NFS fixture or multi-node acceptance run of the
+installed platform exists.
 
-`inventory` checks collection only. `run` also requires every reviewed case to
-pass and the underlying runner to exit successfully. Empty collection,
-missing/unexpected cases, wrong levels, skips, xfail/xpass and fixture failures
-fail the suite. Rust inventory compiles and lists test binaries without
-starting their external fixtures. Required execution inputs are checked before
-running a suite.
-
-A plain `uv run pytest -q` selects every Python test that needs no
-infrastructure. Every Python test has exactly one level marker; collection rejects
-missing or ambiguous levels. `pyproject.toml` registers capability markers and
-enables strict marker/configuration checks. Requirement/case markers are not
-comprehensively mapped.
-
-## Cluster fixtures
-
-There are two cluster execution paths:
-
-- `tests.personal_hermes.kubernetes` starts direct single-server k3s by default,
-  with a private temporary kubeconfig. It runs the Rust adapter/admission and
-  controller process profiles. Its optional `--k3d` path creates a k3d cluster.
-  `--native` then installs the chart and runs the sequential native scenario.
-- `tests/support/cluster.py` creates run-owned k3d clusters for pytest. The
-  session `cluster` fixture has one server and two agents and proves
-  NetworkPolicy enforcement with a working allowed connection and a denied
-  connection before handing the cluster to a case. The installed `platform`
-  fixture has a separate single-node cluster because its local static volumes
-  and dynamic storage must be mountable together on one node.
-
-Both paths pin the k3s image and keep kubeconfigs private. The pytest path
-requires k3d v5.9.0 explicitly through `HERMES_TEST_K3D` and disables changes to
-the default kubeconfig. Fixture images are built/imported locally or pulled
-from pinned references. Fixture hostnames use a generated CA. The real-browser
-helper trusts that CA in a private NSS database and uses explicit resolver
-rules; it disables Chromium's Local Network Access checks for the private
-fixture address.
-
-The restore helper creates a second direct-k3s cluster, including when called
-from a pytest case whose source platform uses k3d. It restores a PostgreSQL dump
-and an archive of static fixture storage, runs `rebind-cluster`, and checks
-identity/material retention and orphan reporting. It does not establish
-recovery of dynamic private-home data across provisioners. No live NFS fixture
-or multi-node acceptance run of the installed platform exists.
-
-## Fixture lifecycle and isolation
+Every cluster pins its k3s image and keeps its kubeconfig private. Fixture
+images are built and imported locally or pulled from pinned references.
+Fixture hostnames use a generated CA.
 
 `tests/support/ownership.py` checks resource kind and run labels before reset,
 injection or cleanup. Database cleanup checks run ownership comments. The
@@ -131,18 +140,13 @@ injection or cleanup. Database cleanup checks run ownership comments. The
 all registered cleanup actions even after a failure. Docker inspection failures
 are errors, never evidence that a resource is safe to remove.
 
-The non-destructive pytest cases share a commissioned platform and create
-additional assignments as needed. Teardown suspends extra assignments to free
-Pods while retaining data. They do not have separate installation/database state
-per case. `HERMES_TEST_ORDER=reverse` reverses collection order for diagnosis.
+## Splitting the end-to-end suite
 
-Destructive cases take turns on their own session platform pool. After each
-case the pool checks health and replaces a failed or unusable platform before
-another case takes it. This pool is separate from the non-destructive platform.
-The standalone native script has a sequential scenario order and shares its
-run's mutable state. It pauses its PostgreSQL fixture for an outage case, so
-only one such run may use that fixture at a time. `--keep` and `--reuse` support
-local diagnosis with verified fixture resources.
+`--shard K/N` (`tests/support/shards.py`) runs part K of N of the selected
+tests. Whole files go to one part, so a file's cases share that part's
+fixtures. The parts are balanced by the seconds per file recorded in
+`tests/e2e/durations.json`, plus the setup of each session fixture a part
+needs for the first time. Every runner computes the same split.
 
 ## Tests and proving boundaries
 
@@ -151,39 +155,37 @@ local diagnosis with verified fixture resources.
 | Commands and stores | Replay/conflict, stale revisions, concurrency, rollback, access changes, secret references, leases and controller state; memory and PostgreSQL share the contract cases |
 | Protocols | Administration, execution, resolver and gateway fixtures check declared responses and selected malformed headers/bodies, body bounds, authentication, CSRF and wrong-owner/wrong-interface refusals; complete operation/status/header coverage remains in G21 |
 | Storage and initialization | Approved roots, traversal, static sharing, read-only mounts, mount-path compatibility, dynamic claims, private-home isolation, retained state and interrupted initialization; live NFS, more permission variants and private-home restore remain gaps |
-| Worker identity | Domain range validation, backend UID/GID/fsGroup rendering, real SSH against the declared UID, a session refused on every login, worker/Hermes admission cases, and a native scenario in which the default image, a specialized image and an identity-ignoring custom image serve one backend-only folder |
+| Worker identity | Domain range validation, backend UID/GID/fsGroup rendering, real SSH against the declared UID, a session refused on every login, worker/Hermes admission cases, and a case in which the default image, a specialized image and an identity-ignoring custom image serve one backend-only folder |
 | Browser | TypeScript workflows use mocked APIs; the Rust production browser case uses real assets/CSP with fixture sessions; pytest browser cases use the installed chart and Keycloak |
 | Failures and bounds | API/controller fault injection, leader turnover, worker loss, provider/database outages and selected timing boundaries; no full interleaving, capacity or sustained soak claim |
 
-The standalone native script and pytest acceptance wrappers share scenario
-helpers. Pytest provides individual node IDs and reports for those wrappers;
-the standalone script reports aggregate progress and stops at its first failure.
 The [coverage assessment](testing/coverage.md) identifies the uncovered
 variants without treating helper existence as a passing result.
 
-## Reports and diagnostics
+## Reports
 
-Verifier reports contain source revision, dirty-tree status, catalogue digest,
-profile, start/end times and per-case outcomes. Python records each case's aggregate setup/call/teardown duration; Rust per-case
-durations are not measured. A sibling JUnit XML report
-is written for execution. Captured output, environments and failure bodies are
-omitted; unreviewed identities are hashed before reporting. CI uploads these
-reports with seven-day retention.
-
-These reports do not contain a complete tested artifact-digest manifest or
-exhaustive clause/actor/header/timing coverage. The standalone native run and
-TypeScript suites retain their own output; TypeScript identities are outside
-the reviewed case ledger. Timing cases have explicit waits and observation
-budgets, with incomplete production-boundary coverage recorded in G06.
+Pytest writes a JUnit XML report per CI job (`--junitxml`), with each case's
+outcome and duration; captured output is not included. CI uploads the reports
+with seven-day retention. A Rust wrapper case reports one outcome for its
+target; Rust per-test durations are not measured. The reports do not contain
+a tested artifact-digest manifest or exhaustive clause/actor/header/timing
+coverage. Timing cases have explicit waits and observation budgets, with
+incomplete production-boundary coverage recorded in G06.
 
 ## CI and releases
 
-| Workflow | Trigger and execution |
+| Job of `Checks` | Runs |
 | --- | --- |
-| `Checks` (`checks.yml`) | Pull requests run the fast groups; release tags and manual dispatch run every group. Pushes to main run no checks for now. Each image is built once by the `images` job, and the jobs that need it test that build. `e2e` runs in two parts on separate runners. Manual dispatch also runs `cluster scenarios` (the `e2e` and `e2e-destructive` profiles, including the network matrix and installed browser journeys) on the same builds |
-| `publish release` (job of `Checks`) | Version tags only, after every test job passed: verifies the version and that the tested images carry this commit and version, checks GHCR push access, pushes those images and then their chart, and creates the GitHub Release |
+| `tooling, chart and hermes` | Lint, privacy preflight, Helm lint and render, and `-m "(tooling or chart or hermes) and not image"` |
+| `manager, gateway, dashboard and worker` | `cargo fmt` and `clippy`, and `-m "manager or gateway or dashboard or worker"` |
+| `build images` | Each image once (`python -m tests.support.images`), labelled with the commit and version, saved as an archive for the jobs below |
+| `hermes image` | `-m "hermes and image" --prebuilt` on the saved Hermes image |
+| `e2e part 1`–`5` | `-m e2e --prebuilt --shard K/5` on the saved images |
+| `publish release` | Version tags only, after every test job passed: verifies the version and that the tested images carry this commit and version, checks GHCR push access, pushes those images and then their chart, and creates the GitHub Release |
 
-Changes are tested locally with `tests.run` before they are merged, and the release tag runs the suite again, so pushes to main run no checks. The cluster scenarios run only when dispatched by hand; they gate neither pull requests nor releases. There is no scheduled
-extended/NFS/soak workflow. A release publishes the images its own run tested;
-the publish job adds image and packaged-chart validation. G20 records the remaining artifact evidence; G22
-records the remaining profile and reporting work.
+Pull requests run the first two jobs. Release tags and manual dispatch run
+every job; only a tag publishes. Changes are tested locally before they are
+merged and the release tag runs the suite again, so pushes to main run no
+checks. There is no scheduled extended/NFS/soak workflow. A release publishes
+the images its own run tested. G20 records the remaining artifact evidence;
+G22 records the remaining profile and reporting work.

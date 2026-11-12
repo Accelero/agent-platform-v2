@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [
     pytest.mark.e2e,
@@ -91,8 +91,8 @@ def test_a_read_only_volume_refuses_writes_while_its_writable_sibling_accepts_th
         "/api/v1/assignments",
         {
             "identity": {
-                "issuer": scenarios.ISSUER,
-                "subject": scenarios.SUBJECTS["erin"],
+                "issuer": system.ISSUER,
+                "subject": system.SUBJECTS["erin"],
             },
             "spec": {
                 "access": "enabled",
@@ -110,9 +110,9 @@ def test_a_read_only_volume_refuses_writes_while_its_writable_sibling_accepts_th
             },
         },
     ).json()
-    scenarios.wait(
+    system.wait(
         lambda: admin.phase(receipt["instanceId"])["phase"] == "ready",
-        scenarios.READY_TIMEOUT,
+        system.READY_TIMEOUT,
         lambda: (
             f"the instance never became ready: {admin.phase(receipt['instanceId'])}"
         ),

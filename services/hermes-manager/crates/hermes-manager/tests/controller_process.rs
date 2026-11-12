@@ -4,7 +4,7 @@
 //! without regenerating material or recording status from a dead term.
 //!
 //! Needs `HERMES_TEST_KUBECONFIG` and a `fault-injection` build; run through
-//! `tests/personal_hermes/kubernetes.py --workspace next`.
+//! `tests/services/test_manager.py`.
 
 #![cfg(feature = "fault-injection")]
 

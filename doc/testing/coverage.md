@@ -2,16 +2,14 @@
 
 This assessment compares test code, fixture mechanics, contracts and CI
 configuration. It is not a line/branch coverage measurement or a passing receipt
-for this checkout. Actual outcomes belong to the verifier's per-run JSON/JUnit
-reports; a cited helper or collected case does not establish that it ran.
+for this checkout. Actual outcomes belong to each run's JUnit reports; a cited
+helper or collected case does not establish that it ran.
 
-The [execution ledger](../../tests/verification/README.md) checks exact
-Python/Rust collection, proving levels and per-case outcomes in dedicated
-profiles. It includes compiled shared-store cases, ignored/feature-gated Rust
-cases, and the independent pytest cluster/destructive scenarios. Helpers without
-collected wrappers remain explicitly uncollected. Composite operation IDs and
+Every test runs in [the one pytest suite](../TESTING.md): Python directly, and
+Rust and TypeScript through one case per test target, which fails when a Rust
+test is ignored or none ran. A skip fails the run. Composite operation IDs and
 all nine operational bounds are statically checked. Full clause/status/actor
-coverage and TypeScript execution inventories remain incomplete.
+coverage remains incomplete.
 
 [TESTING.md](../TESTING.md) describes the implemented runners, fixtures and CI
 selection. Gap IDs refer to the actionable [gap register](gaps.md). Existing
@@ -23,14 +21,14 @@ particular candidate's profile.
 
 | Source | Current evidence | Limitation |
 | --- | --- | --- |
-| [Python tests](../../tests/) and [pytest configuration](../../pyproject.toml) | Release/privacy/build invariants including the tag/version rule, contracts/chart rendering, runtime initialization (with a 68-case malformed-input matrix), terminal policy and plugin selection, direct-dependency and ownership/cleanup checks for the harness, the installed Hermes image as 13 collected `hermes-integration` cases, plus collection/reporting regressions; explicit levels, registered capability markers, a plain run that needs no infrastructure and strict configuration | Independent pytest E2E cases share k3d/platform fixtures alongside the standalone native script; complete requirement/case metadata and exhaustive variant coverage are absent |
+| [Python tests](../../tests/) and [pytest configuration](../../pyproject.toml) | Release/privacy/build invariants including the tag/version rule, contracts/chart rendering, runtime initialization (with a 68-case malformed-input matrix), terminal policy and plugin selection, direct-dependency and ownership/cleanup checks for the harness, the installed Hermes image as 14 collected cases, plus collection and split regressions; explicit levels, registered capability markers, a plain run that needs no infrastructure and strict configuration | Pytest E2E cases share k3d/platform fixtures; complete requirement/case metadata and exhaustive variant coverage are absent |
 | [Core domain](../../services/hermes-manager/crates/hermes-core/src/domain/) | Typed state/validation tests and a broad finite desired/observed planner enumeration | No `proptest`, fuzz or mutation setup is present; no measured branch-coverage report. The finite planner test is valuable, but is not a generated event-sequence test |
 | [Shared store cases](../../services/hermes-manager/crates/hermes-core/src/app/testing/mod.rs) | Shared cases instantiated by the contract macro for memory and [PostgreSQL](../../services/hermes-manager/crates/hermes-store/src/testing.rs): replay, races, retention, leases, controller and route rules | This is strong store/application coverage. It is not a reusable conformance suite for every external port, nor proof of process/cluster behaviour for every case |
 | [HTTP integrations](../../services/hermes-manager/crates/hermes-http/tests/), [raw wire client](../../services/hermes-manager/crates/hermes-testkit/src/raw.rs) and [contract checker](../../services/hermes-manager/crates/hermes-testkit/src/contract.rs) | Real TLS listeners, PostgreSQL, endpoint success/refusal cases, JSON response-schema checks and byte-level request cases (exact body bounds, chunked and cancelled bodies, repeated and malformed headers, hostile JSON) | No complete operation × status × actor/header/body-case execution ledger. The checker validates status/body, not every header rule or runtime request schema |
 | [Identity](../../services/hermes-manager/crates/hermes-identity/tests/), [proxy](../../services/hermes-manager/crates/hermes-proxy/tests/gateway.rs), [gateway binary](../../services/hermes-manager/crates/hermes-gateway/tests/gateway.rs) | Signed JWTs, callback/session/refresh denial, wrong claims and keys, route/cookie/header hygiene, streaming, accelerated revocation and compiled gateway flows | Many use fake OIDC/native/resolver services. They are integrations, not pure units or substitutes for the full real-Keycloak/browser matrix |
-| [Kubernetes driver](../../tests/personal_hermes/kubernetes.py) and [adapter tests](../../services/hermes-manager/crates/hermes-kube/tests/cluster.rs) | Real adapter/admission tests plus controller-process abort/recovery; scoped ServiceAccount, idempotent apply, stale deletion, leader election, actual SSH worker and image-pull failure, and the admission/RBAC matrix (positive control and one-field negatives for Pods, namespaces, volumes, Services, RoleBindings and controller rights) | Direct single-server k3s is the CI default. An optional k3d path exists, but is not the standard CI path or the restore implementation. The separate pytest network matrix uses live positive controls across one and three nodes; the installed platform remains single-node |
-| [Native multi-user login](../../tests/integration/hermes/test_login.py), [runtime](../../tests/personal_hermes/native_runtime.py), [initializer tests](../../tests/integration/hermes/test_personal_init.py) | Realm login/session/refresh, shared home binding, missing-policy refusal, non-root startup, forced restart, retained settings, concurrent/interrupted initialization and symlink/special-file refusal | Docker/in-image checks are partly standalone scripts with aggregate pass output. Not all malformed-policy/startup combinations are tested in the installed system |
-| [System scenario](../../tests/personal_hermes/native_e2e.py) | Real chart/operator Jobs, real native chat/cron/uploads, two owners, private registry, suspension, outages and second-cluster restore | One sequential script of more than 3,000 lines. The standalone invocation stops at its first failure and shares mutable state and a process-wide DNS patch. Collected pytest wrappers provide scenario IDs/JUnit with common helpers, but do not give the script itself per-scenario reporting |
+| [k3s fixture](../../tests/support/fixtures.py) and [adapter tests](../../services/hermes-manager/crates/hermes-kube/tests/cluster.rs) | Real adapter/admission tests plus controller-process abort/recovery; scoped ServiceAccount, idempotent apply, stale deletion, leader election, actual SSH worker and image-pull failure, and the admission/RBAC matrix (positive control and one-field negatives for Pods, namespaces, volumes, Services, RoleBindings and controller rights) | These run on a direct single-server k3s. The pytest network matrix uses live positive controls across one and three nodes; the installed platform remains single-node |
+| [Native multi-user login](../../runtimes/hermes/tests/integration/test_login.py), [runtime](../../runtimes/hermes/tests/integration/test_image_runtime.py), [initializer tests](../../runtimes/hermes/tests/integration/test_personal_init.py) | Realm login/session/refresh, shared home binding, missing-policy refusal, non-root startup, forced restart, retained settings, concurrent/interrupted initialization and symlink/special-file refusal | Not all malformed-policy/startup combinations are tested in the installed system |
+| [Installed-system cases](../../tests/e2e/) and [their platform](../../tests/support/system.py) | Real chart/operator Jobs, real native chat/cron/uploads, two owners, private registry, suspension, outages and second-cluster restore, each a separately reported case | The non-destructive cases share one platform and a process-wide DNS patch; they are shown independent by reverse-order runs, not by isolation |
 | [UI browser fixtures](../../services/hermes-manager/ui/e2e/fixtures.ts) and [production browser case](../../services/hermes-manager/ui/e2e/production/assets.spec.ts) | Presentation workflows with mocked APIs; separate real-server CSP, write-only secret and template publication case | The production case injects cookies created by a Rust fixture and ignores browser HTTPS errors. It does not perform a real browser Keycloak login or commission an instance through the cluster dashboard |
 | [CI checks and release](../../.github/workflows/checks.yml) | PR/main jobs run native language suites, image/runtime checks, direct-k3s integrations and native system script; Python/Rust profiles enforce exact collection and passing outcomes and retain sanitized reports; tag/dispatch runs add the pytest cluster/destructive profiles; on a tag, publish waits for every test job and pushes the tested images after label, image and push-access checks | No scheduled extended topology/soak lane or aggregate obligation-coverage gate. The published chart is rendered, not installed, after publication |
 
@@ -67,7 +65,7 @@ names are representative proving cases, not a second copy of `TESTS.md`.
 All 23 acceptance rows have entries in `TESTS.md`. This table identifies their
 main present proving boundary and the additional assertion or variant needed.
 U = native unit/shared fake; I = real dependency/process integration;
-E = installed-system assertions in the native script or collected pytest wrappers.
+E = installed-system assertions in `tests/e2e/`.
 The cited runner determines whether the fixture is direct k3s or k3d.
 
 | Specification scenario | Present evidence | Additional case or test-system work |
@@ -117,11 +115,10 @@ production boundary. G06 owns their measurement contract.
 ## What cannot be concluded from the current green results
 
 - No measured line/branch percentage or comprehensive mutation/fuzz result exists.
-- The `cluster scenarios` job runs the k3d network, acceptance, browser and
-  destructive profiles only when dispatched by hand. They gate neither pull
-  requests nor releases;
-  a workflow definition or a source-level assertion is not a candidate result. No live NFS test and no multi-node acceptance run of the platform
-  exist; the platform runs on a single node.
+- The end-to-end cases run on release tags and manual dispatch, not on pull
+  requests; a workflow definition or a source-level assertion is not a
+  candidate result. No live NFS test and no multi-node acceptance run of the
+  platform exist; the platform runs on a single node.
 - Generated manifests matching each other do not demonstrate live isolation.
 - A traced function name does not prove collection, feature selection, execution,
   its asserted level, or complete coverage of a requirement's clauses.

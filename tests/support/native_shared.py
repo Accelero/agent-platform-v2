@@ -15,7 +15,6 @@ import subprocess
 import time
 from pathlib import Path
 
-from tests.personal_hermes.native_e2e import KEYCLOAK_IMAGE, SUBJECTS, realm
 from tests.support.native import (
     PYTHON,
     CommandFailed,
@@ -25,6 +24,7 @@ from tests.support.native import (
     openssl_ca,
 )
 from tests.support.ownership import FIXTURE, RUN, Cleanup, new_run, require_fixture
+from tests.support.system import KEYCLOAK_IMAGE, SUBJECTS, realm
 
 FIXTURE_KIND = "shared-hermes-native"
 ISSUER = "https://sso.shared.test:8443/realms/agents"

@@ -724,9 +724,9 @@ Current test implementation:
 
 | Level | Existing runner and proving boundary | Current execution |
 | --- | --- | --- |
-| Unit | Cargo domain/application fakes, finite planner state-grid and targeted transition tests; pytest Python runtime/plugin/release/privacy units; Vitest UI logic | PRs and main commits; Cargo also runs external-dependency tests in the same workspace invocation |
-| Integration | Shared store cases on memory and PostgreSQL; actual HTTP/TLS/OIDC/SSH fixtures; binary abort tests; runtime-image checks; chart/render/golden comparisons; mocked UI browser workflows and the separate production-server CSP case | PR/main jobs; PostgreSQL and selected explicitly ignored/feature-gated tests need their dedicated commands |
-| E2E | The standalone native scenario and collected pytest cases install the chart and reach real Hermes through Keycloak and the gateway, with a fake model and private registry; restore uses a second direct-k3s cluster | Tag and dispatch Checks runs the sequential script on direct k3s. Its dispatch-only cluster scenarios job runs the pytest k3d profiles, including real-browser journeys and a separate destructive platform pool |
+| Unit | Cargo domain/application fakes, finite planner state-grid and targeted transition tests; pytest Python runtime/plugin/release/privacy units; Vitest UI logic | Pull requests, release tags and manual dispatch |
+| Integration | Shared store cases on memory and PostgreSQL; actual HTTP/TLS/OIDC/SSH fixtures; binary abort tests; runtime-image checks; chart/render/golden comparisons; mocked UI browser workflows and the separate production-server CSP case | Pull requests, except the runtime-image checks, which run on release tags and manual dispatch with the other image jobs |
+| E2E | Pytest cases install the chart on k3d and reach real Hermes through Keycloak and the gateway, with a fake model and private registry, a real browser, a network-policy cluster and a pool of platforms for destructive cases; restore uses a second direct-k3s cluster | Release tags and manual dispatch, split across five runners |
 
 Existing mechanisms and their limits:
 
@@ -740,27 +740,24 @@ Existing mechanisms and their limits:
   the feature.
 - **Traceability.** `services/hermes-manager/TESTS.md` maps requirement,
   acceptance, bound and composite contract-operation rows to named functions.
-  Architecture tests enforce row/name consistency. The
-  [execution ledger](../tests/verification/README.md) separately requires exact
-  Python/Rust collection, reviewed proving levels and passing per-case outcomes
-  in dedicated profiles, including shared macros, faults and ignored cases.
-  Helpers without collected wrappers are explicitly uncollected gaps. Full
-  clause/status/header coverage and TypeScript execution inventories are not
-  implemented.
+  Architecture tests enforce row/name consistency. Every named test runs in
+  the one pytest suite, Rust and TypeScript through one case per test target,
+  and a skip or an ignored Rust test fails the run. Full clause/status/header
+  coverage is not implemented.
 - **Planner coverage.** Finite desired/observed state-grid, targeted transition
   and deterministic command-sequence tests exist. No `proptest`, fuzzing,
   mutation or measured branch-coverage pipeline is configured.
 - **Golden files.** Rendered manifests, admission and chart/config fixtures are
   reviewed outputs; supported tests update them only with `UPDATE_GOLDEN=1`.
   Golden agreement complements real authorization and packet-level tests.
-- **CI.** `.github/workflows/checks.yml` runs Python/chart/privacy checks,
-  dashboard and Rust suites, binary/image/runtime checks, Kubernetes adapter
-  and controller-process checks, and, on release tags and manual dispatch, the
-  full native system script; pushes to `main` run no checks for now. Python/Rust profiles retain sanitized JSON/JUnit reports.
-  No scheduled extended/soak profile exists there.
-  Only on manual dispatch, its `cluster scenarios` job runs the collected k3d
-  network, acceptance, browser and destructive cases on the same image builds. On a tag, its `publish` job runs only after every test job
-  passed, and it pushes the images that were tested.
+- **CI.** `.github/workflows/checks.yml` runs selections of the pytest suite:
+  Python/chart/privacy checks, dashboard and Rust suites, Kubernetes adapter
+  and controller-process checks on pull requests; on release tags and manual
+  dispatch also the runtime-image checks and the end-to-end cases on the same
+  image builds. Pushes to `main` run no checks for now. Each job keeps a JUnit
+  report. No scheduled extended/soak profile exists there. On a tag, its
+  `publish` job runs only after every test job passed, and it pushes the
+  images that were tested.
 
 The [verification commands](personal-hermes/implementation.md#verification-commands)
 are the working commands.

@@ -26,11 +26,11 @@ from urllib.parse import quote
 import pytest
 import requests
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.security]
 
-BASE = f"https://{scenarios.ADMIN}"
+BASE = f"https://{system.ADMIN}"
 SESSION, PROOF = "__Host-hermes-admin", "__Host-hermes-admin-browser"
 HTML = {"Accept": "text/html"}
 ORIGIN = {"Origin": BASE}
@@ -202,7 +202,7 @@ def test_the_dashboard_answers_a_client_without_a_session_as_declared(
         assert "<a " in reply.text
     if expect.get("login"):
         assert reply.headers["location"].startswith(
-            scenarios.ISSUER + "/protocol/openid-connect/auth?"
+            system.ISSUER + "/protocol/openid-connect/auth?"
         )
         query = dict(
             part.split("=", 1)
@@ -233,16 +233,16 @@ class Held:
 
     def __init__(self, platform, name="alice"):
         self.platform = platform
-        session = scenarios.resilient(requests.Session())
+        session = system.resilient(requests.Session())
         session.verify = platform.ca
         page = session.get(f"{BASE}/", headers=HTML, timeout=30)
-        assert scenarios.KEYCLOAK in page.url, "not sent to the provider"
-        landed = scenarios.keycloak_login(session, page, name, platform.passwords[name])
+        assert system.KEYCLOAK in page.url, "not sent to the provider"
+        landed = system.keycloak_login(session, page, name, platform.passwords[name])
         assert landed.status_code == 200, landed.status_code
         self.cookies = {
             cookie.name: cookie.value
             for cookie in session.cookies
-            if cookie.domain.lstrip(".") == scenarios.ADMIN
+            if cookie.domain.lstrip(".") == system.ADMIN
         }
         assert set(self.cookies) == {SESSION, PROOF}
         self.csrf = self.call("GET", "/api/v1/session").json()["csrfToken"]
@@ -282,8 +282,8 @@ def test_a_session_reports_the_administrator_and_a_csrf_token_and_nothing_else(
     body = reply.json()
     assert set(body) == {"actor", "permittedActions", "csrfToken"}
     assert body["actor"] == {
-        "issuer": scenarios.ISSUER,
-        "subject": scenarios.SUBJECTS["alice"],
+        "issuer": system.ISSUER,
+        "subject": system.SUBJECTS["alice"],
     }
     assert sorted(body["permittedActions"]) == ["administer", "administrator.manage"]
     assert HANDLE.match(body["csrfToken"])

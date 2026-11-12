@@ -1,11 +1,9 @@
 """The installed platform on the run-owned k3d cluster, for independent cases.
 
-This is the bring-up of the standalone end-to-end program, factored for pytest:
-a run-owned PostgreSQL on the cluster's network, every image imported into
-every node, Keycloak and the fake model, the chart with its operator Jobs, and
-the published catalog with two commissioned owners. Cases receive the result
-and run alone, in any order; the program's sequential entry point stays until
-its assertions are all collected.
+A run-owned PostgreSQL on the cluster's network, the images under test (which
+the caller's fixtures provide) imported into every node, Keycloak and the fake
+model, the chart with its operator Jobs, and the published catalog with two
+commissioned owners. Cases receive the result and run alone, in any order.
 
 Nothing here prints or retains a credential beyond the run's temporary
 directory.
@@ -21,14 +19,13 @@ from types import SimpleNamespace
 
 import requests
 
-from tests.personal_hermes import native_e2e as e2e
-from tests.personal_hermes.kubernetes import (
+from tests.support import system
+from tests.support.cluster import Cluster
+from tests.support.k3s import (
     WORKER_TAG,
     command,
-    image_source,
     import_image,
 )
-from tests.support.cluster import Cluster
 from tests.support.ownership import (
     FIXTURE,
     POSTGRES,
@@ -44,17 +41,6 @@ POSTGRES_IMAGE = (
 
 class PlatformUnavailable(RuntimeError):
     """A prerequisite of the installed platform is missing."""
-
-
-def require_local_images():
-    """The artifacts under test must exist locally, or as CI's saved builds;
-    nothing is built here."""
-    for tag in (e2e.MANAGER_IMAGE, e2e.HERMES_IMAGE):
-        if image_source(tag)[0] == "zstd":
-            continue
-        result = command_status(["docker", "image", "inspect", tag])
-        if result != 0:
-            raise PlatformUnavailable(f"the image {tag} is not built")
 
 
 def command_status(args):
@@ -128,35 +114,22 @@ def start_postgres(cluster: Cluster, cleanup: Cleanup):
             f"CREATE DATABASE {database}",
         ]
     )
-    address = e2e.container_ip(name, network)
+    address = system.container_ip(name, network)
     return name, database, f"postgres://hermes_test@{address}:5432/{database}"
 
 
 def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=False):
     """The installed platform with Bob's and Carol's commissioned instances."""
-    require_local_images()
     server = cluster.servers[0]
     network = f"k3d-{cluster.name}"
     postgres, database, database_url = start_postgres(cluster, cleanup)
 
-    command(["docker", "pull", "--quiet", e2e.KEYCLOAK_IMAGE], timeout=900)
-    command(["docker", "tag", e2e.KEYCLOAK_IMAGE, "hermes-e2e-keycloak:pinned"])
-    if image_source(WORKER_TAG)[0] != "zstd":
-        command(
-            [
-                "docker",
-                "build",
-                "--quiet",
-                "--tag",
-                WORKER_TAG,
-                str(e2e.ROOT / "runtimes/agent-runtime"),
-            ],
-            timeout=600,
-        )
+    command(["docker", "pull", "--quiet", system.KEYCLOAK_IMAGE], timeout=900)
+    command(["docker", "tag", system.KEYCLOAK_IMAGE, "hermes-e2e-keycloak:pinned"])
     references = {}
     for key, tag in (
-        ("manager", e2e.MANAGER_IMAGE),
-        ("hermes", e2e.HERMES_IMAGE),
+        ("manager", system.MANAGER_IMAGE),
+        ("hermes", system.HERMES_IMAGE),
         ("worker", WORKER_TAG),
         ("keycloak", "hermes-e2e-keycloak:pinned"),
     ):
@@ -166,7 +139,7 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         references[key] = pinned.pop()
     images = {name: references[name] for name in ("manager", "hermes", "worker")}
 
-    node_ip = e2e.container_ip(server, network)
+    node_ip = system.container_ip(server, network)
     command(
         [
             "docker",
@@ -179,22 +152,22 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
     )
     tls_directory = directory / "tls"
     tls_directory.mkdir()
-    shared_domain = e2e.SHARED_DOMAIN if shared else None
+    shared_domain = system.SHARED_DOMAIN if shared else None
     shared_hosts = (
-        tuple(f"{label}.{shared_domain}" for label in e2e.SHARED_LABELS)
+        tuple(f"{label}.{shared_domain}" for label in system.SHARED_LABELS)
         if shared
         else ()
     )
-    tls = e2e.certificates(tls_directory, shared_domain)
+    tls = system.certificates(tls_directory, shared_domain)
     ca = str(tls_directory / "ca.crt")
-    passwords = {name: secrets.token_urlsafe(18) for name in e2e.SUBJECTS}
+    passwords = {name: secrets.token_urlsafe(18) for name in system.SUBJECTS}
     for name in ("directory", "llm", "registry"):
         passwords[name] = secrets.token_urlsafe(24)
 
-    e2e.keycloak(server, references["keycloak"], tls, passwords, shared_hosts)
-    e2e.fake_model(server, images["hermes"])
+    system.keycloak(server, references["keycloak"], tls, passwords, shared_hosts)
+    system.fake_model(server, images["hermes"])
     for namespace, name in (("keycloak", "keycloak"), ("model", "fake-model")):
-        e2e.kubectl(
+        system.kubectl(
             server,
             "rollout",
             "status",
@@ -206,11 +179,11 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         )
     stack = ExitStack()
     cleanup.add("name routing", stack.close)
-    stack.enter_context(e2e.routed(node_ip, shared_hosts))
-    e2e.wait(
+    stack.enter_context(system.routed(node_ip, shared_hosts))
+    system.wait(
         lambda: (
             requests.get(
-                f"{e2e.ISSUER}/.well-known/openid-configuration",
+                f"{system.ISSUER}/.well-known/openid-configuration",
                 verify=ca,
                 timeout=5,
             ).status_code
@@ -219,8 +192,8 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         300,
         "Keycloak did not serve the realm",
     )
-    owned = e2e.installation()
-    e2e.install(
+    owned = system.installation()
+    system.install(
         server,
         cluster.kubeconfig,
         str(directory),
@@ -229,10 +202,10 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
         tls,
         server,
         owned,
-        e2e.FRESH,
+        system.FRESH,
         shared_domain=shared_domain,
     )
-    state = e2e.commission(server, images, ca, passwords)
+    state = system.commission(server, images, ca, passwords)
     return SimpleNamespace(
         cluster=cluster,
         identifier=server,

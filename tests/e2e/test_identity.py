@@ -20,7 +20,7 @@ import time
 import pytest
 import requests
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [
     pytest.mark.e2e,
@@ -43,7 +43,7 @@ def key_id(token):
 
 def status_with(platform, token):
     reply = platform.admin.session.get(
-        f"https://{scenarios.ADMIN}/api/v1/session",
+        f"https://{system.ADMIN}/api/v1/session",
         headers={"Authorization": f"Bearer {token}"},
         timeout=20,
     )
@@ -69,7 +69,7 @@ def test_a_rotated_signing_key_is_followed_without_a_restart_and_the_old_one_is_
     destructive_platform,
 ):
     platform = destructive_platform
-    directory = scenarios.Directory(platform.ca, platform.passwords["directory"])
+    directory = system.Directory(platform.ca, platform.passwords["directory"])
     directory.call("PUT", "", {"accessTokenLifespan": 3600}, expected=(204,))
 
     old_kid, _ = signing_keys(directory)
@@ -101,7 +101,7 @@ def test_a_rotated_signing_key_is_followed_without_a_restart_and_the_old_one_is_
     new_token = fresh_token(platform)
     assert key_id(new_token) == new_kid, "the provider now signs with the new key"
     # An unknown key ID refetches the key set, at most once per cooldown.
-    scenarios.wait(
+    system.wait(
         lambda: status_with(platform, new_token) == 200,
         COOLDOWN * 4,
         "the manager never accepted a token of the rotated key",
@@ -112,9 +112,9 @@ def test_a_rotated_signing_key_is_followed_without_a_restart_and_the_old_one_is_
     # rules: an unknown key ID refetches at most once per cooldown, so a login
     # less than the cooldown after the gateway's last fetch is refused once and
     # accepted on the next try.
-    scenarios.wait(
+    system.wait(
         lambda: (
-            scenarios.Browser(platform.ca, "bob", platform.passwords["bob"])
+            system.Browser(platform.ca, "bob", platform.passwords["bob"])
             .sign_in()
             .status_code
             == 200
@@ -136,7 +136,7 @@ def test_a_rotated_signing_key_is_followed_without_a_restart_and_the_old_one_is_
     )
     assert status_with(platform, new_token) == 200
     assert (
-        scenarios.Browser(platform.ca, "carol", platform.passwords["carol"])
+        system.Browser(platform.ca, "carol", platform.passwords["carol"])
         .sign_in()
         .status_code
         == 200
@@ -148,13 +148,13 @@ def restart_gateway(platform, keyring, new_keys=()):
     then restarts it; the key material is never printed."""
     identifier = platform.identifier
     if new_keys:
-        scenarios.kubectl(
+        system.kubectl(
             identifier,
             "patch",
             "secret",
             "hermes-gateway",
             "--namespace",
-            scenarios.NAMESPACE,
+            system.NAMESPACE,
             "--type",
             "merge",
             "--patch",
@@ -170,41 +170,41 @@ def restart_gateway(platform, keyring, new_keys=()):
             ),
             quiet=True,
         )
-    scenarios.kubectl(
+    system.kubectl(
         identifier,
         "patch",
         "configmap",
         "hermes-gateway",
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
         "--type",
         "merge",
         "--patch",
         json.dumps({"data": {"keyring.json": json.dumps(keyring)}}),
     )
-    scenarios.kubectl(
+    system.kubectl(
         identifier,
         "rollout",
         "restart",
         "deployment/hermes-gateway",
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
     )
-    scenarios.kubectl(
+    system.kubectl(
         identifier,
         "rollout",
         "status",
         "deployment/hermes-gateway",
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
         "--timeout=180s",
         timeout=200,
     )
     # The rollout is done before the node port reaches the new Pod.
-    scenarios.wait(
+    system.wait(
         lambda: (
             requests.get(
-                f"https://{scenarios.PUBLIC}/_platform/healthz",
+                f"https://{system.PUBLIC}/_platform/healthz",
                 verify=platform.ca,
                 timeout=5,
             ).status_code
@@ -232,7 +232,7 @@ def test_rotating_the_gateway_session_key_keeps_old_sessions_until_it_is_dropped
     sessions sealed under it, and people sign in again."""
     platform = destructive_platform
     ca, passwords = platform.ca, platform.passwords
-    old = scenarios.signed_in(ca, "bob", passwords)
+    old = system.signed_in(ca, "bob", passwords)
     assert old.get("/_platform/me").status_code == 200
 
     # The same ring across a restart: the session survives.
@@ -242,14 +242,14 @@ def test_rotating_the_gateway_session_key_keeps_old_sessions_until_it_is_dropped
     # A new active key beside the old: old sessions read, new ones sealed anew.
     restart_gateway(platform, keyring("g2", "g1", "g2"), new_keys=("g2",))
     assert old.get("/_platform/me").status_code == 200, "rotation ended the session"
-    fresh = scenarios.signed_in(ca, "carol", passwords)
+    fresh = system.signed_in(ca, "carol", passwords)
     assert fresh.get("/_platform/me").status_code == 200
 
     # The old key dropped: only the sessions sealed under it end.
     restart_gateway(platform, keyring("g2", "g2"))
     assert old.get("/_platform/me").status_code == 401, "the dropped key still reads"
     assert fresh.get("/_platform/me").status_code == 200, "a session of the new key"
-    again = scenarios.signed_in(ca, "bob", passwords)
+    again = system.signed_in(ca, "bob", passwords)
     assert again.get("/_platform/me").status_code == 200
 
 
@@ -265,7 +265,7 @@ def test_a_session_whose_provider_login_expired_is_refused_and_an_active_one_is_
     caused by the lapsed login and not by an expired access token."""
     platform = destructive_platform
     ca, passwords = platform.ca, platform.passwords
-    directory = scenarios.Directory(ca, passwords["directory"])
+    directory = system.Directory(ca, passwords["directory"])
     # The realm is shared with the cases that follow: put back what is changed.
     realm = directory.call("GET", "").json()
     original = {
@@ -276,14 +276,14 @@ def test_a_session_whose_provider_login_expired_is_refused_and_an_active_one_is_
 
         # Control: with the provider's default idle limit, a session left alone for
         # longer than the gateway trusts its evidence is refreshed on demand.
-        unused = scenarios.signed_in(ca, "bob", passwords)
+        unused = system.signed_in(ca, "bob", passwords)
         time.sleep(150)
         assert unused.get("/_platform/me").status_code == 200, "an idle session lapsed"
 
         # A provider login that lapses after 90 s without use.
         directory.call("PUT", "", {"ssoSessionIdleTimeout": 90}, expected=(204,))
-        quiet = scenarios.signed_in(ca, "carol", passwords)
-        active = scenarios.signed_in(ca, "bob", passwords)
+        quiet = system.signed_in(ca, "carol", passwords)
+        active = system.signed_in(ca, "bob", passwords)
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             reply = active.get("/api/auth/me")

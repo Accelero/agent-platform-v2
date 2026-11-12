@@ -199,7 +199,7 @@ def verify_images(images: dict[str, str]) -> None:
             images["hermes"],
             "-",
         ],
-        data=(ROOT / "tests/hermes_execution_smoke.py").read_bytes(),
+        data=(ROOT / "runtimes/hermes/tests/image_smoke.py").read_bytes(),
         timeout=180,
     )
     run(

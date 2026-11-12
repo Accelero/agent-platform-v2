@@ -83,7 +83,7 @@ def unusable(platform) -> str | None:
 
     import requests
 
-    from tests.personal_hermes import native_e2e as e2e
+    from tests.support import system
 
     def check(platform):
         state = json.loads(
@@ -92,19 +92,19 @@ def unusable(platform) -> str | None:
         if state["Paused"] or not state["Running"]:
             return "the database is not running"
         reply = requests.get(
-            f"{e2e.ISSUER}/.well-known/openid-configuration",
+            f"{system.ISSUER}/.well-known/openid-configuration",
             verify=platform.ca,
             timeout=5,
         )
         if reply.status_code != 200:
             return "the provider does not serve its realm"
         deployments = json.loads(
-            e2e.kubectl(
+            system.kubectl(
                 platform.identifier,
                 "get",
                 "deployments",
                 "--namespace",
-                e2e.NAMESPACE,
+                system.NAMESPACE,
                 "-o",
                 "json",
             )

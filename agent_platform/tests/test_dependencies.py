@@ -9,18 +9,28 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 LOCAL = {"tests", "agent_platform"}
 # These scripts run inside the Hermes image against its own packages.
 IMAGE_SIDE = {
-    ROOT / "tests/hermes_execution_smoke.py",
+    ROOT / "runtimes/hermes/tests/image_smoke.py",
     ROOT / "tests/support/native_shared_client.py",
 }
+TEST_DIRECTORIES = (
+    "agent_platform",
+    "charts/tests",
+    "contracts/hermes-manager/tests",
+    "runtimes/hermes/tests",
+    "tests",
+)
 SOURCES = sorted(
-    path
-    for directory in ("tests", "agent_platform")
-    for path in (ROOT / directory).rglob("*.py")
-    if path not in IMAGE_SIDE and ".venv" not in path.parts
+    {ROOT / "conftest.py"}
+    | {
+        path
+        for directory in TEST_DIRECTORIES
+        for path in (ROOT / directory).rglob("*.py")
+        if path not in IMAGE_SIDE and ".venv" not in path.parts
+    }
 )
 
 

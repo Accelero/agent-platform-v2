@@ -24,8 +24,8 @@ from pathlib import Path
 
 import yaml
 
-from tests.personal_hermes.kubernetes import IMAGE as NODE_IMAGE
-from tests.personal_hermes.kubernetes import import_image
+from tests.support.k3s import IMAGE as NODE_IMAGE
+from tests.support.k3s import import_image
 from tests.support.ownership import (
     FIXTURE,
     KUBERNETES,
@@ -36,6 +36,7 @@ from tests.support.ownership import (
 )
 
 K3D_VERSION = "v5.9.0"
+REGISTRIES = Path(__file__).resolve().parent / "k3s-registries.yaml"
 # k3d's helper container, pinned by digest like every other fixture image.
 K3D_TOOLS = (
     "ghcr.io/k3d-io/k3d-tools@sha256:"
@@ -90,6 +91,8 @@ def configuration(name, run_id, agents, port):
         "servers": 1,
         "agents": agents,
         "image": NODE_IMAGE,
+        # The private registry case's registry: plain HTTP, nothing mirrored.
+        "registries": {"config": REGISTRIES.read_text()},
         "kubeAPI": {"host": "127.0.0.1", "hostIP": "127.0.0.1", "hostPort": str(port)},
         "options": {
             "k3d": {

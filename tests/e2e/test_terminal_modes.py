@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person, ready
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.slow]
@@ -26,7 +26,7 @@ IDLE_SECONDS = 60
 MODES = ("per_session", "per_profile_on_demand", "per_profile_always_running")
 
 OPEN_AND_RELEASE = (
-    scenarios.PLUGIN_PRELUDE
+    system.PLUGIN_PRELUDE
     + """
 import urllib.error, uuid
 first = environment("", "m1")
@@ -52,7 +52,7 @@ print(json.dumps({"mode": settings["mode"], "wrong": wrong}))
 )
 
 OPEN_ANOTHER = (
-    scenarios.PLUGIN_PRELUDE
+    system.PLUGIN_PRELUDE
     + """
 later = environment("", "m4")
 later.execute("true")
@@ -65,12 +65,12 @@ print(json.dumps({"ok": True}))
 def view(platform, receipt):
     return [
         {key: item[key] for key in ("id", "session", "state", "leases", "mode")}
-        for item in scenarios.environments(platform.admin, receipt["instanceId"])
+        for item in system.environments(platform.admin, receipt["instanceId"])
     ]
 
 
 def until(condition, timeout, message):
-    scenarios.wait(condition, timeout, message, interval=3)
+    system.wait(condition, timeout, message, interval=3)
 
 
 def test_each_lifetime_mode_keys_shares_and_retires_environments_as_specified(
@@ -108,7 +108,7 @@ def test_each_lifetime_mode_keys_shares_and_retires_environments_as_specified(
     spaces = {mode: ready(platform, receipt) for mode, receipt in people.items()}
 
     for mode in MODES:
-        result = scenarios.hermes_python(
+        result = system.hermes_python(
             platform.identifier, spaces[mode], OPEN_AND_RELEASE
         )
         assert result["mode"] == mode, "the managed configuration carries the mode"
@@ -142,7 +142,7 @@ def test_each_lifetime_mode_keys_shares_and_retires_environments_as_specified(
     # A later session reuses the shared environment; a per-session one starts
     # afresh.
     for mode in MODES:
-        scenarios.hermes_python(platform.identifier, spaces[mode], OPEN_ANOTHER)
+        system.hermes_python(platform.identifier, spaces[mode], OPEN_ANOTHER)
     for mode in MODES[1:]:
         environments = view(platform, people[mode])
         assert [e["id"] for e in environments] == [shared[mode]], (
@@ -169,7 +169,7 @@ def test_each_lifetime_mode_keys_shares_and_retires_environments_as_specified(
         (shared["per_profile_always_running"], "ready")
     ], f"the always-running environment did not stay: {always}"
     # And it still serves a session at once.
-    scenarios.hermes_python(
+    system.hermes_python(
         platform.identifier, spaces["per_profile_always_running"], OPEN_ANOTHER
     )
     assert [e["id"] for e in view(platform, people["per_profile_always_running"])] == [

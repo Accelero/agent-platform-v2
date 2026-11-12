@@ -1,6 +1,6 @@
 //! `TESTS.md` must cover every requirement, acceptance scenario and contract
 //! operation and operational bound, and every test it names must exist.
-//! Execution is checked separately by `tests.support.verification`.
+//! Running them is pytest's job (`tests/services/`).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -100,7 +100,7 @@ fn contract_operations() -> BTreeSet<Operation> {
 }
 
 /// Function names defined in the rewrite's Rust sources and the repository's
-/// Python tests.
+/// Python test directories.
 fn defined_tests() -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let roots = [
@@ -110,6 +110,10 @@ fn defined_tests() -> BTreeSet<String> {
             "fn ",
         ),
         (repository().join("tests"), "py", "def "),
+        (repository().join("agent_platform/tests"), "py", "def "),
+        (repository().join("charts/tests"), "py", "def "),
+        (repository().join("contracts/hermes-manager/tests"), "py", "def "),
+        (repository().join("runtimes/hermes/tests"), "py", "def "),
     ];
     for (root, extension, keyword) in roots {
         let mut stack = vec![root];

@@ -20,7 +20,7 @@ import secrets
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person, ready, template
 
 pytestmark = [
@@ -46,7 +46,7 @@ def holders(platform, value):
     """Where in the cluster a Kubernetes Secret holds `value`, as
     (namespace, secret, key); the values themselves are only hashed."""
     items = json.loads(
-        scenarios.kubectl(
+        system.kubectl(
             platform.identifier,
             "get",
             "secrets",
@@ -75,12 +75,12 @@ def listing(platform):
 def exec_digest(platform, namespace, script):
     """SHA-256 of what a command prints inside the instance's Hermes."""
     return hashlib.sha256(
-        scenarios.instance_pod_exec(platform.identifier, namespace, script).encode()
+        system.instance_pod_exec(platform.identifier, namespace, script).encode()
     ).hexdigest()
 
 
 def exit_status(platform, namespace, script):
-    return scenarios.instance_pod_exec(
+    return system.instance_pod_exec(
         platform.identifier, namespace, f"{script} >/dev/null 2>&1; echo $?"
     ).strip()
 
@@ -88,11 +88,11 @@ def exit_status(platform, namespace, script):
 def restarted(platform, receipt, namespace, before):
     def replaced():
         try:
-            return scenarios.hermes_pod(platform.identifier, namespace) != before
+            return system.hermes_pod(platform.identifier, namespace) != before
         except AssertionError:
             return False
 
-    scenarios.wait(replaced, 600, "the instance never restarted", interval=5)
+    system.wait(replaced, 600, "the instance never restarted", interval=5)
     return ready(platform, receipt)
 
 
@@ -107,11 +107,11 @@ def surfaces(platform, namespaces):
         admin.call("GET", "/api/v1/templates?limit=100").text,
         admin.call("GET", "/api/v1/terminal-backends?limit=100").text,
     ]
-    sources = [(scenarios.NAMESPACE, f"deployment/{name}") for name in CONTROL_PLANE]
+    sources = [(system.NAMESPACE, f"deployment/{name}") for name in CONTROL_PLANE]
     sources += [(namespace, "deployment/hermes") for namespace in namespaces]
     for namespace, target in sources:
         bodies.append(
-            scenarios.kubectl(
+            system.kubectl(
                 platform.identifier,
                 "logs",
                 "--namespace",
@@ -153,11 +153,11 @@ def test_a_file_secret_reaches_only_its_referencing_instance_and_follows_its_ref
     assert exec_digest(platform, holder_space, f"cat {path}") == digest(first)
     assert exit_status(platform, holder_space, f"echo x >> {path}") != "0"
     assert exit_status(platform, holder_space, f"touch {DIRECTORY}/other") != "0"
-    mode = scenarios.instance_pod_exec(
+    mode = system.instance_pod_exec(
         platform.identifier, holder_space, f"stat -L -c %a {path}"
     )
     assert mode.strip() == "440", mode
-    environment = scenarios.instance_pod_exec(platform.identifier, holder_space, "env")
+    environment = system.instance_pod_exec(platform.identifier, holder_space, "env")
     assert first not in environment, "a file secret was also delivered as a variable"
     assert exit_status(platform, other_space, f"test -e {DIRECTORY}") != "0", (
         "an instance that does not reference the secret has the directory"
@@ -165,12 +165,12 @@ def test_a_file_secret_reaches_only_its_referencing_instance_and_follows_its_ref
     assert holders(platform, first) == [(holder_space, "hermes-admin-secrets", name)]
 
     # Rotation restarts the referencing instance only and replaces the value.
-    holder_pod = scenarios.hermes_pod(platform.identifier, holder_space)
-    other_pod = scenarios.hermes_pod(platform.identifier, other_space)
+    holder_pod = system.hermes_pod(platform.identifier, holder_space)
+    other_pod = system.hermes_pod(platform.identifier, other_space)
     admin.call("PUT", f"/api/v1/secrets/{name}", {"kind": "file", "value": second})
     restarted(platform, holder, holder_space, holder_pod)
     assert exec_digest(platform, holder_space, f"cat {path}") == digest(second)
-    assert scenarios.hermes_pod(platform.identifier, other_space) == other_pod, (
+    assert system.hermes_pod(platform.identifier, other_space) == other_pod, (
         "an instance that does not reference the secret was restarted"
     )
     assert holders(platform, first) == [], "the replaced value is still stored"
@@ -192,7 +192,7 @@ def test_a_file_secret_reaches_only_its_referencing_instance_and_follows_its_ref
     current = admin.call("GET", f"/api/v1/assignments/{holder['assignmentId']}")
     spec = current.json()["spec"]
     spec["template"] = {"id": f"without-file-{tag}", "version": plain}
-    holder_pod = scenarios.hermes_pod(platform.identifier, holder_space)
+    holder_pod = system.hermes_pod(platform.identifier, holder_space)
     admin.call(
         "PATCH",
         f"/api/v1/assignments/{holder['assignmentId']}",
@@ -352,7 +352,7 @@ def test_a_registry_secret_reaches_only_the_instance_whose_backend_names_it(plat
     # name is not part of the specification, so it is found by its content.
     [(space, pull, key)] = holders(platform, first)
     assert (space, key) == (holder_space, ".dockerconfigjson")
-    kind = scenarios.kubectl(
+    kind = system.kubectl(
         platform.identifier,
         "get",
         "secret",
@@ -365,7 +365,7 @@ def test_a_registry_secret_reaches_only_the_instance_whose_backend_names_it(plat
     )
     assert kind == "kubernetes.io/dockerconfigjson", kind
     for space in (holder_space, other_space):
-        environment = scenarios.instance_pod_exec(platform.identifier, space, "env")
+        environment = system.instance_pod_exec(platform.identifier, space, "env")
         assert password not in environment and first not in environment
     assert listing(platform)[name]["references"] == 1
 
@@ -382,7 +382,7 @@ def test_a_registry_secret_reaches_only_the_instance_whose_backend_names_it(plat
         }
     )
     admin.call("PUT", f"/api/v1/secrets/{name}", {"kind": "registry", "value": rotated})
-    scenarios.wait(
+    system.wait(
         lambda: (
             [(a, c) for a, _, c in holders(platform, rotated)]
             == [(holder_space, ".dockerconfigjson")]

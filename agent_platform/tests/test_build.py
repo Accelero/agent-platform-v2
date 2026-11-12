@@ -11,7 +11,7 @@ from agent_platform import build, release
 
 pytestmark = pytest.mark.unit
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -76,32 +76,25 @@ def test_the_job_that_fills_the_cache_cannot_publish_packages():
     job = workflow["jobs"]["images"]
     assert job["if"] == "github.event_name != 'pull_request'"
     commands = "\n".join(step.get("run", "") for step in job["steps"])
-    assert "tests.run build --github-cache" in commands
+    assert "tests.support.images --github-cache" in commands
     assert "--publish" not in commands
     assert "--push" not in commands
     assert not any("login-action" in step.get("uses", "") for step in job["steps"])
 
 
 def test_a_release_publishes_the_builds_every_test_job_ran():
-    """`publish` waits for every test job a tag runs, builds nothing, and pushes
-    the archives the images job saved for the tests. The cluster scenarios run
-    only when dispatched by hand."""
+    """`publish` waits for every test job, builds nothing, and pushes the
+    archives the images job saved for the tests."""
     workflow = yaml.safe_load((build.ROOT / ".github/workflows/checks.yml").read_text())
     jobs = workflow["jobs"]
     job = jobs["publish"]
-    by_hand = {
-        name
-        for name, definition in jobs.items()
-        if definition.get("if") == "github.event_name == 'workflow_dispatch'"
-    }
-    assert by_hand == {"cluster-scenarios"}
-    assert set(job["needs"]) == set(jobs) - {"publish", "images"} - by_hand
+    assert set(job["needs"]) == set(jobs) - {"publish", "images"}
     assert {"images"} <= {
         need for name in job["needs"] for need in [jobs[name].get("needs")] if need
     }
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "--publish" in commands and "docker load" in commands
-    for builder in ("docker build", "buildx build", "buildx bake", "tests.run build"):
+    for builder in ("docker build", "buildx build", "buildx bake", "support.images"):
         assert builder not in commands
     saved = "\n".join(step.get("run", "") for step in jobs["images"]["steps"])
     for tag in release.TESTED.values():
@@ -109,14 +102,23 @@ def test_a_release_publishes_the_builds_every_test_job_ran():
     assert set(release.TESTED) == set(build.TARGETS)
 
 
+def test_every_e2e_part_runs_its_share_of_one_split():
+    """The e2e matrix and its `--shard K/N` agree, so no part is left out."""
+    workflow = yaml.safe_load((build.ROOT / ".github/workflows/checks.yml").read_text())
+    job = workflow["jobs"]["e2e"]
+    parts = job["strategy"]["matrix"]["part"]
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert parts == [str(part) for part in range(1, len(parts) + 1)]
+    assert f"--shard ${{{{ matrix.part }}}}/{len(parts)}" in commands
+
+
 def test_the_tested_images_are_the_ones_the_suites_build():
-    from tests import run
-    from tests.personal_hermes import kubernetes, native_runtime
+    from tests.support import images
 
     assert release.TESTED == {
-        "hermes": native_runtime.IMAGE,
-        "agent-runtime": kubernetes.WORKER_TAG,
-        "hermes-manager": run.MANAGER_IMAGE,
+        "hermes": images.HERMES_IMAGE,
+        "agent-runtime": images.WORKER_TAG,
+        "hermes-manager": images.MANAGER_IMAGE,
     }
 
 

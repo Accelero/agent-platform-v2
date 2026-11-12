@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import secrets
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 
 def template(platform, **extra):
@@ -28,13 +28,13 @@ def template(platform, **extra):
 def person(platform, prefix, spec):
     """A new directory person with the assignment `spec`; returns the receipt."""
     username = f"{prefix}-{secrets.token_hex(3)}"
-    directory = scenarios.Directory(platform.ca, platform.passwords["directory"])
+    directory = system.Directory(platform.ca, platform.passwords["directory"])
     subject = directory.create(username, f"{username}@e2e.test", secrets.token_hex(12))
     return platform.admin.call(
         "POST",
         "/api/v1/assignments",
         {
-            "identity": {"issuer": scenarios.ISSUER, "subject": subject},
+            "identity": {"issuer": system.ISSUER, "subject": subject},
             "spec": {"access": "enabled", **spec},
         },
     ).json()
@@ -52,9 +52,9 @@ def current(instance):
 def ready(platform, receipt):
     """Waits for the instance to be ready at its desired state; returns its
     namespace."""
-    scenarios.wait(
+    system.wait(
         lambda: current(platform.admin.phase(receipt["instanceId"])),
-        scenarios.READY_TIMEOUT,
+        system.READY_TIMEOUT,
         lambda: platform.admin.phase(receipt["instanceId"]),
         interval=5,
     )

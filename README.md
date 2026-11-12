@@ -100,8 +100,10 @@ operator Jobs; the controller creates the per-user resources. See the
 - `examples/manager/`: nonsecret manager render fixture.
 - `containers/docker-bake.hcl`: the three release image targets.
 - `agent_platform/`: release builder, privacy preflight and bounded commands.
-- `tests/`: Python tests and the `tests/personal_hermes/` cluster and
-  end-to-end fixtures.
+- `tests/`: the end-to-end suite, shared fixtures and the pytest wrappers for
+  the Rust and dashboard tests. Each component's unit and integration tests
+  live with it; [doc/TESTING.md](doc/TESTING.md) describes the one pytest
+  suite.
 
 ## Development
 
@@ -110,19 +112,20 @@ Use Python 3.14, uv, Docker Buildx, Helm 3 and the Rust toolchain in
 
 ```bash
 uv sync --locked
-uv run ruff check agent_platform tests
-uv run ruff format --check agent_platform tests
+uv run ruff check .
+uv run ruff format --check .
 uv run pytest -q
 helm lint charts/agent-platform
 uv run python -m agent_platform.privacy
 ```
 
-Chart tests call `helm`; it must be on `PATH`. The Rust, dashboard, k3s and
-end-to-end checks are listed in the
-[verification commands](doc/personal-hermes/implementation.md#verification-commands).
-`Checks` runs the fast groups on pull requests and everything else on release
-tags and manual dispatch; only manual dispatch also runs the collected k3d and
-browser scenarios. Pushes to `main` run no checks for now. For an explicit local build without publishing, set
+Chart tests call `helm`; it must be on `PATH`. Marker expressions select the
+rest of the suite, for example `uv run pytest -m unit` or
+`uv run pytest -m e2e`; [doc/TESTING.md](doc/TESTING.md) lists them, and the
+[verification commands](doc/personal-hermes/implementation.md#verification-commands)
+the full local run. `Checks` runs the component tests on pull requests and
+everything, including the end-to-end cases, on release tags and manual
+dispatch. Pushes to `main` run no checks for now. For an explicit local build without publishing, set
 `RELEASE_VERSION` to an unused SemVer release or prerelease:
 
 ```bash
@@ -141,8 +144,7 @@ See [AGENTS.md](AGENTS.md) for repository guidance.
 2. Push an explicit immutable tag on that commit: `vMAJOR.MINOR.PATCH`, or
    `vMAJOR.MINOR.PATCH-dev.N` for a prerelease of unmerged work.
 3. `Checks` builds each image once, labelled with the commit and version, and
-   runs every test group and the end-to-end run on those builds. The cluster
-   scenarios run only when `Checks` is dispatched by hand.
+   runs every test, including the end-to-end cases, on those builds.
 4. Only when every test job passed, its `publish` job checks the labels, runs
    the image checks, confirms GHCR accepts pushes to every package, pushes the
    tested images, then packages, renders and pushes the chart with their

@@ -1,32 +1,24 @@
-"""Run resource ownership and bootstrap tests on a disposable Kubernetes server.
+"""A disposable single-server k3s, and images imported into a cluster.
 
 Uses a separate digest-pinned k3s Docker container and a temporary kubeconfig.
 No existing Kubernetes context or deployment credentials are read or modified.
 """
 
-import argparse
 import json
-import os
-import socket
 import subprocess
-import sys
-import tempfile
 import time
 from pathlib import Path
 
 import yaml
 
+from tests.support.images import WORKER_TAG, image_source
 from tests.support.ownership import (
     FIXTURE,
     KUBERNETES,
-    POSTGRES,
     RUN,
-    Cleanup,
     CommandFailed,
     ForeignResource,
-    new_run,
     remove_fixture,
-    require_fixture,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,19 +46,6 @@ def build_image(args):
     assert result.returncode == 0, (
         "building a fixture image failed: " + (result.stderr[-800:])
     )
-
-
-WORKER_TAG = "hermes-next-worker:test"
-
-
-def image_source(tag):
-    """The command that writes the image's archive: CI's saved build, or Docker."""
-    directory = os.environ.get("HERMES_TEST_IMAGE_ARCHIVES")
-    if directory:
-        name = tag.replace("/", "_").replace(":", "_") + ".tar.zst"
-        if (Path(directory) / name).exists():
-            return ["zstd", "-dc", str(Path(directory) / name)]
-    return ["docker", "save", tag]
 
 
 def stream_into_cluster(identifier, tag):
@@ -112,16 +91,15 @@ def import_image(identifier, tag, reuse=False):
 
 
 def import_worker_image(identifier, *, uid=1000, gid=1000):
-    """Builds the requested worker identity and imports a digest reference.
+    """Imports the worker for an identity; returns its digest reference.
 
-    The default identity is the release worker: CI's saved build of it is
-    imported as it is, so the tests run the image a release publishes.
+    The default identity is the release worker under test, which the
+    `worker_image` fixture provides (or CI's saved build of it). Another
+    identity is built here from the worker's Dockerfile.
     """
-    tag = (
-        WORKER_TAG if (uid, gid) == (1000, 1000) else f"hermes-worker-{uid}-{gid}:test"
-    )
-    if image_source(tag)[0] == "zstd":
-        return import_image(identifier, tag)
+    if (uid, gid) == (1000, 1000):
+        return import_image(identifier, WORKER_TAG)
+    tag = f"hermes-worker-{uid}-{gid}:test"
     build_image(
         [
             "--tag",
@@ -190,7 +168,7 @@ def start_k3s(network, name, run):
             "--label",
             f"{RUN}={run}",
             "--volume",
-            f"{ROOT / 'tests/personal_hermes/k3s-registries.yaml'}"
+            f"{ROOT / 'tests/support/k3s-registries.yaml'}"
             ":/etc/rancher/k3s/registries.yaml:ro",
             "--publish",
             "127.0.0.1::6443",
@@ -290,128 +268,3 @@ def remove_container(identifier, run=None):
             return
         assert attempt < 2, "Disposable Kubernetes fixture cleanup failed"
         time.sleep(0.2)
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--postgres-container", default="personal-hermes-manager-tests")
-    parser.add_argument(
-        "--suite",
-        action="append",
-        required=True,
-        help="a verification suite to run on this cluster; repeatable",
-    )
-    parser.add_argument(
-        "--k3d",
-        action="store_true",
-        help="Use a disposable k3d cluster without touching a deployment context",
-    )
-    args = parser.parse_args()
-    # Injection (pausing the database) and database creation happen in this
-    # container: prove it is a fixture before anything else.
-    require_fixture(args.postgres_container, POSTGRES)
-    postgres = json.loads(command(["docker", "inspect", args.postgres_container]))[0]
-    networks = postgres["NetworkSettings"]["Networks"]
-    assert networks, "Disposable PostgreSQL fixture has no network"
-    network = "bridge" if "bridge" in networks else next(iter(networks))
-    run = new_run()
-    name = "personal-hermes-kube-test-" + run
-    if args.k3d:
-        name = "hermes-native-" + run[:8]
-    with Cleanup() as cleanup:
-        if args.k3d:
-            with socket.socket() as port_socket:
-                port_socket.bind(("127.0.0.1", 0))
-                api_port = port_socket.getsockname()[1]
-            cleanup.add(
-                "k3d cluster",
-                lambda: command(["k3d", "cluster", "delete", name], timeout=90),
-            )
-            command(
-                [
-                    "k3d",
-                    "cluster",
-                    "create",
-                    name,
-                    "--image",
-                    IMAGE,
-                    "--api-port",
-                    f"127.0.0.1:{api_port}",
-                    "--no-lb",
-                    "--kubeconfig-update-default=false",
-                    "--kubeconfig-switch-context=false",
-                    "--wait",
-                    "--timeout",
-                    "120s",
-                ],
-                timeout=180,
-            )
-            identifier = command(
-                ["docker", "inspect", "--format", "{{.Id}}", f"k3d-{name}-server-0"]
-            ).strip()
-            cleanup.add(
-                "database network membership",
-                lambda: command(
-                    [
-                        "docker",
-                        "network",
-                        "disconnect",
-                        f"k3d-{name}",
-                        args.postgres_container,
-                    ]
-                ),
-            )
-            command(
-                ["docker", "network", "connect", f"k3d-{name}", args.postgres_container]
-            )
-        else:
-            identifier = start_k3s(network, name, run)
-            cleanup.add("k3s container", lambda: remove_container(identifier, run))
-        config = wait_ready(identifier)
-        postgres_port = (
-            command(["docker", "port", args.postgres_container, "5432/tcp"])
-            .strip()
-            .splitlines()[0]
-            .rsplit(":", 1)[1]
-        )
-        with tempfile.TemporaryDirectory(
-            prefix="personal-hermes-kubernetes-"
-        ) as temporary:
-            path = Path(temporary) / "kubeconfig"
-            path.write_text(yaml.safe_dump(config))
-            path.chmod(0o600)
-            environment = dict(os.environ)
-            environment["HERMES_TEST_KUBECONFIG"] = str(path)
-            environment["HERMES_TEST_RUN"] = run
-            environment["DATABASE_URL"] = (
-                f"postgres://hermes_test@127.0.0.1:{postgres_port}/hermes_test"
-            )
-            # The rewrite's adapter tests run in-process as the controller's
-            # real ServiceAccount; no binary is needed. The worker test
-            # needs the repository's terminal backend image in the cluster.
-            environment["HERMES_TEST_WORKER_IMAGE"] = import_worker_image(identifier)
-            environment["HERMES_TEST_K3S_CONTAINER"] = identifier
-            environment["HERMES_TEST_POSTGRES_CONTAINER"] = args.postgres_container
-            failed = []
-            for suite in args.suite:
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "tests.support.verification",
-                        "run",
-                        suite,
-                        "--output",
-                        f".local/verification/{suite}.json",
-                    ],
-                    cwd=ROOT,
-                    env=environment,
-                    timeout=1200,
-                )
-                if result.returncode:
-                    failed.append(suite)
-            assert not failed, f"failed: {failed}"
-
-
-if __name__ == "__main__":
-    main()

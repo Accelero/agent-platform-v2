@@ -7,8 +7,8 @@
 //! message, or Pod Security Admission where the policy delegates to it), so an
 //! unrelated invalid fixture or a policy that refuses everything cannot pass.
 //!
-//! Needs `HERMES_TEST_KUBECONFIG`; run through
-//! `tests/personal_hermes/kubernetes.py`, never against a real cluster.
+//! Needs `HERMES_TEST_KUBECONFIG`; run through `tests/services/test_manager.py`,
+//! whose fixture provides a disposable k3s, never against a real cluster.
 
 #[allow(dead_code)]
 mod support;

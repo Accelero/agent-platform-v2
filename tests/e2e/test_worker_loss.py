@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person, ready
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.slow]
@@ -23,7 +23,7 @@ RUNTIME = "--runtime-endpoint unix:///run/k3s/containerd/containerd.sock"
 RETIRED_WITHIN = 330
 
 LONG_COMMAND = (
-    scenarios.PLUGIN_PRELUDE
+    system.PLUGIN_PRELUDE
     + """
 shell = environment("", "k1")
 print("started", flush=True)
@@ -39,7 +39,7 @@ except Exception as error:
 )
 
 NEXT_SESSION = (
-    scenarios.PLUGIN_PRELUDE
+    system.PLUGIN_PRELUDE
     + """
 shell = environment("", "k2")
 reply = shell.execute("cat /workspace/loss-log; id -u")
@@ -50,7 +50,7 @@ print(json.dumps({"output": reply["output"], "returncode": reply["returncode"]})
 
 
 def worker_pods(platform, namespace):
-    pods = scenarios.kubectl(
+    pods = system.kubectl(
         platform.identifier, "get", "pods", "--namespace", namespace, "-o", "name"
     ).split()
     return {pod.split("/", 1)[1] for pod in pods if pod.startswith("pod/hw-")}
@@ -120,16 +120,14 @@ def test_a_worker_lost_mid_command_is_not_replayed_or_replaced_and_keeps_its_dat
     )
     namespace = ready(platform, receipt)
     instance = receipt["instanceId"]
-    hermes = scenarios.hermes_pod(platform.identifier, namespace)
+    hermes = system.hermes_pod(platform.identifier, namespace)
 
-    process = scenarios.hermes_python_started(
-        platform.identifier, namespace, LONG_COMMAND
-    )
+    process = system.hermes_python_started(platform.identifier, namespace, LONG_COMMAND)
     try:
         assert process.stdout.readline().strip() == "started"
-        scenarios.wait(
+        system.wait(
             lambda: (
-                scenarios.instance_pod_exec(
+                system.instance_pod_exec(
                     platform.identifier,
                     namespace,
                     "cat /workspace/loss-log 2>/dev/null",
@@ -142,7 +140,7 @@ def test_a_worker_lost_mid_command_is_not_replayed_or_replaced_and_keeps_its_dat
         )
         original = worker_pods(platform, namespace)
         assert len(original) == 1, original
-        lost = scenarios.environments(admin, instance)
+        lost = system.environments(admin, instance)
         assert [(e["state"], e["leases"]) for e in lost] == [("ready", 1)]
 
         stop_worker(platform, namespace)
@@ -157,7 +155,7 @@ def test_a_worker_lost_mid_command_is_not_replayed_or_replaced_and_keeps_its_dat
     seen, states = set(original), []
     deadline = time.monotonic() + RETIRED_WITHIN
     while True:
-        environment = {e["id"]: e for e in scenarios.environments(admin, instance)}[
+        environment = {e["id"]: e for e in system.environments(admin, instance)}[
             lost[0]["id"]
         ]
         states.append(environment["state"])
@@ -172,19 +170,19 @@ def test_a_worker_lost_mid_command_is_not_replayed_or_replaced_and_keeps_its_dat
     )
     assert seen == original, f"another worker replaced it: {seen - original}"
     assert not worker_pods(platform, namespace), "the lost worker's Pod was left"
-    log = scenarios.instance_pod_exec(
+    log = system.instance_pod_exec(
         platform.identifier, namespace, "cat /workspace/loss-log"
     )
     assert log.split() == ["started"], f"the command was replayed or finished: {log}"
-    assert scenarios.hermes_pod(platform.identifier, namespace) == hermes, (
+    assert system.hermes_pod(platform.identifier, namespace) == hermes, (
         "Hermes was restarted by the loss of a worker"
     )
 
     # The next session gets its own worker of the same backend, on the same data.
-    result = scenarios.hermes_python(platform.identifier, namespace, NEXT_SESSION)
+    result = system.hermes_python(platform.identifier, namespace, NEXT_SESSION)
     assert result["returncode"] == 0
     assert result["output"].split() == ["started", "1000"], result
-    after = {e["id"]: e for e in scenarios.environments(admin, instance)}
+    after = {e["id"]: e for e in system.environments(admin, instance)}
     assert len(after) == 2 and lost[0]["id"] in after
     fresh = next(e for i, e in after.items() if i != lost[0]["id"])
     assert fresh["backend"] == lost[0]["backend"]

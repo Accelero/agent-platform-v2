@@ -21,9 +21,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from tests.personal_hermes import native_e2e as e2e
+from tests.support import system
 
-KEYCLOAK_ORIGIN = f"https://{e2e.KEYCLOAK}:8443"
+KEYCLOAK_ORIGIN = f"https://{system.KEYCLOAK}:8443"
 TIMEOUT_MS = 30_000
 
 
@@ -48,13 +48,13 @@ def trust(home: Path, ca: str):
 def resolver_rules(node_ip: str):
     """Maps the fixture's names to their node ports; every other name fails."""
     mapped = [
-        (e2e.KEYCLOAK, e2e.NODE_PORTS["keycloak"]),
-        (e2e.PUBLIC, e2e.NODE_PORTS["gateway"]),
-        (e2e.ADMIN, e2e.NODE_PORTS["admin"]),
+        (system.KEYCLOAK, system.NODE_PORTS["keycloak"]),
+        (system.PUBLIC, system.NODE_PORTS["gateway"]),
+        (system.ADMIN, system.NODE_PORTS["admin"]),
     ]
     mapped.extend(
-        (f"{label}.{e2e.SHARED_DOMAIN}", e2e.NODE_PORTS["gateway"])
-        for label in e2e.SHARED_LABELS
+        (f"{label}.{system.SHARED_DOMAIN}", system.NODE_PORTS["gateway"])
+        for label in system.SHARED_LABELS
     )
     rules = [f"MAP {host} {node_ip}:{port}" for host, port in mapped]
     return ", ".join([*rules, "MAP * ~NOTFOUND"])

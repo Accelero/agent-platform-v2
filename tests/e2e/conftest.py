@@ -1,4 +1,4 @@
-"""Fixtures for the independently collected system scenarios.
+"""Fixtures for the end-to-end cases of the installed platform.
 
 Nothing is created at collection. The k3d cluster is built when the first
 test that needs it runs, with its teardown registered immediately; selecting
@@ -24,7 +24,13 @@ def cluster(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def platform(tmp_path_factory):
+def platform_images(images):
+    """The three images under test, built (or found saved) side by side."""
+    return images.require("hermes", "manager", "worker")
+
+
+@pytest.fixture(scope="session")
+def platform(tmp_path_factory, platform_images):
     """The installed platform with Bob's and Carol's commissioned instances.
 
     Built once per run on a single-node cluster of its own: node-local storage
@@ -80,12 +86,12 @@ def reclaimed(request):
 def chromium(platform, tmp_path_factory):
     """A real Chromium that trusts the fixture CA and reaches the platform's
     hostnames only; each case takes a context of its own."""
-    from tests.personal_hermes import native_e2e as e2e
     from tests.support import browser as browser_support
+    from tests.support import system
 
     home = tmp_path_factory.mktemp("chromium-home")
     home.chmod(0o700)
-    node_ip = e2e.container_ip(platform.identifier, platform.network)
+    node_ip = system.container_ip(platform.identifier, platform.network)
     browser = browser_support.Chromium(node_ip, platform.ca, home)
     try:
         yield browser
@@ -102,7 +108,7 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture(scope="session")
-def destructive_pool(tmp_path_factory):
+def destructive_pool(tmp_path_factory, platform_images):
     """The platform the destructive cases share.
 
     Building one takes about 3.5 minutes, nearly three quarters of a destructive
