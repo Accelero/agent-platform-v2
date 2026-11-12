@@ -5,6 +5,9 @@ test that needs it runs, with its teardown registered immediately; selecting
 one scenario provisions only its prerequisites.
 """
 
+import json
+import time
+
 import pytest
 
 from tests.support import cluster as cluster_support
@@ -48,9 +51,14 @@ def platform(tmp_path_factory, platform_images):
         yield platform_support.bring_up(built, directory, cleanup, shared=True)
 
 
-def reclaim(platform):
-    """Suspends every enabled instance except the commissioned owners'."""
+def reclaim(platform, timeout=180):
+    """Suspends every enabled instance except the commissioned owners', and
+    waits (bounded) until their Pods are gone, so the next case has the room."""
     kept = {receipt["assignmentId"] for receipt in platform.assignments.values()}
+    owners = {
+        platform.admin.phase(receipt["instanceId"])["namespace"]
+        for receipt in platform.assignments.values()
+    }
     after = ""
     while True:
         page = platform.admin.call(
@@ -63,18 +71,34 @@ def reclaim(platform):
             break
         after = f"&after={page['nextCursor']}"
 
+    def released():
+        listed = platform.cluster.kubectl(
+            "get", "pods", "-A", "-o", "json", check=False
+        )
+        if listed.returncode:
+            return False
+        pods = json.loads(listed.stdout)["items"]
+        return not any(
+            pod["metadata"]["namespace"].startswith("hi-")
+            and pod["metadata"]["namespace"] not in owners
+            for pod in pods
+        )
+
+    deadline = time.monotonic() + timeout
+    while not released() and time.monotonic() < deadline:
+        time.sleep(3)
+
 
 @pytest.fixture(autouse=True)
 def reclaimed(request):
     """Stops the instances a case created on the shared platform once it ends.
 
-    Every Hermes instance requests 2 GiB of memory and a CPU, and the shared
-    platform is one node, so instances left running by earlier cases starve the
-    later ones (about fifteen fill a 31 GB machine). Suspending an instance
-    keeps its data and credentials and frees its Pods; the commissioned owners
-    stay as they are. The Pods are not waited for: they terminate while the next
-    case makes its own people. The destructive cases do the same in their own
-    fixture, which owns the platform they share.
+    The shared platform is one node, so instances left running by earlier cases
+    starve the later ones; on a CI runner two or three more fill it. Suspending
+    an instance keeps its data and credentials and frees its Pods; the
+    commissioned owners stay as they are. The Pods are waited for, because a
+    terminating Pod still holds its requests. The destructive cases do the
+    same in their own fixture, which owns the platform they share.
     """
     yield
     if "platform" not in request.fixturenames:

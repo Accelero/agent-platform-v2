@@ -241,6 +241,7 @@ def create(agents: int, directory: Path, cleanup: Cleanup) -> Cluster:
 
 def import_probe_image(cluster: Cluster):
     """Imports the pinned probe image into every node; returns its reference."""
+    run(["docker", "pull", "--quiet", PROBE_SOURCE], timeout=600)
     run(["docker", "tag", PROBE_SOURCE, PROBE_TAG])
     references = set()
     for node in cluster.nodes:

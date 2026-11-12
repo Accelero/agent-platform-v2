@@ -76,7 +76,7 @@ def test_a_read_only_volume_refuses_writes_while_its_writable_sibling_accepts_th
         {
             "schemaVersion": 2,
             "image": platform.images["hermes"],
-            "resources": {"cpuMillis": 1000, "memoryMib": 2048},
+            "resources": system.HERMES_RESOURCES,
             "home": {"source": "local", "sizeGib": 1},
             "mounts": {
                 "workspace": {"mountPath": "/workspace"},

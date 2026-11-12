@@ -574,7 +574,7 @@ def test_hostile_catalog_text_is_shown_as_text_in_the_dashboard(platform, chromi
         {
             "schemaVersion": 2,
             "image": platform.images["hermes"],
-            "resources": {"cpuMillis": 1000, "memoryMib": 2048},
+            "resources": system.HERMES_RESOURCES,
             "home": {"source": "local", "sizeGib": 1},
             "adminConfig": {"display": {"note": payload}},
         },

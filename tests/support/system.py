@@ -68,7 +68,9 @@ SUBJECTS = {
 READY_TIMEOUT = 900
 # Requests equal limits, so these fix how many instances fit on the node. Two
 # owners run throughout and each scenario adds at most one, on a 2-CPU runner.
-HERMES_RESOURCES = {"cpuMillis": 350, "memoryMib": 1024}
+# What a test instance requests: a real instance stays near 400 MiB, and the
+# CI runners have two CPUs and about 7 GiB for the whole platform.
+HERMES_RESOURCES = {"cpuMillis": 350, "memoryMib": 768}
 HERE = Path(__file__).resolve().parent
 # The in-cluster fake model (fake_model.py) every assistant instance uses.
 MODEL_URL = "http://fake-model.model.svc.cluster.local:8080/v1"

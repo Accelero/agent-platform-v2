@@ -17,7 +17,7 @@ def template(platform, **extra):
     return {
         "schemaVersion": 2,
         "image": platform.images["hermes"],
-        "resources": {"cpuMillis": 1000, "memoryMib": 2048},
+        "resources": system.HERMES_RESOURCES,
         "home": {"source": "local", "sizeGib": 1},
         "mounts": {"workspace": {"mountPath": "/workspace"}},
         "defaultVolumes": {"workspace": {"source": "local", "sizeGib": 1}},
