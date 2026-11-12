@@ -75,8 +75,8 @@ features that are already implemented.
 collected cases under `tests/e2e/` run through the `e2e` and
 `e2e-destructive` profiles. Their fixtures use k3d: the network matrix has
 one server and two agents; the installed platform runs on a separate single
-node. The `cluster scenarios` job of `Checks` runs these profiles on release
-tags and manual dispatch. On main and tags, `Checks` also runs the sequential
+node. The `cluster scenarios` job of `Checks` runs these profiles only when
+dispatched by hand. On release tags and manual dispatch, `Checks` also runs the sequential
 platform script as `e2e`. Its restore helper creates a second direct-k3s cluster,
 including when invoked from pytest.
 

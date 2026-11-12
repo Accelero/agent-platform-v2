@@ -180,10 +180,10 @@ budgets, with incomplete production-boundary coverage recorded in G06.
 
 | Workflow | Trigger and execution |
 | --- | --- |
-| `Checks` (`checks.yml`) | Pull requests run the fast groups; pushes to main run every group. Each image is built once by the `images` job, and the jobs that need it test that build. `e2e` runs in two parts on separate runners. Release tags and manual dispatch also run `cluster scenarios` (the `e2e` and `e2e-destructive` profiles, including the network matrix and installed browser journeys) on the same builds |
+| `Checks` (`checks.yml`) | Pull requests run the fast groups; release tags and manual dispatch run every group. Pushes to main run no checks for now. Each image is built once by the `images` job, and the jobs that need it test that build. `e2e` runs in two parts on separate runners. Manual dispatch also runs `cluster scenarios` (the `e2e` and `e2e-destructive` profiles, including the network matrix and installed browser journeys) on the same builds |
 | `publish release` (job of `Checks`) | Version tags only, after every test job passed: verifies the version and that the tested images carry this commit and version, checks GHCR push access, pushes those images and then their chart, and creates the GitHub Release |
 
-The cluster scenarios are not pull request gates. There is no scheduled
+Changes are tested locally with `tests.run` before they are merged, and the release tag runs the suite again, so pushes to main run no checks. The cluster scenarios run only when dispatched by hand; they gate neither pull requests nor releases. There is no scheduled
 extended/NFS/soak workflow. A release publishes the images its own run tested;
 the publish job adds image and packaged-chart validation. G20 records the remaining artifact evidence; G22
 records the remaining profile and reporting work.

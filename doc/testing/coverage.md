@@ -118,7 +118,8 @@ production boundary. G06 owns their measurement contract.
 
 - No measured line/branch percentage or comprehensive mutation/fuzz result exists.
 - The `cluster scenarios` job runs the k3d network, acceptance, browser and
-  destructive profiles on release tags and manual dispatch. They are not PR gates;
+  destructive profiles only when dispatched by hand. They gate neither pull
+  requests nor releases;
   a workflow definition or a source-level assertion is not a candidate result. No live NFS test and no multi-node acceptance run of the platform
   exist; the platform runs on a single node.
 - Generated manifests matching each other do not demonstrate live isolation.

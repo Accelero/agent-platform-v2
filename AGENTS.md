@@ -98,9 +98,9 @@ release numbers to documentation. A release requires an explicit
 unmerged work. This repository is its own product: it publishes only under
 `ghcr.io/accelero/agent-platform-v2` (images and the `agent-platform-v2`
 chart) with its own version line, never to the public `agent-platform`
-repository's packages. Never overwrite or reuse an existing version. A version tag runs all of
-`Checks`, including the cluster scenarios, on images built once from the
-tagged commit. Its `publish` job runs only after every test job passed: it
+repository's packages. Never overwrite or reuse an existing version. A version tag runs
+`Checks` on images built once from the tagged commit; the cluster scenarios
+run only when `Checks` is dispatched by hand. Its `publish` job runs only after every test job passed: it
 checks that the tested images carry this commit and version, confirms GHCR
 accepts pushes to every package, pushes those same images and then their
 self-contained chart. Nothing is rebuilt for a release. Keep the source and
@@ -121,7 +121,8 @@ Publication and repository visibility changes require user authorization.
 
 Build caches use GitHub Actions API v2 with distinct scopes per image. Only the
 `images` job on pushes to main writes them, and it holds no package permission;
-release builds only read them.
+release builds only read them. `Checks` does not run on pushes to main for now,
+so nothing currently writes them.
 A cache failure must not fail a build.
 Never recreate GHCR cache packages or pass cache credentials in command arguments.
 Keep the default cache storage limit unless the user authorizes paid storage.

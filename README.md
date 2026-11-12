@@ -120,9 +120,9 @@ uv run python -m agent_platform.privacy
 Chart tests call `helm`; it must be on `PATH`. The Rust, dashboard, k3s and
 end-to-end checks are listed in the
 [verification commands](doc/personal-hermes/implementation.md#verification-commands).
-`Checks` runs the fast groups on pull requests, everything else on pushes to
-`main`, and on release tags and manual dispatch also the collected k3d and
-browser scenarios. For an explicit local build without publishing, set
+`Checks` runs the fast groups on pull requests and everything else on release
+tags and manual dispatch; only manual dispatch also runs the collected k3d and
+browser scenarios. Pushes to `main` run no checks for now. For an explicit local build without publishing, set
 `RELEASE_VERSION` to an unused SemVer release or prerelease:
 
 ```bash
@@ -137,13 +137,12 @@ See [AGENTS.md](AGENTS.md) for repository guidance.
 
 1. Set the chart (`version`, `appVersion`) and `pyproject.toml` versions, and
    the project entry in `uv.lock`, to the release version in one commit; the
-   workflow rejects a tag that does not match them. Let the `Checks` run of the
-   latest push to `main` finish first, so the release build reuses its layers.
+   workflow rejects a tag that does not match them.
 2. Push an explicit immutable tag on that commit: `vMAJOR.MINOR.PATCH`, or
    `vMAJOR.MINOR.PATCH-dev.N` for a prerelease of unmerged work.
 3. `Checks` builds each image once, labelled with the commit and version, and
-   runs every test group, the end-to-end run and the cluster scenarios on
-   those builds.
+   runs every test group and the end-to-end run on those builds. The cluster
+   scenarios run only when `Checks` is dispatched by hand.
 4. Only when every test job passed, its `publish` job checks the labels, runs
    the image checks, confirms GHCR accepts pushes to every package, pushes the
    tested images, then packages, renders and pushes the chart with their
@@ -175,6 +174,7 @@ uv run python -m agent_platform.privacy
 ## Build cache
 
 BuildKit uses the GitHub Actions cache API v2 with one scope per image. The
-`images` job of `Checks` stores its layers on pushes to `main`; a failed upload
-does not fail the build. Runs on other refs, including release tags, only read
-the cache. The default 10 GB storage limit is retained.
+`images` job of `Checks` stores its layers only on pushes to `main`, which do
+not run `Checks` for now, so release builds start cold; a failed upload does
+not fail the build. Runs on other refs, including release tags, only read the
+cache. The default 10 GB storage limit is retained.

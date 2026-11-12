@@ -2,14 +2,13 @@ name: Checks
 
 # Each step is one test group: `tests.run <component> <level>` runs the same
 # group locally. Every image is built once, by the `images` job; the jobs that
-# need one test exactly that build. Those jobs, the slowest, run on main and on
-# release tags, not on every pull request. A push to main also stores the image
-# layers in the build cache; every other run only reads them. The cluster
-# scenarios run on release tags and on manual dispatch. On a release tag,
-# `publish` pushes those tested images once every test job has passed.
+# need one test exactly that build. Those jobs, the slowest, run on release tags
+# and manual dispatch, not on pull requests. Pushes to main run no checks for
+# now, so the image build cache, which only main writes, stays empty. The
+# cluster scenarios run only on manual dispatch. On a release tag, `publish`
+# pushes those tested images once every test job has passed.
 'on':
   push:
-    branches: [main]
     tags: ['v[0-9]*.[0-9]*.[0-9]*']
   pull_request:
   # Runs everything, including the cluster scenarios, without a release.
@@ -261,7 +260,7 @@ jobs:
   cluster-scenarios:
     name: cluster scenarios
     needs: images
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -314,11 +313,11 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  # Runs only for a release tag, and only after every test job above passed.
+  # Runs only for a release tag, and only after every test job of the tag passed.
   # It publishes the images those jobs tested; nothing is rebuilt.
   publish:
     name: publish release
-    needs: [tooling-chart-hermes-unit, manager-gateway-dashboard-worker, hermes-integration, e2e, cluster-scenarios]
+    needs: [tooling-chart-hermes-unit, manager-gateway-dashboard-worker, hermes-integration, e2e]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 45
