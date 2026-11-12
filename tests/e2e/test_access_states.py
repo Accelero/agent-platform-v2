@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.slow]
 
@@ -31,13 +31,13 @@ WALK = [
 
 
 def pods(platform, namespace):
-    return scenarios.kubectl(
+    return system.kubectl(
         platform.identifier, "get", "pods", "--namespace", namespace, "-o", "name"
     ).split()
 
 
 def claims(platform, namespace):
-    return scenarios.kubectl(
+    return system.kubectl(
         platform.identifier,
         "get",
         "pvc",
@@ -58,7 +58,7 @@ def served(owner, step):
         statuses.add(reply.status_code)
         return reply.status_code == 200
 
-    scenarios.wait(back, scenarios.READY_TIMEOUT, f"{step}: not back", interval=5)
+    system.wait(back, system.READY_TIMEOUT, f"{step}: not back", interval=5)
     return statuses
 
 
@@ -68,13 +68,13 @@ def test_every_access_state_denies_the_owner_and_keeps_the_instance_and_its_data
     admin = platform.admin
     username = f"states-{secrets.token_hex(3)}"
     password = secrets.token_urlsafe(18)
-    directory = scenarios.Directory(platform.ca, platform.passwords["directory"])
+    directory = system.Directory(platform.ca, platform.passwords["directory"])
     subject = directory.create(username, f"{username}@e2e.test", password)
     receipt = admin.call(
         "POST",
         "/api/v1/assignments",
         {
-            "identity": {"issuer": scenarios.ISSUER, "subject": subject},
+            "identity": {"issuer": system.ISSUER, "subject": subject},
             "spec": {
                 "access": "enabled",
                 "template": {"id": "personal", "version": platform.state.template},
@@ -84,26 +84,26 @@ def test_every_access_state_denies_the_owner_and_keeps_the_instance_and_its_data
     instance, assignment = receipt["instanceId"], receipt["assignmentId"]
 
     def ready():
-        scenarios.wait(
+        system.wait(
             lambda: admin.phase(instance)["phase"] == "ready",
-            scenarios.READY_TIMEOUT,
+            system.READY_TIMEOUT,
             lambda: admin.phase(instance),
             interval=5,
         )
 
     ready()
     namespace = admin.phase(instance)["namespace"]
-    owner = scenarios.Browser(platform.ca, username, password)
+    owner = system.Browser(platform.ca, username, password)
     assert owner.sign_in().status_code == 200
     owner.native_sign_in()
 
     marker = secrets.token_hex(8)
-    scenarios.instance_pod_exec(
+    system.instance_pod_exec(
         platform.identifier, namespace, f"echo {marker} > /opt/data/e2e-marker"
     )
     volumes = claims(platform, namespace)
     assert volumes
-    credentials = scenarios.secret_digests(
+    credentials = system.secret_digests(
         platform.identifier, namespace, "hermes-credentials"
     )
     state = "enabled"
@@ -118,20 +118,20 @@ def test_every_access_state_denies_the_owner_and_keeps_the_instance_and_its_data
             ready()
             assert statuses <= {200, 202, 403}, f"{step}: unexpected {statuses}"
             assert admin.phase(instance)["id"] == instance, step
-            kept = scenarios.instance_pod_exec(
+            kept = system.instance_pod_exec(
                 platform.identifier, namespace, "cat /opt/data/e2e-marker"
             )
             assert kept.strip() == marker, f"{step}: the home volume was replaced"
             assert claims(platform, namespace) == volumes, step
             assert (
-                scenarios.secret_digests(
+                system.secret_digests(
                     platform.identifier, namespace, "hermes-credentials"
                 )
                 == credentials
             ), f"{step}: credentials were regenerated"
         else:
             if connection is not None:
-                took = scenarios.closed_within(connection, 15)
+                took = system.closed_within(connection, 15)
                 assert took < 12, f"{step}: an open WebSocket outlived the change"
             # Denied within the cache bound, and never let through again.
             deadline = time.monotonic() + 15
@@ -140,7 +140,7 @@ def test_every_access_state_denies_the_owner_and_keeps_the_instance_and_its_data
                 time.sleep(0.5)
             page = owner.get("/", headers={"Accept": "text/html"})
             assert page.status_code == 403, f"{step}: {page.status_code}"
-            scenarios.wait(
+            system.wait(
                 lambda: admin.phase(instance)["phase"] == "retained",
                 300,
                 f"{step}: the instance was not retained",

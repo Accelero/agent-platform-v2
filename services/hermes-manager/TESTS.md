@@ -25,14 +25,11 @@ Statuses:
   or an execution receipt for a particular run;
 - `manual`: needs an environment CI does not have; the procedure is linked.
 
-The [execution ledger](../../tests/verification/README.md) adds exact compiled
-Cargo and collected pytest identities, reviewed levels, profile-specific gates,
-and sanitized JSON/JUnit outcomes. CI requires collection and passing execution
-for the Python, Rust workspace, fault, production-browser, Kubernetes adapter
-and controller-process profiles. Helpers from standalone native scripts without collected wrappers remain
-explicitly uncollected G01 entries; their existence never counts as a collected
-result. TypeScript and the native system script retain their
-existing jobs. Full clause/interface variant mapping remains G03 work.
+Every named test runs in the repository's pytest suite
+([doc/TESTING.md](../../doc/TESTING.md)): Python tests directly, and Rust and
+TypeScript tests through one pytest case per test target. CI requires each
+job's selection to pass with no skip. Full clause/interface variant mapping
+remains G03 work.
 
 R14 is `partial`: the native alternate-identity ownership, default-image and
 image-mismatch scenario is implemented and executed; live NFS, multi-node mount
@@ -214,8 +211,8 @@ are implemented and executed; accelerated timings do not prove production deadli
 
 These tests exercise the project runtime image described in
 [the shared-agent plan](../../doc/shared-hermes-agents.md#native-runtime).
-They do not by themselves prove platform routing. The collected
-`hermes-integration` profile supplies a real disposable Keycloak, isolated DNS and TLS,
+They do not by themselves prove platform routing. Their fixtures (the
+`hermes and image` selection) supply a real disposable Keycloak, isolated DNS and TLS,
 and non-root native instances with read-only roots and managed configuration.
 
 | Case | Tests | Level | Status |

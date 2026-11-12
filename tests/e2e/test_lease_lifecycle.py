@@ -22,13 +22,13 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person, ready
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.slow]
 
 PRELUDE = (
-    scenarios.PLUGIN_PRELUDE
+    system.PLUGIN_PRELUDE
     + """
 import urllib.error, uuid
 
@@ -85,13 +85,13 @@ def instance_with(platform, backends, default, mode):
 
 
 def run(platform, namespace, body):
-    return scenarios.hermes_python(
+    return system.hermes_python(
         platform.identifier, namespace, PRELUDE + body, timeout=400
     )
 
 
 def environments(platform, receipt):
-    return scenarios.environments(platform.admin, receipt["instanceId"])
+    return system.environments(platform.admin, receipt["instanceId"])
 
 
 def leases(platform, receipt):

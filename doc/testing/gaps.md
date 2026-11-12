@@ -28,10 +28,9 @@ candidate. File/function existence is not completion.
    Add or change tests at the lowest proving level. Every Python test carries
    exactly one level marker plus its capability markers; parameter IDs describe
    behaviour.
-3. In the same change, update [`cases.json`](../../tests/verification/README.md)
-   for every added, renamed or removed identity, and name obligation-proving
-   tests in the matching [`TESTS.md`](../../services/hermes-manager/TESTS.md) row.
-4. Run the affected verifier profiles and the repository checks in `AGENTS.md`.
+3. In the same change, name obligation-proving tests in the matching
+   [`TESTS.md`](../../services/hermes-manager/TESTS.md) row.
+4. Run the affected pytest selection and the repository checks in `AGENTS.md`.
    A product defect found by a new test is fixed in the product with its
    regression test; never weaken a SPEC.md bound or skip a case to pass.
 5. Rewrite the gap's "Current" paragraph to what now exists. When its "Done"
@@ -46,13 +45,11 @@ ARCH.md rules like any other change.
 
 **P0 · Refactor system tests · Prerequisite for reliable per-case reporting.**
 
-Current: `tests/personal_hermes/native_e2e.py` is still the sequential program, and
-CI still runs it. Its bring-up and its scenarios are now also reachable as
-independent pytest cases (`tests/e2e/`): `tests/support/platform.py` installs
-Keycloak, the fake model, PostgreSQL and the chart on the run-owned k3d cluster
-and commissions Bob and Carol through the factory `commission()` extracted from
-the program, and each scenario helper is its own collected case that keeps the
-helper's assertions. Twelve run against one shared platform and can run alone or
+Current: every end-to-end scenario is a collected pytest case in `tests/e2e/`;
+the installation helpers they share are `tests/support/system.py`.
+`tests/support/platform.py` installs Keycloak, the fake model, PostgreSQL and
+the chart on the run-owned k3d cluster and commissions Bob and Carol through
+`commission()`. Twelve run against one shared platform and can run alone or
 back to front (`HERMES_TEST_ORDER=reverse`). The `destructive` marker names the
 twelve cases that break or take over their platform: outages, controller absence and
 failover, a wrong sealing key, key rotations, suspension, a backend change, a
@@ -68,13 +65,15 @@ as they found it. The shared platform runs on a single-node cluster of its own: 
 three nodes, node-local dynamic storage and a static local-path source pinned
 to the server leave a worker that mounts both unschedulable, which the first
 full run showed as a persistent `409` (the specified single-server setup;
-multi-node storage placement belongs to G16). The private-registry scenario is not collected: it edits
-one node's hosts file, so it needs per-node registry configuration first.
+multi-node storage placement belongs to G16). The private-registry scenario is
+a destructive case of its own (`tests/e2e/test_private_registry.py`); every k3d
+node carries the registry mirror configuration, and the case points the
+platform's single node at the registry through its hosts file. It has not yet
+run in a reverse-order run of the destructive cases.
 
-The installed-image checks of `native_runtime.py` are collected as 13
-`hermes-integration` cases (`tests/integration/hermes/test_image_runtime.py`, mechanics in
-`tests/support/native.py`); the script stays until the scenarios below have
-collected equivalents; one end-to-end helper remains uncollected.
+The installed-image checks are 14 collected cases
+(`runtimes/hermes/tests/integration/test_image_runtime.py`, mechanics in
+`tests/support/native.py`).
 
 Extract clients and mechanics into shared Python support; express each of the
 23 acceptance rows as one or more independent collected cases. Factories create
@@ -99,11 +98,12 @@ node, a private kubeconfig and no change to the default context. Its teardown is
 registered the moment the cluster exists and removes exactly the labelled nodes.
 It imports the pinned probe and platform images into every node by digest, waits
 for CoreDNS, and proves NetworkPolicy enforcement with a functional allow/deny
-probe before a case runs. The `e2e` and `e2e-destructive` profiles
-require `HERMES_TEST_K3D` (k3d v5.9.0). The Rust adapter fixtures, the standalone
-runner and the restore's second cluster still use direct k3s containers, per-node
-registry mirror and authentication are not configured, and the Python DNS
-override for the host name routing is still process-global.
+probe before a case runs. The end-to-end cases require `HERMES_TEST_K3D` (k3d
+v5.9.0). Every k3d node carries the private registry's mirror configuration;
+registry authentication is the registry proxy's, not the node's. The Rust
+adapter fixtures (the `kubernetes` fixture) and the restore's second cluster
+still use direct k3s containers, and the Python DNS override for the host name
+routing is still process-global.
 
 Specify and implement one run-owned k3d fixture with explicit node image/tool
 pins, topology, CA/host routing, registry mirror/auth configuration, all-node
@@ -123,14 +123,13 @@ same fixture; its cases belong to G07 and G16.
 
 **P0 · Extend traceability and reporting · All requirements/contracts.**
 
-Current: the [execution ledger](../../tests/verification/README.md) records exact
-collected Python and compiled Rust IDs and reviewed levels. CI gates collection
-and passing execution separately for the workspace, fault-enabled process,
-production browser, Kubernetes adapter and controller-process profiles. Both
-53-case store instantiations are included. Skips, missing cases, additions,
-level changes and absent execution results fail. Reports contain sanitized
-JSON/JUnit outcomes, source/profile/catalogue metadata and unresolved helper
-names; standalone native helpers explicitly remain uncollected G01 gaps.
+Current: there is no case ledger. Every test runs in the one pytest suite: each
+Rust or TypeScript test target is one pytest case, which fails when Cargo
+fails, when no Rust test ran or when libtest ignored one, and a skip fails the
+run. Each test has exactly one level and, below e2e, one component. Rust
+per-test identities appear only in Cargo's output, so a Rust test that is
+deleted, or dropped from the shared 53-case store macro, is not noticed while
+its target still runs others. Reports are per-job JUnit outcomes.
 
 Architecture checks still scan source names for static consistency. Interface
 rows now use contract filename, operation ID and method/path, so all 58
@@ -139,7 +138,7 @@ operational bounds have required `partial` traceability rows. Full clause,
 actor/status/header/side-effect/timing mapping and TypeScript collection/result
 inventories are not implemented; passing existing examples does not close them.
 
-Keep the useful static consistency checks and add a case ledger linking
+Keep the useful static consistency checks and add an obligation map linking
 individual specification clauses, all 23 acceptance rows, nine operational
 bounds and composite contract operation identities to exact Cargo/pytest/UI
 test identities. Include parameter and CI profile requirements. Compare it to
@@ -158,20 +157,17 @@ both logout contracts remain independently accounted for.
 
 Current: `tests/support/ownership.py` proves a container is a fixture by its
 `agent-platform.io/fixture` label (and, for run-scoped steps, its
-`agent-platform.io/run` label) before the standalone driver resets it, injects
-into it or removes it; a failed inspection is an error and never permission.
-A database belongs to a run by the comment the run stored, so `reset()` drops
-only those and never a name pattern. Finalizers are registered immediately
-after each allocation (k3s containers, the registry pair, the restore cluster
-and its database), all of them run, and cleanup failures are attached to the
-original error instead of replacing it. `--keep` retains the cluster and the
-database after a failure only. Unit tests with a fake daemon and integration
-tests with real, never-started containers cover foreign, similar-named,
-other-run and other-kind resources and the finalizer stack. The shared
-PostgreSQL container is still used by concurrent runs (a pause can affect
-another run), the k3d path's node containers carry no run label, the driver as
-a whole has no failure-injection tests for each allocation point, timeout or
-interrupt, and per-case sanitized phase output waits for G01.
+`agent-platform.io/run` label) before a fixture injects into it or removes it;
+a failed inspection is an error and never permission. A database belongs to a
+run by the comment the run stored, never by a name pattern. Finalizers are
+registered immediately after each allocation (PostgreSQL, k3s and k3d
+clusters, the registry pair, the restore cluster and its database), all of
+them run, and cleanup failures are attached to the original error instead of
+replacing it. Unit tests with a fake daemon and integration tests with real,
+never-started containers cover foreign, similar-named, other-run and
+other-kind resources and the finalizer stack. Each platform has a run-owned
+PostgreSQL, so pausing it affects no other run. The fixtures as a whole have
+no failure-injection tests for each allocation point, timeout or interrupt.
 
 Allocate exact run-owned resources and register finalizers immediately.
 Implement ownership checks before reset/injection/removal; cleanup only
@@ -192,7 +188,7 @@ workers cannot reset or pause each other's database/cluster.
 
 Current: `pyproject.toml` declares every direct host-side import (`requests`,
 `urllib3`, `websocket-client`, `cryptography`, `jsonschema`) at its locked
-version, and `tests/unit/tooling/test_dependencies.py` fails when a test or tooling
+version, and `agent_platform/tests/test_dependencies.py` fails when a test or tooling
 module imports an undeclared third-party package. Local mutable image tags are
 imported into fixtures; there is no shared candidate/test configuration receipt,
 and browser tooling is not yet declared.
@@ -436,12 +432,12 @@ is no non-personal mode and no environment marker that selects one. Unit and
 in-image checks refuse missing policies, environment pins and shadow plugins;
 `runtime-init.py` refuses to start without the managed policy. Initializer
 tests cover interrupted/concurrent writes, symlinks and tampered receipts, and
-`tests/integration/hermes/test_personal_init_inputs.py` drives the initializer entry
+`runtimes/hermes/tests/integration/test_personal_init_inputs.py` drives the initializer entry
 point with 68 malformed mounted inputs (context, configuration, key, input
 file kind and home root): each is refused with one fixed message that echoes
 nothing and leaves the home untouched, and the same inputs with one field
-corrected initialize. `tests/integration/hermes/test_image_runtime.py` (profile
-`hermes-integration`) starts the built image as a Pod does and collects: refusal of
+corrected initialize. `runtimes/hermes/tests/integration/test_image_runtime.py`
+starts the built image as a Pod does and collects: refusal of
 unowned authentication and execution without the mounted policies, managed
 precedence and the unredirectable policy directory, the terminal lock for every
 scope and backend, shadow-plugin refusal, profile overrides, native dashboard
@@ -586,7 +582,7 @@ ended (`401` on the platform and the native route). That case failed once in six
 passed three times in a row alone and in its position in the other order; five polling
 cadences from 10 to 40 s against the 90 s limit all kept a session alive, so the
 margin is not the cause and the cause is unknown. When it recurs, run the case with
-`pytest --tb=short` to read its assertion: the verifier hides failure text on purpose.
+`pytest --tb=short` to read its assertion.
 Concurrent refresh, provider partition, certificate negatives on a cluster and two gateway
 replicas remain.
 
@@ -741,10 +737,9 @@ scale promise. Keep external model/provider benchmarks optional and separate.
 Current: release unit tests mock build/publish commands, and image checks smoke
 specific properties. A version tag runs all of `Checks` on images its `images`
 job builds once, labelled with source, revision and declared version; the
-`publish` job `needs` every test job a tag runs (the cluster scenarios run
-only by hand) and
+`publish` job `needs` every test job, including every end-to-end case, and
 pushes those same images after checking their labels name the tagged commit
-and version (`agent_platform.release.publish`). `tests/unit/tooling/test_build.py`
+and version (`agent_platform.release.publish`). `agent_platform/tests/test_build.py`
 and `test_release.py` cover that publication waits for every test job, builds
 nothing, refuses another commit's or version's image, and stops before the
 first push when GHCR refuses any package. The tag workflow also
@@ -752,7 +747,7 @@ requires the chart and project versions in the tagged commit to equal the tag,
 while ordinary commits keep the `0.0.0` placeholder. That rule is now
 `agent_platform.release.verify_release_source` and `verify_placeholder_source`,
 called by the tag workflow before any login or publication, and
-`tests/unit/tooling/test_release_versions.py` covers the version grammar including
+`agent_platform/tests/test_release_versions.py` covers the version grammar including
 `-dev.N`, the trigger pattern against it, each of chart and project being stale,
 the placeholder never being a release, and this tree being a placeholder tree or
 the exact release commit.
@@ -866,12 +861,12 @@ presence and a few JSON schema samples are insufficient completion criteria.
 
 **P1 · Complete profile and candidate evidence.**
 
-Current: TESTING.md describes the implemented profile selection, direct-k3s
-and pytest/k3d fixtures, shared destructive platform pool and report contents.
-Checks runs the standalone native script on release tags and manual dispatch,
-and the collected pytest/k3d cases on manual dispatch only. Release publication waits for
-every test job of the tag's run. No scheduled extended/soak workflow or
-measured branch-coverage pipeline exists.
+Current: TESTING.md describes the one pytest suite, its markers and fixtures,
+the split of the end-to-end cases and the CI jobs. Checks runs the end-to-end
+cases on release tags and manual dispatch across five runners, and release
+publication waits for every test job of the tag's run. A missing fixture,
+zero collection or a skip fails a selection. No scheduled extended/soak
+workflow or measured branch-coverage pipeline exists.
 
 Complete the extended/soak profile and the remaining
 case/obligation reporting, keeping command documentation and `TESTS.md` in step.
@@ -879,17 +874,10 @@ A missing dependency, zero collection or unexpected skip in a requested profile
 must fail. Any remaining scope limitation or accepted
 gap needs a reason, responsible owner and review point rather than a `pass`.
 
-The Python/Rust baseline profiles and strict level/marker checks are
-implemented and described in the [execution ledger](../../tests/verification/README.md).
-A plain `uv run pytest -q` and the `python` profile select only tests that need
-no infrastructure; the capabilities `native`, `cluster` and `destructive` have
-their own `hermes-integration`, `e2e` and `e2e-destructive` profiles,
-which fail when their input (`HERMES_TEST_NATIVE_IMAGE` or `HERMES_TEST_K3D`) is
-absent. The k3d profiles run in the `cluster scenarios` job of `Checks` on
-manual dispatch only, not on pull requests or release tags. They do not implement
-the extended/soak profile, and the browser, database and multi-node
-capabilities have no profile of their own. TypeScript cases are not in the
-ledger.
+A plain `uv run pytest -q` selects only tests that need no infrastructure or
+toolchain; marker expressions select the rest. Nothing implements the
+extended/soak profile, and a JUnit report does not yet identify the candidate
+images it tested.
 
 **Done:** documented commands and schedules match CI, and each reported result
 identifies the executed profile, candidate, cases and coverage limitations.
@@ -1072,8 +1060,8 @@ reconnects after a dropped connection. Then delete this entry.
 
 ## Order of work and preservation rules
 
-1. The baseline case ledger exists (G03, partly). Keep it and the existing
-   native/shared/Rust/TypeScript suites and their PR gates running.
+1. Keep the one pytest suite, with its Rust and TypeScript targets, and its
+   PR gates running.
 2. Build and test ownership-safe fixtures and reproducible inputs (G04, G05),
    then the canonical k3d lifecycle including restore (G02).
 3. Split the existing scenarios into pytest with equivalent assertions and

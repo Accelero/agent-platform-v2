@@ -13,22 +13,242 @@ and no session is answered `401` and clears the stale cookies, which its rows do
 not pin.
 """
 
+import json
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, urlparse
 
 import pytest
 import requests
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.security]
 
 
+def shared_agent_direct_and_group_members_reach_one_workspace(platform):
+    """Real gateway, Keycloak, manager and native runtime share one instance."""
+    admin = platform.admin
+    created = admin.call(
+        "POST",
+        "/api/v1/assignments",
+        {
+            "sharedAgent": {
+                "name": "engineering",
+                "displayName": "Engineering",
+                "label": "engineering",
+                "enabled": True,
+            },
+            "spec": {
+                "access": "enabled",
+                "template": {"id": "assistant", "version": 1},
+                "volumes": {"workspace": {"source": "local", "sizeGib": 1}},
+                "terminal": platform.state.terminal,
+            },
+        },
+    ).json()
+    assignment = created["assignmentId"]
+    group = admin.call(
+        "POST",
+        "/api/v1/access-groups",
+        {"name": "engineers", "displayName": "Engineers"},
+    ).json()
+    group_path = f"/api/v1/access-groups/{group['groupId']}"
+    group_etag = admin.call("GET", group_path).headers["ETag"]
+    admin.call(
+        "POST",
+        f"{group_path}/members",
+        {
+            "identity": {
+                "issuer": system.ISSUER,
+                "subject": system.SUBJECTS["frank"],
+            }
+        },
+        etag=group_etag,
+    )
+    grants_path = f"/api/v1/assignments/{assignment}/grants"
+    grants_etag = admin.call("GET", grants_path).headers["ETag"]
+    admin.call(
+        "PUT",
+        grants_path,
+        {
+            "grants": [
+                {
+                    "identity": {
+                        "issuer": system.ISSUER,
+                        "subject": system.SUBJECTS["bob"],
+                    }
+                },
+                {"groupId": group["groupId"]},
+            ]
+        },
+        etag=grants_etag,
+    )
+    system.wait(
+        lambda: admin.phase(created["instanceId"])["phase"] == "ready",
+        system.READY_TIMEOUT,
+        "shared instance never became ready",
+        interval=5,
+    )
+    namespace = admin.phase(created["instanceId"])["namespace"]
+
+    def pod_state():
+        pods = json.loads(
+            system.kubectl(
+                platform.identifier,
+                "get",
+                "pods",
+                "-n",
+                namespace,
+                "-l",
+                f"agent-platform.io/instance={created['instanceId']},app.kubernetes.io/component=hermes",
+                "-o",
+                "json",
+            )
+        )["items"]
+        assert len(pods) == 1
+        container = next(
+            item
+            for item in pods[0]["status"]["containerStatuses"]
+            if item["name"] == "hermes"
+        )
+        return pods[0]["metadata"]["uid"], container["restartCount"]
+
+    original_pod = pod_state()
+    before_namespaces = system.namespaces(platform.identifier)
+
+    host = platform.shared_hosts[0]
+    members = [
+        system.Browser(platform.ca, name, platform.passwords[name], host=host)
+        for name in ("bob", "frank")
+    ]
+    for browser in members:
+        assert browser.sign_in().status_code == 200
+        assert (
+            browser.get("/_platform/me").json()["identity"]["subject"]
+            == system.SUBJECTS[browser.name]
+        )
+        assert browser.native_sign_in()["user_id"] == system.SUBJECTS[browser.name]
+    first, second = members[0].rpc(), members[1].rpc()
+    try:
+        # Concurrently: the server drops a socket that does not answer its
+        # keepalive pings, and this client answers only while it is reading.
+        with ThreadPoolExecutor(max_workers=2) as turns:
+            first_turn = turns.submit(
+                system.converse, first, "first shared fixture turn", 240
+            )
+            second_turn = turns.submit(
+                system.converse, second, "second shared fixture turn", 240
+            )
+            _, first_reply = first_turn.result(timeout=250)
+            _, second_reply = second_turn.result(timeout=250)
+        assert first_reply == second_reply == "hello from e2e"
+        assignments = admin.call("GET", "/api/v1/assignments?limit=100").json()["items"]
+        assert not any(
+            (item.get("identity") or {}).get("subject") == system.SUBJECTS["frank"]
+            for item in assignments
+        )
+        assert system.namespaces(platform.identifier) == before_namespaces
+        outsider = system.Browser(
+            platform.ca, "mallory", platform.passwords["mallory"], host=host
+        )
+        assert outsider.sign_in().status_code == 403
+
+        grants_etag = admin.call("GET", grants_path).headers["ETag"]
+        admin.call(
+            "PUT",
+            grants_path,
+            {"grants": [{"groupId": group["groupId"]}]},
+            etag=grants_etag,
+        )
+        revoked_at = time.monotonic()
+        system.wait(
+            lambda: (
+                members[0].get("/api/sessions", allow_redirects=False).status_code
+                == 403
+            ),
+            5.2,
+            "revoked member retained access",
+            interval=0.1,
+        )
+        remaining = max(0.1, 10 - (time.monotonic() - revoked_at))
+        system.closed_within(first, remaining)
+        assert not first.connected, "the revoked member's WebSocket stayed open"
+        assert time.monotonic() - revoked_at <= 10.2
+        _, continued = system.converse(
+            second, "still connected after direct removal", 240
+        )
+        assert continued == "hello from e2e"
+        assert members[1].get("/api/sessions").status_code == 200
+        assert pod_state() == original_pod
+
+        # Restore Bob's direct grant and give him a group grant too. Removing
+        # either group membership must respect the remaining direct grant.
+        grants_etag = admin.call("GET", grants_path).headers["ETag"]
+        direct_bob = {
+            "identity": {"issuer": system.ISSUER, "subject": system.SUBJECTS["bob"]}
+        }
+        admin.call(
+            "PUT",
+            grants_path,
+            {"grants": [direct_bob, {"groupId": group["groupId"]}]},
+            etag=grants_etag,
+        )
+        system.wait(
+            lambda: (
+                members[0].get("/api/sessions", allow_redirects=False).status_code
+                == 200
+            ),
+            10,
+            "direct grant did not restore access",
+            interval=0.2,
+        )
+        group_etag = admin.call("GET", group_path).headers["ETag"]
+        admin.call("POST", f"{group_path}/members", direct_bob, etag=group_etag)
+        items = admin.call("GET", f"{group_path}/members?limit=100").json()["items"]
+        identities = {item["identity"]["subject"]: item["identityId"] for item in items}
+        group_etag = admin.call("GET", group_path).headers["ETag"]
+        admin.call(
+            "DELETE",
+            f"{group_path}/members/{identities[system.SUBJECTS['bob']]}",
+            etag=group_etag,
+        )
+        assert members[0].get("/api/sessions", allow_redirects=False).status_code == 200
+        group_etag = admin.call("GET", group_path).headers["ETag"]
+        admin.call(
+            "DELETE",
+            f"{group_path}/members/{identities[system.SUBJECTS['frank']]}",
+            etag=group_etag,
+        )
+        revoked_at = time.monotonic()
+        system.wait(
+            lambda: (
+                members[1].get("/api/sessions", allow_redirects=False).status_code
+                == 403
+            ),
+            5.2,
+            "removed group member retained access",
+            interval=0.1,
+        )
+        remaining = max(0.1, 10 - (time.monotonic() - revoked_at))
+        system.closed_within(second, remaining)
+        assert not second.connected, "the removed group member's WebSocket stayed open"
+        assert time.monotonic() - revoked_at <= 10.2
+        assert members[0].get("/api/sessions", allow_redirects=False).status_code == 200
+        assert pod_state() == original_pod
+    finally:
+        first.close()
+        second.close()
+
+    return created
+
+
 def test_shared_agent_direct_and_group_members_reach_one_workspace(platform):
-    scenarios.shared_agent_direct_and_group_members_reach_one_workspace(platform)
+    shared_agent_direct_and_group_members_reach_one_workspace(platform)
 
 
-BASE = f"https://{scenarios.PUBLIC}"
+BASE = f"https://{system.PUBLIC}"
 HTML = {"Accept": "text/html"}
 ORIGIN = {"Origin": BASE}
 UNAUTHENTICATED = (401, {"error": "invalid_identity_evidence"})
@@ -244,7 +464,7 @@ def test_the_gateway_answers_a_client_without_a_session_as_declared(
     if expect.get("login"):
         # To the provider, with a flow bound to this browser by its proof cookie.
         assert reply.headers["location"].startswith(
-            scenarios.ISSUER + "/protocol/openid-connect/auth?"
+            system.ISSUER + "/protocol/openid-connect/auth?"
         )
         assert "__Host-hermes-platform-browser" in [n for n, _ in cookies(reply)]
     if "cookies" in expect:
@@ -276,7 +496,7 @@ def test_a_login_redirect_binds_a_single_use_flow_to_the_browser(platform):
         location = urlparse(reply.headers["location"])
         assert (
             f"{location.scheme}://{location.netloc}"
-            == scenarios.ISSUER.rsplit("/realms", 1)[0]
+            == system.ISSUER.rsplit("/realms", 1)[0]
         )
         assert location.path == "/realms/agents/protocol/openid-connect/auth"
         query = dict(part.split("=", 1) for part in location.query.split("&"))

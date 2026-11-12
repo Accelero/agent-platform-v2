@@ -1,6 +1,6 @@
 """The installed Hermes image, started as a Pod starts it: non-root, a read-only
-root, no network and only scoped mounts. The image under test is named by
-`HERMES_TEST_NATIVE_IMAGE` (the `hermes integration` group)."""
+root, no network and only scoped mounts. The image under test is
+the `hermes_image` fixture's build."""
 
 import json
 import textwrap
@@ -18,7 +18,11 @@ from tests.support.native import (
 )
 from tests.support.ownership import Cleanup
 
-pytestmark = [pytest.mark.integration, pytest.mark.image]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.image,
+    pytest.mark.usefixtures("hermes_image"),
+]
 
 HEALTH = textwrap.dedent(
     """

@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person
 
 pytestmark = [
@@ -24,12 +24,12 @@ CONTROLLER = "hermes-manager-controller"
 
 
 def holder(platform):
-    return scenarios.kubectl(
+    return system.kubectl(
         platform.identifier,
         "get",
         "leases",
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
         "-o",
         "jsonpath={.items[*].spec.holderIdentity}",
     ).strip()
@@ -37,7 +37,7 @@ def holder(platform):
 
 def owned_namespaces(platform):
     """The namespaces of every instance this installation owns."""
-    return scenarios.kubectl(
+    return system.kubectl(
         platform.identifier,
         "get",
         "namespaces",
@@ -53,13 +53,13 @@ def identities(platform, namespaces):
     objects whose identity would change if something were recreated."""
     state = {}
     for name, namespace in namespaces.items():
-        uids = {"hermes": scenarios.hermes_pod(platform.identifier, namespace)}
+        uids = {"hermes": system.hermes_pod(platform.identifier, namespace)}
         for kind, resource in (
             ("namespace", f"namespace/{namespace}"),
             ("credentials", f"secret/hermes-credentials -n {namespace}"),
             ("worker keys", f"secret/hermes-worker-keys -n {namespace}"),
         ):
-            uids[kind] = scenarios.kubectl(
+            uids[kind] = system.kubectl(
                 platform.identifier,
                 "get",
                 *resource.split(),
@@ -82,21 +82,21 @@ def test_a_standby_takes_over_a_killed_leader_and_no_instance_is_disturbed(
     before = identities(platform, namespaces)
     owned_before = owned_namespaces(platform)
 
-    scenarios.scale(platform.identifier, scenarios.NAMESPACE, CONTROLLER, 2)
+    system.scale(platform.identifier, system.NAMESPACE, CONTROLLER, 2)
     leader = holder(platform)
     assert leader, "a leader holds the Lease"
-    scenarios.kubectl(
+    system.kubectl(
         platform.identifier,
         "delete",
         "pod",
         # The holder identity is the Pod name plus a per-process suffix.
         leader.rsplit("-", 1)[0],
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
         "--grace-period=0",
         "--force",
     )
-    scenarios.wait(
+    system.wait(
         lambda: holder(platform) not in ("", leader),
         120,
         "no standby took over the Lease",
@@ -113,9 +113,9 @@ def test_a_standby_takes_over_a_killed_leader_and_no_instance_is_disturbed(
             "terminal": platform.state.terminal,
         },
     )
-    scenarios.wait(
+    system.wait(
         lambda: admin.phase(receipt["instanceId"])["phase"] == "ready",
-        scenarios.READY_TIMEOUT,
+        system.READY_TIMEOUT,
         "the new leader never commissioned the new instance",
         interval=5,
     )
@@ -125,8 +125,8 @@ def test_a_standby_takes_over_a_killed_leader_and_no_instance_is_disturbed(
     assert len(owned) == len(owned_before) + 1, f"one namespace per instance: {owned}"
 
     # The platform is shared: back to the single controller the chart installs.
-    scenarios.scale(platform.identifier, scenarios.NAMESPACE, CONTROLLER, 1)
-    scenarios.wait(
+    system.scale(platform.identifier, system.NAMESPACE, CONTROLLER, 1)
+    system.wait(
         lambda: holder(platform) != "",
         120,
         "no controller holds the Lease again",
@@ -145,13 +145,13 @@ def test_instances_keep_running_untouched_while_there_is_no_controller(
     }
     before = identities(platform, namespaces)
 
-    scenarios.scale(platform.identifier, scenarios.NAMESPACE, CONTROLLER, 0)
+    system.scale(platform.identifier, system.NAMESPACE, CONTROLLER, 0)
     try:
         # Long enough for any restart a missing controller could cause.
         time.sleep(60)
         assert identities(platform, namespaces) == before
         for namespace in namespaces.values():
-            ready = scenarios.kubectl(
+            ready = system.kubectl(
                 platform.identifier,
                 "get",
                 "deployment/hermes",
@@ -162,9 +162,9 @@ def test_instances_keep_running_untouched_while_there_is_no_controller(
             )
             assert ready == "1", f"Hermes stopped without the controller: {ready!r}"
     finally:
-        scenarios.scale(platform.identifier, scenarios.NAMESPACE, CONTROLLER, 1)
+        system.scale(platform.identifier, system.NAMESPACE, CONTROLLER, 1)
 
-    scenarios.wait(
+    system.wait(
         lambda: all(
             admin.phase(receipt["instanceId"])["phase"] == "ready"
             for receipt in platform.assignments.values()

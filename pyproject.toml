@@ -19,14 +19,30 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+    "agent_platform/tests",
+    "charts/tests",
+    "contracts/hermes-manager/tests",
+    "runtimes/hermes/tests",
+    "tests",
+]
 pythonpath = ["."]
-# A plain run needs no infrastructure; a profile selects its capability with -m.
-addopts = "--strict-config --strict-markers -m 'not (cluster or database or image or browser or destructive or multi_node or soak)'"
+# A plain run needs no infrastructure and no Rust or Node toolchain; select
+# more with -m, for example `-m unit`, `-m "manager and integration"`, `-m e2e`.
+addopts = "--strict-config --strict-markers --import-mode=importlib -m 'not (cluster or database or image or browser or destructive or multi_node or soak or rust or node)'"
 markers = [
     "unit: no external service or cluster",
     "integration: a real dependency, image or process boundary",
     "e2e: the Helm-installed system",
+    "manager: the manager API, controller and their contracts",
+    "gateway: hermes-proxy, hermes-gateway and gateway TLS",
+    "dashboard: the React dashboard",
+    "hermes: what the project adds to the Hermes image",
+    "worker: the agent-runtime worker image",
+    "chart: the Helm chart",
+    "tooling: agent_platform and the test harness",
+    "rust: runs cargo test",
+    "node: runs the dashboard's npm scripts",
     "cluster: requires a disposable cluster",
     "database: requires a disposable PostgreSQL fixture",
     "image: requires a built runtime image",
@@ -37,6 +53,10 @@ markers = [
     "slow: longer bounded verification",
     "soak: explicitly budgeted stability profile",
 ]
+
+[tool.ruff]
+# The Hermes image's own sources follow the upstream code they patch.
+extend-exclude = ["runtimes/hermes/*.py", "runtimes/hermes/plugins"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

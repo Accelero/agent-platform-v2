@@ -2,9 +2,9 @@
 //! with the rendered RBAC and admission policies installed and the
 //! controller acting as its real ServiceAccount.
 //!
-//! Needs `HERMES_TEST_KUBECONFIG`; run through
-//! `tests/personal_hermes/kubernetes.py --workspace next`, never against a
-//! real cluster.
+//! Needs `HERMES_TEST_KUBECONFIG`; run through `tests/services/test_manager.py`
+//! and `tests/services/test_worker.py`, whose fixture provides a disposable
+//! k3s, never against a real cluster.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

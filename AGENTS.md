@@ -20,12 +20,14 @@ mutable application state or deployment-specific backup scripts.
 - `runtimes/agent-runtime/`: default SSH terminal worker image.
 - `charts/agent-platform/`: self-contained application chart.
 - `examples/manager/`: nonsecret manager render fixture.
-- `tests/`: pytest suites by level and component (`unit/<component>/`,
-  `integration/<component>/`, `e2e/`), the `run.py` entry point for every test
-  group, shared `support/` including the case verifier, the reviewed case
-  ledger in `verification/`, and the standalone cluster and native drivers in
-  `personal_hermes/` (k3s suite runner, native end-to-end run, fake model,
-  registry proxy).
+- `tests/`: the cross-component part of the one pytest suite: `e2e/` (the
+  installed platform), `services/` (pytest wrappers that run the Rust and
+  dashboard test targets), `harness/` (tests of the test support) and
+  `support/` (fixtures, images, clusters, the installed-platform helpers, fake
+  model and registry proxy). Unit and integration tests live with their
+  component: `agent_platform/tests/`, `charts/tests/`,
+  `contracts/hermes-manager/tests/`, `runtimes/hermes/tests/`, and the Rust
+  and TypeScript tests in `services/hermes-manager/`.
 - `doc/`: `SPEC.md` (specification), `ARCH.md` (architecture) and `TESTING.md`
   (test system); the coverage assessment and gap register under `doc/testing/`;
   the guides and the implementation status under `doc/personal-hermes/`.
@@ -62,23 +64,23 @@ Manager code follows these rules:
 Use Python 3.14 and `uv sync --locked`. After edits run:
 
 ```bash
-uv run ruff check agent_platform tests
-uv run ruff format --check agent_platform tests
+uv run ruff check .
+uv run ruff format --check .
 uv run pytest -q
 helm lint charts/agent-platform
-uv run python -m tests.run tooling chart hermes unit
 ```
 
-Every Python test carries exactly one level marker (`unit`, `integration`,
-`e2e`); collection fails otherwise. Adding, renaming or removing any Python or
-Rust test updates `tests/verification/cases.json` in the same change, and a
-test that proves a requirement is named in its `TESTS.md` row. Follow the
-procedure in `doc/testing/gaps.md` when closing a test gap.
+`doc/TESTING.md` describes the suite. Every test carries exactly one level
+marker (`unit`, `integration`, `e2e`), and every unit and integration test
+belongs to exactly one component; collection fails otherwise. A skip fails the
+run. A test that proves a requirement is named in its `TESTS.md` row. Follow
+the procedure in `doc/testing/gaps.md` when closing a test gap.
 
 Run the Rust checks in `services/hermes-manager/README.md` after manager edits.
 After changes to the controller, the chart, the runtime image or the gateway,
-also run `uv run python -m tests.run e2e` and the affected component's
-integration group, on disposable fixtures only.
+also run `uv run pytest -m e2e` and the affected component's integration
+tests (for example `uv run pytest -m "manager and integration"`), on
+disposable fixtures only.
 The OpenAPI contracts are the authority for every interface. Keep the plugin's
 requests conformant to `execution.openapi.yaml`; change the contract, the Rust
 handler and the plugin together.
@@ -99,8 +101,8 @@ unmerged work. This repository is its own product: it publishes only under
 `ghcr.io/accelero/agent-platform-v2` (images and the `agent-platform-v2`
 chart) with its own version line, never to the public `agent-platform`
 repository's packages. Never overwrite or reuse an existing version. A version tag runs
-`Checks` on images built once from the tagged commit; the cluster scenarios
-run only when `Checks` is dispatched by hand. Its `publish` job runs only after every test job passed: it
+`Checks`, including every end-to-end case, on images built once from the
+tagged commit. Its `publish` job runs only after every test job passed: it
 checks that the tested images carry this commit and version, confirms GHCR
 accepts pushes to every package, pushes those same images and then their
 self-contained chart. Nothing is rebuilt for a release. Keep the source and

@@ -17,7 +17,7 @@ import yaml
 pytestmark = pytest.mark.unit
 
 SOURCE = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[4]
     / "runtimes/hermes/plugins/managed_execution/__init__.py"
 )
 
@@ -25,7 +25,7 @@ SOURCE = (
 @pytest.fixture
 def plugin(monkeypatch, tmp_path):
     # These tests use the native provider's public factory without starting SSH.
-    # The real pinned Hermes image is covered by personal_hermes/native_runtime.py.
+    # The real pinned Hermes image is covered by runtimes/hermes/tests/integration.
     dependencies = {
         "agent.terminal_env_provider": {"TerminalEnvironmentProvider": object},
         "tools.environments.ssh": {"SSHEnvironment": object},
@@ -198,7 +198,7 @@ def test_personal_connection_requires_manager_host_identity(plugin):
 
 CONTRACT = yaml.safe_load(
     (
-        Path(__file__).resolve().parents[3]
+        Path(__file__).resolve().parents[4]
         / "contracts/hermes-manager/execution.openapi.yaml"
     ).read_text()
 )

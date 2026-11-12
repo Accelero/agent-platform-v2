@@ -492,8 +492,7 @@ For every agent:
   `patch-terminal-policy.py`, with its hash check.
 - **Keep the home binding.** `personal-init.py` and `personal-run.py` go on checking the
   context's owner against the receipt; that protects data, not login.
-- Remove `tests/personal_hermes/native_owner.py`, its payload and its `checks.yml` step,
-  and update `tests/verification/cases.json`.
+- Remove the native owner-pin check, its payload and its `checks.yml` step.
 - Change tests that expect an instance to refuse another person's native cookie. Any instance
   now accepts any valid realm login, so such a cookie is accepted, though the router still
   sends whoever presents it only to the instance their own platform session resolves to.
@@ -575,9 +574,8 @@ untouched and the agent's status and grants as they were.
 
 Build in this order. Each phase ends in a gate, and is not complete until its gate
 passes and its [acceptance cases](#planned-acceptance-cases) are collected and pass. The
-checks from `AGENTS.md` apply to every change; adding a test updates
-`tests/verification/cases.json`, and a test proving a requirement is named in its
-`TESTS.md` row. With `agentDomain` empty, personal behaviour stays as the existing suites
+checks from `AGENTS.md` apply to every change; a test proving a requirement is named
+in its `TESTS.md` row. With `agentDomain` empty, personal behaviour stays as the existing suites
 prove it, except for what this plan changes on purpose: the owner pin's removal, host
 classification, the cookie rules, and clearing native cookies on a new platform session.
 
@@ -587,10 +585,10 @@ evidence exists.
 
 ### Phase 0: native login for several users
 
-**Verified:** SH-N01, SH-N02, SH-N04 and SH-N05 pass in the collected
-`hermes-integration` profile, together with the supplemental provider-session cases.
+**Verified:** SH-N01, SH-N02, SH-N04 and SH-N05 pass in the `hermes and image`
+selection, together with the supplemental provider-session cases.
 
-The collected `tests/integration/hermes/test_login.py` cases exercise the project
+The collected `runtimes/hermes/tests/integration/test_login.py` cases exercise the project
 image with a disposable Keycloak and TLS relay for
 [SH-N01, SH-N02, SH-N04 and SH-N05](#native-runtime).
 
@@ -635,8 +633,7 @@ the traceability tests.
 ### Phase 3: resolver
 
 **Verified:** SH-R01 to SH-R06 have decision-table, memory/PostgreSQL and
-mTLS API cases. The workspace verifier passes all 366 collected cases, including
-doctests in the runner gate; personal-target compatibility and shared first-login
+mTLS API cases, which pass in the Rust workspace's test targets; personal-target compatibility and shared first-login
 and revocation behavior are covered. Per-host gateway forwarding remains planned.
 
 `decide_shared`, the store query and `router.openapi.yaml`.
@@ -652,9 +649,8 @@ have collected tests. The rebuilt native image passed the 23-case `hermes integr
 the disposable k3s and native end-to-end runs passed with that image, including
 the compatibility check that platform routing is independent of native identity.
 
-**Gate:** rebuild the image with `tests.personal_hermes.native_runtime --build`, then
-SH-N01 to SH-N05 on the built image (the `hermes integration` group);
-SH-I01 to SH-I03; SH-C01 to SH-C03; the k3s suite on disposable fixtures.
+**Gate:** SH-N01 to SH-N05 on a freshly built image (`uv run pytest -m "hermes and image"`);
+SH-I01 to SH-I03; SH-C01 to SH-C03; the k3s cluster tests on disposable fixtures.
 
 ### Phase 5: gateway sessions and forwarding
 
@@ -692,8 +688,8 @@ scenarios marked **(S)**.
 
 ### Native runtime
 
-Level: integration, `tests/integration/hermes/test_login.py` in the `hermes-integration`
-profile. Run the image with its real user, read-only root and rendered managed
+Level: integration, `runtimes/hermes/tests/integration/test_login.py` in the
+`hermes and image` selection. Run the image with its real user, read-only root and rendered managed
 configuration, on an isolated network with a disposable Keycloak.
 
 | ID | Scenario | Pass when |
@@ -706,7 +702,7 @@ configuration, on an isolated network with a disposable Keycloak.
 
 ### Home initialization
 
-Level: integration, `tests/integration/hermes/test_personal_init.py`.
+Level: integration, `runtimes/hermes/tests/integration/test_personal_init.py`.
 
 | ID | Scenario | Pass when |
 | --- | --- | --- |
@@ -779,7 +775,7 @@ with a fake resolver and fake instances, unless stated.
 | SH-C03 | Probe | Integration | The unchanged probe accepts a shared instance, and refuses an extra provider, password support and an open `/api/sessions` |
 | SH-H01 | Values | Integration, `test_manager_chart.py` | Strict schema; generated role configurations are the ones the Rust parsers load |
 | SH-H02 | Service | Integration | `loadBalancerClass`, annotations and ingress peers render as set; with defaults, the rendered output is unchanged |
-| SH-H03 | Inputs | Unit, `tests/unit/tooling/test_release.py` | `release-policy.json` no longer lists the removed pin files and the build still has the terminal selector; the privacy check passes |
+| SH-H03 | Inputs | Unit, `agent_platform/tests/test_release.py` | `release-policy.json` no longer lists the removed pin files and the build still has the terminal selector; the privacy check passes |
 
 ### Dashboard
 
@@ -796,8 +792,7 @@ journeys in `tests/e2e/test_browser.py`.
 
 Level: e2e, `tests/e2e/test_shared_agents.py` and `tests/e2e/test_browser.py` on the
 disposable k3d platform, with real Keycloak, gateway, manager and Hermes and the fake
-model. Add the core journey to `tests.personal_hermes.native_e2e`, so that `Checks` runs
-it. The fixture needs agent hostnames in its DNS and certificate, and their callbacks in its
+model; `Checks` runs them on release tags. The fixture needs agent hostnames in its DNS and certificate, and their callbacks in its
 Keycloak realm.
 
 | ID | Scenario | Pass when |
@@ -833,12 +828,12 @@ is covered by SH-G01, SH-G17 and SH-E18.
 
 ## Definition of done
 
-- Every SH case is collected in its profile and passes on the candidate commit, and is
-  named in `TESTS.md` and `tests/verification/cases.json`. A case that cannot run is
+- Every SH case is collected and passes on the candidate commit, and is named in
+  `TESTS.md`. A case that cannot run is
   recorded as a limitation or a gap, not as passing.
 - The checks in `AGENTS.md` pass, with the Rust checks in
-  `services/hermes-manager/README.md`, the dashboard checks, the k3s suite and native
-  end-to-end run, and `uv run python -m agent_platform.privacy`.
+  `services/hermes-manager/README.md`, the dashboard checks, the k3s cluster tests and
+  the end-to-end suite, and `uv run python -m agent_platform.privacy`.
 - `SPEC.md` has these changes: the scope no longer excludes team instances and states the
   [responsibility boundary](#planned-responsibility-boundary); R2, R5 and R6 cover both kinds, and R6 no longer requires a native owner check; new
   requirements cover grants, endpoints and hostname renaming, per-host sign-in and logout, and

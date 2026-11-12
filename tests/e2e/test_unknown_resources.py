@@ -20,7 +20,7 @@ import uuid
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.contract import operations
 from tests.support.people import template
 
@@ -63,7 +63,7 @@ def body(operation, platform):
         "replaceAssignmentGrants": {"grants": []},
         "updateAccessGroup": {"displayName": "Nobody"},
         "addAccessGroupMember": {
-            "identity": {"issuer": scenarios.ISSUER, "subject": "no-such-person"}
+            "identity": {"issuer": system.ISSUER, "subject": "no-such-person"}
         },
     }.get(operation, {} if operation != "deleteSecret" else None)
 
@@ -110,7 +110,7 @@ def test_an_identifier_that_names_nothing_is_not_found_and_changes_nothing(
     before = state(platform)
     reply = platform.admin.session.request(
         method.upper(),
-        f"https://{scenarios.ADMIN}{concrete}",
+        f"https://{system.ADMIN}{concrete}",
         json=body(operation, platform),
         headers=platform.admin.headers(etag='"1"'),
         timeout=30,

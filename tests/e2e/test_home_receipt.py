@@ -26,7 +26,7 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person, ready
 
 pytestmark = [
@@ -80,7 +80,7 @@ class Home:
 def stop(platform, receipt):
     """Suspends the instance until it is retained: no Pod, the home at rest."""
     platform.admin.set_access(receipt["assignmentId"], "suspended")
-    scenarios.wait(
+    system.wait(
         lambda: platform.admin.phase(receipt["instanceId"])["phase"] == "retained",
         300,
         "the instance was not retained",
@@ -97,7 +97,7 @@ def blocked_and_unstarted(platform, receipt, namespace):
     over the next HOLD seconds it stays blocked and its Hermes container never
     starts."""
     admin = platform.admin
-    scenarios.wait(
+    system.wait(
         lambda: admin.phase(receipt["instanceId"])["phase"] == "blocked",
         240,
         lambda: admin.phase(receipt["instanceId"]),
@@ -108,7 +108,7 @@ def blocked_and_unstarted(platform, receipt, namespace):
         phase = admin.phase(receipt["instanceId"])
         assert phase["phase"] == "blocked", phase
         assert phase["blockedReason"] == "invalid_initialization_receipt", phase
-        started = scenarios.kubectl(
+        started = system.kubectl(
             platform.identifier,
             "get",
             "pods",
@@ -130,7 +130,7 @@ def test_a_damaged_initialization_record_never_lets_hermes_start_or_changes_the_
         {"template": {"id": "personal", "version": platform.state.template}},
     )
     namespace = ready(platform, receipt)
-    scenarios.instance_pod_exec(
+    system.instance_pod_exec(
         platform.identifier,
         namespace,
         f"echo {secrets.token_hex(8)} > /opt/data/e2e-marker",

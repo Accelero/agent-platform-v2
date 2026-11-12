@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
 )
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 
 pytestmark = [
     pytest.mark.e2e,
@@ -34,7 +34,7 @@ KEY = "OPENAI_API_KEY"
 
 def delivered(platform, namespace):
     """The variable as the instance's own Hermes sees it, or `ABSENT`."""
-    return scenarios.instance_pod_exec(
+    return system.instance_pod_exec(
         platform.identifier, namespace, f"printenv {KEY} || echo ABSENT"
     ).strip()
 
@@ -44,12 +44,12 @@ def restarted(platform, instance, namespace, before):
 
     def replaced():
         try:
-            return scenarios.hermes_pod(platform.identifier, namespace) != before
+            return system.hermes_pod(platform.identifier, namespace) != before
         except AssertionError:
             return False  # the old Pod is gone and the new one not yet created
 
-    scenarios.wait(replaced, 600, "the instance never restarted", interval=5)
-    scenarios.wait(
+    system.wait(replaced, 600, "the instance never restarted", interval=5)
+    system.wait(
         lambda: platform.admin.phase(instance)["phase"] == "ready",
         600,
         "the restarted instance never became ready",
@@ -69,19 +69,19 @@ def test_rotating_an_admin_secret_restarts_only_its_instances_and_never_returns_
 
     assert delivered(platform, bob_space) == original
     assert delivered(platform, carol_space) == "ABSENT", "an unreferencing instance"
-    carol_pod = scenarios.hermes_pod(platform.identifier, carol_space)
+    carol_pod = system.hermes_pod(platform.identifier, carol_space)
 
     # A referenced secret cannot be deleted, and the refusal removes nothing.
     admin.call("DELETE", "/api/v1/secrets/llm-key", expected=(409, 422))
     assert "llm-key" in admin.call("GET", "/api/v1/secrets").text
 
     for value in (secrets.token_urlsafe(24), original):
-        bob_pod = scenarios.hermes_pod(platform.identifier, bob_space)
+        bob_pod = system.hermes_pod(platform.identifier, bob_space)
         admin.call("PUT", "/api/v1/secrets/llm-key", {"kind": "env", "value": value})
         restarted(platform, bob, bob_space, bob_pod)
         assert delivered(platform, bob_space) == value, "the current version"
         assert delivered(platform, carol_space) == "ABSENT"
-        assert scenarios.hermes_pod(platform.identifier, carol_space) == carol_pod, (
+        assert system.hermes_pod(platform.identifier, carol_space) == carol_pod, (
             "an instance that does not reference the secret was restarted"
         )
         shown = (
@@ -97,35 +97,35 @@ def set_sealing_key(platform, encoded, wait=True):
     """Replaces the controller's sealing key (base64, as a Secret holds it) and
     restarts the controller; the key is never printed. With `wait`, returns
     when the new controller is rolled out."""
-    scenarios.kubectl(
+    system.kubectl(
         platform.identifier,
         "patch",
         "secret",
         "hermes-manager-controller",
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
         "--type",
         "merge",
         "--patch",
         json.dumps({"data": {"secret-sealing.key": encoded}}),
         quiet=True,
     )
-    scenarios.kubectl(
+    system.kubectl(
         platform.identifier,
         "rollout",
         "restart",
         "deployment/hermes-manager-controller",
         "--namespace",
-        scenarios.NAMESPACE,
+        system.NAMESPACE,
     )
     if wait:
-        scenarios.kubectl(
+        system.kubectl(
             platform.identifier,
             "rollout",
             "status",
             "deployment/hermes-manager-controller",
             "--namespace",
-            scenarios.NAMESPACE,
+            system.NAMESPACE,
             "--timeout=240s",
             timeout=260,
         )
@@ -136,11 +136,11 @@ def controller_logs(platform):
     logs = []
     for flag in ([], ["--previous"]):
         logs.append(
-            scenarios.kubectl(
+            system.kubectl(
                 platform.identifier,
                 "logs",
                 "--namespace",
-                scenarios.NAMESPACE,
+                system.NAMESPACE,
                 "--selector",
                 "app.kubernetes.io/name=hermes-manager-controller",
                 "--all-containers",
@@ -171,20 +171,20 @@ def test_a_controller_with_a_wrong_sealing_key_refuses_to_start_and_poisons_noth
 
     def credentials():
         return {
-            name: scenarios.secret_digests(
+            name: system.secret_digests(
                 platform.identifier, space, "hermes-credentials"
             )
             for name, space in spaces.items()
         }
 
     held = json.loads(
-        scenarios.kubectl(
+        system.kubectl(
             platform.identifier,
             "get",
             "secret",
             "hermes-manager-controller",
             "--namespace",
-            scenarios.NAMESPACE,
+            system.NAMESPACE,
             "--output",
             "json",
             quiet=True,
@@ -192,7 +192,7 @@ def test_a_controller_with_a_wrong_sealing_key_refuses_to_start_and_poisons_noth
     )["data"]["secret-sealing.key"]
     before = credentials()
     pods = {
-        name: scenarios.hermes_pod(platform.identifier, space)
+        name: system.hermes_pod(platform.identifier, space)
         for name, space in spaces.items()
     }
     assert delivered(platform, spaces["bob"]) == platform.passwords["llm"]
@@ -205,7 +205,7 @@ def test_a_controller_with_a_wrong_sealing_key_refuses_to_start_and_poisons_noth
     ).decode()
     assert wrong != held
     set_sealing_key(platform, wrong, wait=False)
-    scenarios.wait(
+    system.wait(
         lambda: "sealing_key_mismatch" in controller_logs(platform),
         180,
         "the controller with the wrong key never refused to start",
@@ -215,13 +215,13 @@ def test_a_controller_with_a_wrong_sealing_key_refuses_to_start_and_poisons_noth
     # While that controller cannot run, people are still added and the
     # secret still rotates; whichever controller acts must use the right key.
     username = f"late-{secrets.token_hex(3)}"
-    directory = scenarios.Directory(platform.ca, platform.passwords["directory"])
+    directory = system.Directory(platform.ca, platform.passwords["directory"])
     subject = directory.create(username, f"{username}@e2e.test", secrets.token_hex(12))
     late = admin.call(
         "POST",
         "/api/v1/assignments",
         {
-            "identity": {"issuer": scenarios.ISSUER, "subject": subject},
+            "identity": {"issuer": system.ISSUER, "subject": subject},
             "spec": {
                 "access": "enabled",
                 "template": {"id": "personal", "version": platform.state.template},
@@ -232,20 +232,20 @@ def test_a_controller_with_a_wrong_sealing_key_refuses_to_start_and_poisons_noth
     admin.call("PUT", "/api/v1/secrets/llm-key", {"kind": "env", "value": new})
 
     set_sealing_key(platform, held)
-    scenarios.wait(
+    system.wait(
         lambda: admin.phase(late["instanceId"])["phase"] == "ready",
-        scenarios.READY_TIMEOUT,
+        system.READY_TIMEOUT,
         lambda: admin.phase(late["instanceId"]),
         interval=5,
     )
-    scenarios.wait(
+    system.wait(
         lambda: delivered(platform, spaces["bob"]) == new,
         600,
         "the rotated value never reached the instance that references it",
         interval=5,
     )
     assert credentials() == before, "credentials were regenerated"
-    assert scenarios.hermes_pod(platform.identifier, spaces["carol"]) == pods["carol"]
+    assert system.hermes_pod(platform.identifier, spaces["carol"]) == pods["carol"]
     # The instance created in the window is as manageable as any other: the
     # right key opens its material (a poisoned one would be refused here).
     time.sleep(30)
@@ -261,7 +261,7 @@ def test_a_controller_with_a_wrong_sealing_key_refuses_to_start_and_poisons_noth
         "/api/v1/secrets/llm-key",
         {"kind": "env", "value": platform.passwords["llm"]},
     )
-    scenarios.wait(
+    system.wait(
         lambda: delivered(platform, spaces["bob"]) == platform.passwords["llm"],
         600,
         "the original value never reached the instance that references it",

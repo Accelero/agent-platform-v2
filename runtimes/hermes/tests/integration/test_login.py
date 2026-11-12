@@ -13,7 +13,11 @@ from tests.support.native_shared import PROVIDER_SHA256, SharedNative
 from tests.support.native_shared import test_image as build_test_image
 from tests.support.ownership import Cleanup
 
-pytestmark = [pytest.mark.integration, pytest.mark.image]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.image,
+    pytest.mark.usefixtures("hermes_image"),
+]
 
 
 @pytest.fixture(scope="module")

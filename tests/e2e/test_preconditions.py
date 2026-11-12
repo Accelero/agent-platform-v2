@@ -24,7 +24,7 @@ import uuid
 import pytest
 import yaml
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.contract import CONTRACT, METHODS
 from tests.support.people import person, template
 
@@ -61,7 +61,7 @@ def send(platform, method, path, body=None, etag=None, key=None):
         headers["Idempotency-Key"] = key
     return platform.admin.session.request(
         method,
-        f"https://{scenarios.ADMIN}{path}",
+        f"https://{system.ADMIN}{path}",
         json=body,
         headers=headers,
         timeout=30,
@@ -184,7 +184,7 @@ def manager(platform):
     (alice,) = [
         item
         for item in listed["items"]
-        if item["identity"]["subject"] == scenarios.SUBJECTS["alice"]
+        if item["identity"]["subject"] == system.SUBJECTS["alice"]
     ]
     return alice
 
@@ -215,7 +215,7 @@ def new_group(platform, tag):
 
 
 def member(tag):
-    return {"identity": {"issuer": scenarios.ISSUER, "subject": f"prec-{tag}"}}
+    return {"identity": {"issuer": system.ISSUER, "subject": f"prec-{tag}"}}
 
 
 def group_case(platform, tag, operation):

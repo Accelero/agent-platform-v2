@@ -1,13 +1,17 @@
-"""Fixtures for the independently collected system scenarios.
+"""Fixtures for the end-to-end cases of the installed platform.
 
 Nothing is created at collection. The k3d cluster is built when the first
 test that needs it runs, with its teardown registered immediately; selecting
 one scenario provisions only its prerequisites.
 """
 
+import json
+import time
+
 import pytest
 
 from tests.support import cluster as cluster_support
+from tests.support import system
 from tests.support.ownership import Cleanup
 
 
@@ -24,7 +28,13 @@ def cluster(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def platform(tmp_path_factory):
+def platform_images(images):
+    """The three images under test, built (or found saved) side by side."""
+    return images.require("hermes", "manager", "worker")
+
+
+@pytest.fixture(scope="session")
+def platform(tmp_path_factory, platform_images):
     """The installed platform with Bob's and Carol's commissioned instances.
 
     Built once per run on a single-node cluster of its own: node-local storage
@@ -42,9 +52,14 @@ def platform(tmp_path_factory):
         yield platform_support.bring_up(built, directory, cleanup, shared=True)
 
 
-def reclaim(platform):
-    """Suspends every enabled instance except the commissioned owners'."""
+def reclaim(platform, timeout=180):
+    """Suspends every enabled instance except the commissioned owners', and
+    waits (bounded) until their Pods are gone, so the next case has the room."""
     kept = {receipt["assignmentId"] for receipt in platform.assignments.values()}
+    owners = {
+        platform.admin.phase(receipt["instanceId"])["namespace"]
+        for receipt in platform.assignments.values()
+    }
     after = ""
     while True:
         page = platform.admin.call(
@@ -57,18 +72,44 @@ def reclaim(platform):
             break
         after = f"&after={page['nextCursor']}"
 
+    def released():
+        listed = platform.cluster.kubectl(
+            "get", "pods", "-A", "-o", "json", check=False
+        )
+        if listed.returncode:
+            return False
+        pods = json.loads(listed.stdout)["items"]
+        return not any(
+            pod["metadata"]["namespace"].startswith("hi-")
+            and pod["metadata"]["namespace"] not in owners
+            for pod in pods
+        )
+
+    deadline = time.monotonic() + timeout
+    while not released() and time.monotonic() < deadline:
+        time.sleep(3)
+
+
+@pytest.fixture(autouse=True)
+def routed_to_its_platform(request):
+    """Every platform answers to the same hostnames: a case reaches the one it
+    uses, whichever platform was installed or used last."""
+    for name in ("destructive_platform", "platform"):
+        if name in request.fixturenames:
+            system.activate(request.getfixturevalue(name).route)
+            break
+
 
 @pytest.fixture(autouse=True)
 def reclaimed(request):
     """Stops the instances a case created on the shared platform once it ends.
 
-    Every Hermes instance requests 2 GiB of memory and a CPU, and the shared
-    platform is one node, so instances left running by earlier cases starve the
-    later ones (about fifteen fill a 31 GB machine). Suspending an instance
-    keeps its data and credentials and frees its Pods; the commissioned owners
-    stay as they are. The Pods are not waited for: they terminate while the next
-    case makes its own people. The destructive cases do the same in their own
-    fixture, which owns the platform they share.
+    The shared platform is one node, so instances left running by earlier cases
+    starve the later ones; on a CI runner two or three more fill it. Suspending
+    an instance keeps its data and credentials and frees its Pods; the
+    commissioned owners stay as they are. The Pods are waited for, because a
+    terminating Pod still holds its requests. The destructive cases do the
+    same in their own fixture, which owns the platform they share.
     """
     yield
     if "platform" not in request.fixturenames:
@@ -80,12 +121,11 @@ def reclaimed(request):
 def chromium(platform, tmp_path_factory):
     """A real Chromium that trusts the fixture CA and reaches the platform's
     hostnames only; each case takes a context of its own."""
-    from tests.personal_hermes import native_e2e as e2e
     from tests.support import browser as browser_support
 
     home = tmp_path_factory.mktemp("chromium-home")
     home.chmod(0o700)
-    node_ip = e2e.container_ip(platform.identifier, platform.network)
+    node_ip = system.container_ip(platform.identifier, platform.network)
     browser = browser_support.Chromium(node_ip, platform.ca, home)
     try:
         yield browser
@@ -102,7 +142,7 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture(scope="session")
-def destructive_pool(tmp_path_factory):
+def destructive_pool(tmp_path_factory, platform_images):
     """The platform the destructive cases share.
 
     Building one takes about 3.5 minutes, nearly three quarters of a destructive

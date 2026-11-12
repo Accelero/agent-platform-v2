@@ -23,7 +23,7 @@ import uuid
 import pytest
 import requests
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.contract import concrete, operations
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.security]
@@ -50,7 +50,7 @@ SECURED = [op for op in operations() if op[3]]
 
 def token(platform, name):
     reply = requests.post(
-        f"{scenarios.ISSUER}/protocol/openid-connect/token",
+        f"{system.ISSUER}/protocol/openid-connect/token",
         data={
             "grant_type": "password",
             "client_id": "manager-admin",
@@ -69,7 +69,7 @@ def send(platform, method, path, headers=None):
     body = {} if method in ("post", "put", "patch") else None
     return requests.request(
         method.upper(),
-        f"https://{scenarios.ADMIN}{concrete(path)}",
+        f"https://{system.ADMIN}{concrete(path)}",
         json=body,
         headers={
             "Idempotency-Key": uuid.uuid4().hex,
@@ -129,4 +129,4 @@ def test_every_secured_operation_refuses_actors_without_access_and_commits_nothi
         {"Authorization": platform.admin.headers()["Authorization"]},
     )
     assert allowed.status_code == 200
-    assert json.loads(allowed.text)["actor"]["subject"] == scenarios.SUBJECTS["alice"]
+    assert json.loads(allowed.text)["actor"]["subject"] == system.SUBJECTS["alice"]

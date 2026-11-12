@@ -1,9 +1,9 @@
 """The installed Hermes image started the way a Pod starts it: non-root, a
 read-only root filesystem, no network and only the scoped mounts.
 
-The image under test is named by `HERMES_TEST_NATIVE_IMAGE`; there is no
-default and nothing is built or downloaded here. Fixture credentials live in a
-temporary directory and are never printed.
+The image under test is the `hermes_image` session fixture's build; tests that
+start it request that fixture. Fixture credentials live in a temporary
+directory and are never printed.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import time
 import uuid
 from pathlib import Path
 
+from tests.support.images import HERMES_IMAGE
 from tests.support.ownership import RUN, Cleanup, new_run, remove_fixture
 
 NATIVE_FIXTURE = "personal-hermes-native"
@@ -33,11 +34,8 @@ POD_IDENTITY = "1000:1000"
 
 
 def image():
-    """The image under test; a missing name is a configuration error."""
-    name = os.environ.get("HERMES_TEST_NATIVE_IMAGE")
-    if not name:
-        raise RuntimeError("HERMES_TEST_NATIVE_IMAGE names the image under test")
-    return name
+    """The image under test, which the `hermes_image` fixture provides."""
+    return HERMES_IMAGE
 
 
 class CommandFailed(RuntimeError):

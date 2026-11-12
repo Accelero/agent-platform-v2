@@ -22,7 +22,7 @@ from urllib.parse import quote, urlparse
 
 import pytest
 
-from tests.personal_hermes import native_e2e as e2e
+from tests.support import system
 from tests.support.browser import fetch, sign_in
 
 pytestmark = [
@@ -32,8 +32,8 @@ pytestmark = [
     pytest.mark.slow,
 ]
 
-PUBLIC = f"https://{e2e.PUBLIC}"
-ADMIN = f"https://{e2e.ADMIN}"
+PUBLIC = f"https://{system.PUBLIC}"
+ADMIN = f"https://{system.ADMIN}"
 HEALTH = {PUBLIC: "/_platform/healthz", ADMIN: "/healthz"}
 PLATFORM_COOKIES = ("__Host-hermes-platform", "__Host-hermes-platform-browser")
 # Both are foreign to the platform's origins; only the second shares their
@@ -74,7 +74,7 @@ def owner(context, platform, name):
         f"{PUBLIC}/",
         name,
         platform.passwords[name],
-        left_the_login(e2e.PUBLIC),
+        left_the_login(system.PUBLIC),
     )
     return page
 
@@ -87,7 +87,7 @@ def administrator(context, platform):
         f"{ADMIN}/",
         "alice",
         platform.passwords["alice"],
-        left_the_login(e2e.ADMIN),
+        left_the_login(system.ADMIN),
     )
     return page
 
@@ -135,10 +135,10 @@ def known_person(platform, chromium, prefix):
     is refused (no grant) but makes the identity known to the manager."""
     username = f"{prefix}-{secrets.token_hex(3)}"
     password = secrets.token_urlsafe(18)
-    directory = e2e.Directory(platform.ca, platform.passwords["directory"])
+    directory = system.Directory(platform.ca, platform.passwords["directory"])
     subject = directory.create(username, f"{username}@e2e.test", password)
     with chromium.context() as context:
-        sign_in(context.new_page(), f"{ADMIN}/", username, password, on(e2e.ADMIN))
+        sign_in(context.new_page(), f"{ADMIN}/", username, password, on(system.ADMIN))
         assert "__Host-hermes-admin" not in {c["name"] for c in context.cookies(ADMIN)}
     return username, password, subject
 
@@ -171,14 +171,19 @@ def test_shared_agent_browser_login_chat_and_logout(platform, chromium):
         grants,
         {
             "grants": [
-                {"identity": {"issuer": e2e.ISSUER, "subject": e2e.SUBJECTS["bob"]}}
+                {
+                    "identity": {
+                        "issuer": system.ISSUER,
+                        "subject": system.SUBJECTS["bob"],
+                    }
+                }
             ]
         },
         etag=etag,
     )
-    e2e.wait(
+    system.wait(
         lambda: admin.phase(created["instanceId"])["phase"] == "ready",
-        e2e.READY_TIMEOUT,
+        system.READY_TIMEOUT,
         "shared browser instance never became ready",
         interval=5,
     )
@@ -204,7 +209,7 @@ def test_shared_agent_browser_login_chat_and_logout(platform, chromium):
         page.goto(f"{origin}/_platform/healthz")
         native = fetch(page, "/api/auth/me")
         assert native["status"] == 200
-        assert json.loads(native["text"])["user_id"] == e2e.SUBJECTS["bob"]
+        assert json.loads(native["text"])["user_id"] == system.SUBJECTS["bob"]
         ticket = fetch(page, "/api/auth/ws-ticket", method="POST")
         assert ticket["status"] == 200
         token = json.loads(ticket["text"])["ticket"]
@@ -261,7 +266,7 @@ def test_an_owner_signs_in_through_keycloak_and_the_session_cookies_are_confined
             f"{PUBLIC}/",
             "bob",
             platform.passwords["bob"],
-            left_the_login(e2e.PUBLIC),
+            left_the_login(system.PUBLIC),
         )
         # The provider's code and state are consumed, never left in the URL.
         assert not re.search(r"[?&](code|state|session_state)=", page.url), page.url
@@ -271,22 +276,22 @@ def test_an_owner_signs_in_through_keycloak_and_the_session_cookies_are_confined
             assert cookie["secure"] and cookie["httpOnly"], cookie["name"]
             assert cookie["sameSite"] == "Lax", cookie["name"]
             assert cookie["path"] == "/", cookie["name"]
-            assert cookie["domain"] == e2e.PUBLIC, "the cookie is not host-only"
+            assert cookie["domain"] == system.PUBLIC, "the cookie is not host-only"
         # Page script cannot read them, and they go to no other host.
         assert "__Host-hermes" not in page.evaluate("document.cookie")
         scattered = [
             (cookie["name"], cookie["domain"])
             for cookie in context.cookies()
             if cookie["name"].startswith("__Host-hermes-platform")
-            and cookie["domain"] != e2e.PUBLIC
+            and cookie["domain"] != system.PUBLIC
         ]
         assert not scattered, scattered
         me = fetch(page, "/_platform/me")
         assert me["status"] == 200
         assert "no-store" in me["headers"]["cache-control"]
         assert json.loads(me["text"])["identity"] == {
-            "issuer": e2e.ISSUER,
-            "subject": e2e.SUBJECTS["bob"],
+            "issuer": system.ISSUER,
+            "subject": system.SUBJECTS["bob"],
         }
         assert not context.observed.errors, context.observed.errors
 
@@ -301,7 +306,7 @@ def test_an_unknown_account_is_told_it_has_no_hermes_and_reaches_nothing(
             f"{PUBLIC}/",
             "mallory",
             platform.passwords["mallory"],
-            left_the_login(e2e.PUBLIC),
+            left_the_login(system.PUBLIC),
         )
         assert "No Hermes for this account" in page.content()
         denial = page.goto(f"{PUBLIC}/")
@@ -328,7 +333,9 @@ def test_each_owners_browser_reaches_only_their_own_instance(platform, chromium)
         }
         for name, page in pages.items():
             account = native_session(page)
-            assert account["user_id"] == e2e.SUBJECTS[name], f"{name} reached another"
+            assert account["user_id"] == system.SUBJECTS[name], (
+                f"{name} reached another"
+            )
         uploaded = upload(pages["bob"], "uploads/browser.txt", secrets.token_hex(8))
         assert uploaded["status"] == 200, uploaded["status"]
         ours = fetch(pages["bob"], "/api/files?path=uploads")
@@ -346,7 +353,7 @@ def attempts(host, targets):
             "path": "uploads/forged.txt",
             "data_url": "data:text/plain;base64,Zm9yZ2Vk",
             "overwrite": True,
-            "identity": {"issuer": e2e.ISSUER, "subject": "forged"},
+            "identity": {"issuer": system.ISSUER, "subject": "forged"},
             "spec": {"access": "enabled"},
         }
     )
@@ -405,7 +412,7 @@ def forge(context, site, source, expect):
                 (reply.request.method, urlparse(reply.url).path, reply.status)
             )
             if reply.request.method == "POST"
-            and urlparse(reply.url).hostname in (e2e.PUBLIC, e2e.ADMIN)
+            and urlparse(reply.url).hostname in (system.PUBLIC, system.ADMIN)
             else None
         ),
     )
@@ -437,7 +444,7 @@ def test_another_origin_cannot_act_with_the_owners_cookies(platform, chromium, s
         answers = forge(
             context,
             site,
-            attempts(e2e.PUBLIC, ["/api/files/upload", "/_platform/logout"]),
+            attempts(system.PUBLIC, ["/api/files/upload", "/_platform/logout"]),
             "script",
         )
         statuses = {path: status for _, path, status in answers}
@@ -449,7 +456,7 @@ def test_another_origin_cannot_act_with_the_owners_cookies(platform, chromium, s
         }, answers
         # A top-level form post is the other classic forgery.
         navigated = forge(
-            context, site, form_post(e2e.PUBLIC, "/auth/logout"), r"/auth/logout$"
+            context, site, form_post(system.PUBLIC, "/auth/logout"), r"/auth/logout$"
         )
         assert navigated == [("POST", "/auth/logout", 403)], navigated
         # Nothing happened to Bob: still signed in, with every cookie, and
@@ -567,7 +574,7 @@ def test_hostile_catalog_text_is_shown_as_text_in_the_dashboard(platform, chromi
         {
             "schemaVersion": 2,
             "image": platform.images["hermes"],
-            "resources": {"cpuMillis": 1000, "memoryMib": 2048},
+            "resources": system.HERMES_RESOURCES,
             "home": {"source": "local", "sizeGib": 1},
             "adminConfig": {"display": {"note": payload}},
         },
@@ -600,7 +607,7 @@ def test_the_dashboard_signs_an_administrator_in_under_a_strict_policy(
         for cookie in cookies.values():
             assert cookie["secure"] and cookie["httpOnly"], cookie["name"]
             assert cookie["sameSite"] == "Lax", cookie["name"]
-            assert cookie["domain"] == e2e.ADMIN and cookie["path"] == "/"
+            assert cookie["domain"] == system.ADMIN and cookie["path"] == "/"
         assert "__Host-hermes" not in page.evaluate("document.cookie")
         document = page.goto(f"{ADMIN}/")
         headers = document.headers
@@ -615,7 +622,9 @@ def test_the_dashboard_signs_an_administrator_in_under_a_strict_policy(
         assert script.split() == ["script-src", "'self'"], script
         session = fetch(page, "/api/v1/session")
         assert session["status"] == 200
-        assert json.loads(session["text"])["actor"]["subject"] == e2e.SUBJECTS["alice"]
+        assert (
+            json.loads(session["text"])["actor"]["subject"] == system.SUBJECTS["alice"]
+        )
         # The dashboard renders, and its own scripts break no policy.
         page.get_by_role("navigation").first.wait_for()
         assert not context.observed.violations, context.observed.violations
@@ -626,7 +635,7 @@ def test_the_dashboard_signs_an_administrator_in_under_a_strict_policy(
 def test_an_owner_without_a_grant_is_refused_the_dashboard(platform, chromium):
     with chromium.context() as context:
         page = context.new_page()
-        sign_in(page, f"{ADMIN}/", "bob", platform.passwords["bob"], on(e2e.ADMIN))
+        sign_in(page, f"{ADMIN}/", "bob", platform.passwords["bob"], on(system.ADMIN))
         # The flow's browser-proof cookie may remain; the session must not exist.
         names = {cookie["name"] for cookie in context.cookies(ADMIN)}
         assert "__Host-hermes-admin" not in names, "a session without a grant"
@@ -648,7 +657,7 @@ def test_another_origin_cannot_use_an_administrators_dashboard_cookies(
         answers = forge(
             context,
             site,
-            attempts(e2e.ADMIN, ["/api/v1/assignments", "/auth/logout"]),
+            attempts(system.ADMIN, ["/api/v1/assignments", "/auth/logout"]),
             "script",
         )
         assert {path for _, path, _ in answers} == {
@@ -694,9 +703,9 @@ def test_a_dashboard_action_commissions_an_instance_its_owner_uses_in_a_browser(
         assignment = next(
             item for item in listed["items"] if item["identity"]["subject"] == subject
         )
-        e2e.wait(
+        system.wait(
             lambda: platform.admin.phase(assignment["instanceId"])["phase"] == "ready",
-            e2e.READY_TIMEOUT,
+            system.READY_TIMEOUT,
             lambda: platform.admin.phase(assignment["instanceId"]),
             interval=5,
         )
@@ -706,13 +715,13 @@ def test_a_dashboard_action_commissions_an_instance_its_owner_uses_in_a_browser(
         row.get_by_text("ready", exact=True).wait_for()
         # The new owner signs in with a browser of their own and uses it.
         dora = dora_context.new_page()
-        sign_in(dora, f"{PUBLIC}/", username, password, left_the_login(e2e.PUBLIC))
+        sign_in(dora, f"{PUBLIC}/", username, password, left_the_login(system.PUBLIC))
         assert native_session(dora)["user_id"] == subject
         assert upload(dora, "uploads/dashboard.txt", "made here")["status"] == 200
         assert "dashboard.txt" in fetch(dora, "/api/files?path=uploads")["text"]
         # Another owner's browser neither sees it nor is it theirs.
         bob = owner(bob_context, platform, "bob")
-        assert native_session(bob)["user_id"] == e2e.SUBJECTS["bob"]
+        assert native_session(bob)["user_id"] == system.SUBJECTS["bob"]
         assert "dashboard.txt" not in fetch(bob, "/api/files?path=uploads")["text"]
         assert not dora_context.observed.dialogs
 
@@ -720,13 +729,13 @@ def test_a_dashboard_action_commissions_an_instance_its_owner_uses_in_a_browser(
 def assign(platform, username):
     """A new directory person with an assignment on the published `personal`
     template; returns the assignment's receipt."""
-    directory = e2e.Directory(platform.ca, platform.passwords["directory"])
+    directory = system.Directory(platform.ca, platform.passwords["directory"])
     subject = directory.create(username, f"{username}@e2e.test", secrets.token_hex(12))
     return platform.admin.call(
         "POST",
         "/api/v1/assignments",
         {
-            "identity": {"issuer": e2e.ISSUER, "subject": subject},
+            "identity": {"issuer": system.ISSUER, "subject": subject},
             "spec": {
                 "access": "enabled",
                 "template": {"id": "personal", "version": platform.state.template},
@@ -780,13 +789,13 @@ def test_a_revoked_administrator_is_refused_on_the_next_dashboard_request(
         "POST",
         "/api/v1/administrators",
         {
-            "identity": {"issuer": e2e.ISSUER, "subject": subject},
+            "identity": {"issuer": system.ISSUER, "subject": subject},
             "canManageAdministrators": False,
         },
     )
     with chromium.context() as context:
         page = context.new_page()
-        sign_in(page, f"{ADMIN}/", username, password, left_the_login(e2e.ADMIN))
+        sign_in(page, f"{ADMIN}/", username, password, left_the_login(system.ADMIN))
         page.goto(f"{ADMIN}/assignments")
         page.get_by_role("table").first.wait_for()
         assert fetch(page, "/api/v1/assignments?limit=1")["status"] == 200

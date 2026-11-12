@@ -13,13 +13,13 @@ import time
 
 import pytest
 
-from tests.personal_hermes import native_e2e as scenarios
+from tests.support import system
 from tests.support.people import person, ready
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.slow]
 
 HOLD = (
-    scenarios.PLUGIN_PRELUDE
+    system.PLUGIN_PRELUDE
     + """
 import urllib.error, uuid
 settings = managed_execution.Provider(Context("")).settings()
@@ -59,7 +59,7 @@ second.cleanup()
 
 
 def workers(platform, namespace):
-    names = scenarios.kubectl(
+    names = system.kubectl(
         platform.identifier,
         "get",
         "pods",
@@ -105,10 +105,10 @@ def test_a_backend_serves_no_more_environments_than_it_allows_until_one_retires(
     def sessions():
         return {
             e["session"]: (e["state"], e["leases"])
-            for e in scenarios.environments(admin, receipt["instanceId"])
+            for e in system.environments(admin, receipt["instanceId"])
         }
 
-    process = scenarios.hermes_python_started(platform.identifier, namespace, HOLD)
+    process = system.hermes_python_started(platform.identifier, namespace, HOLD)
     try:
         assert process.stdout.readline().strip() == "held"
         assert json.loads(process.stdout.readline()) == {"third": 503}
@@ -119,7 +119,7 @@ def test_a_backend_serves_no_more_environments_than_it_allows_until_one_retires(
         assert sessions() == {"s1": ("ready", 1), "s2": ("ready", 1)}
 
         # One session ends; the room it held comes back.
-        scenarios.instance_pod_exec(platform.identifier, namespace, "touch /tmp/go")
+        system.instance_pod_exec(platform.identifier, namespace, "touch /tmp/go")
         assert json.loads(process.stdout.readline()) == {"after": 200}
         now = sessions()
         assert now["s1"] == ("retired", 0)
