@@ -51,6 +51,7 @@ from tests.personal_hermes.kubernetes import (
     ROOT,
     WORKER_TAG,
     command,
+    image_source,
     import_fixed_worker_image,
     import_image,
     import_worker_image,
@@ -2792,7 +2793,7 @@ def push_image(tag, base, repository, credentials):
     """Uploads a local image's linux/amd64 manifest and blobs through the
     registry API (Docker refuses plain HTTP pushes); returns its digest."""
     archive = subprocess.run(
-        ["docker", "save", tag], capture_output=True, timeout=600, check=True
+        image_source(tag), capture_output=True, timeout=600, check=True
     ).stdout
     bundle = tarfile.open(fileobj=io.BytesIO(archive))
 
