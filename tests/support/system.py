@@ -66,11 +66,15 @@ SUBJECTS = {
     "frank": "00000000-0000-4000-8000-0000000000f0",
 }
 READY_TIMEOUT = 900
-# Requests equal limits, so these fix how many instances fit on the node. Two
-# owners run throughout and each scenario adds at most one, on a 2-CPU runner.
-# What a test instance requests: a real instance stays near 400 MiB, and the
-# CI runners have two CPUs and about 7 GiB for the whole platform.
-HERMES_RESOURCES = {"cpuMillis": 350, "memoryMib": 768}
+# Instance and worker requests equal their limits, so these fix how many fit on
+# a CI runner's node: 2 CPUs and about 7 GiB for the whole platform. Two owners
+# run throughout, and a case may add three instances and four workers.
+# A real instance stays near 400 MiB.
+HERMES_RESOURCES = {"cpuMillis": 250, "memoryMib": 768}
+WORKER_RESOURCES = {"cpuMillis": 100, "memoryMib": 256, "ephemeralGib": 1}
+# The manager, controller and gateway have no CPU limit; a small request leaves
+# the node's CPUs to the instances without slowing them.
+PLATFORM_REQUESTS = {"cpu": "50m", "memory": "128Mi"}
 HERE = Path(__file__).resolve().parent
 # The in-cluster fake model (fake_model.py) every assistant instance uses.
 MODEL_URL = "http://fake-model.model.svc.cluster.local:8080/v1"
@@ -959,6 +963,7 @@ def install(
         "images": {"hermes-manager": images["manager"]},
         "hermesManager": {
             "enabled": True,
+            "resources": {"requests": PLATFORM_REQUESTS},
             "installation": {"id": owned["id"], "issuer": ISSUER},
             "storageSources": [
                 {"id": "local", "storageClass": {"name": "local-path"}},
@@ -1155,7 +1160,7 @@ def commission(identifier, images, ca, passwords):
         "sshContract": "managed-ssh-v2",
         "uid": 1000,
         "gid": 1000,
-        "resources": {"cpuMillis": 150, "memoryMib": 256, "ephemeralGib": 1},
+        "resources": WORKER_RESOURCES,
     }
     backend = admin.publish(
         "terminal-backends",

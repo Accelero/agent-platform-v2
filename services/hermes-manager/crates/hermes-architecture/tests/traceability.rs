@@ -112,7 +112,11 @@ fn defined_tests() -> BTreeSet<String> {
         (repository().join("tests"), "py", "def "),
         (repository().join("agent_platform/tests"), "py", "def "),
         (repository().join("charts/tests"), "py", "def "),
-        (repository().join("contracts/hermes-manager/tests"), "py", "def "),
+        (
+            repository().join("contracts/hermes-manager/tests"),
+            "py",
+            "def ",
+        ),
         (repository().join("runtimes/hermes/tests"), "py", "def "),
     ];
     for (root, extension, keyword) in roots {
