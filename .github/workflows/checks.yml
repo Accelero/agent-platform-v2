@@ -95,6 +95,9 @@ jobs:
       - name: cargo clippy
         working-directory: services/hermes-manager
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Install the dashboard dependencies
+        working-directory: services/hermes-manager/ui
+        run: npm ci --ignore-scripts
       - name: Install Chromium for the dashboard
         working-directory: services/hermes-manager/ui
         run: npx --no-install playwright install --with-deps chromium
