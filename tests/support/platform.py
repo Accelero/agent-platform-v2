@@ -21,8 +21,8 @@ import requests
 
 from tests.support import system
 from tests.support.cluster import Cluster
+from tests.support.images import HERMES_IMAGE, MANAGER_IMAGE, WORKER_TAG
 from tests.support.k3s import (
-    WORKER_TAG,
     command,
     import_image,
 )
@@ -128,8 +128,8 @@ def bring_up(cluster: Cluster, directory: Path, cleanup: Cleanup, *, shared=Fals
     command(["docker", "tag", system.KEYCLOAK_IMAGE, "hermes-e2e-keycloak:pinned"])
     references = {}
     for key, tag in (
-        ("manager", system.MANAGER_IMAGE),
-        ("hermes", system.HERMES_IMAGE),
+        ("manager", MANAGER_IMAGE),
+        ("hermes", HERMES_IMAGE),
         ("worker", WORKER_TAG),
         ("keycloak", "hermes-e2e-keycloak:pinned"),
     ):
