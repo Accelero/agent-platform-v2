@@ -42,7 +42,7 @@ REGISTRY = "registry.e2e.test:5000"
 
 
 REGISTRY_IMAGE = (
-    "registry@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8"
+    "registry@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c"
 )
 
 

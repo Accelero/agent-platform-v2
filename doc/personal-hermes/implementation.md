@@ -85,7 +85,7 @@ scenario coverage limits are recorded in G01/G03.
 
 ## Verification commands
 
-Use Python 3.14, `uv sync --locked`, Helm 3, Docker, Node from
+Use Python 3.14, `uv sync --locked`, Helm 4, Docker, Node from
 `services/hermes-manager/ui/.node-version` and the toolchain in
 `services/hermes-manager/rust-toolchain.toml`. Run from the repository root
 unless shown otherwise. The fixtures create and remove their own PostgreSQL,

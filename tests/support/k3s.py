@@ -24,7 +24,7 @@ from tests.support.ownership import (
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = (
     "rancher/k3s@sha256:"
-    "ca7f37d993d82ef0dcdcfecb2e0e2618ea541dbaffc620c8cedebe01a82acd0d"
+    "21ea6e0fac4e3930c2ce8aa40ddd41a8b18cb3e9a0222c030dc005e7e88c4332"
 )
 
 

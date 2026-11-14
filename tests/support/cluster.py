@@ -45,7 +45,7 @@ K3D_TOOLS = (
 # The probe workload: a digest-pinned registry image, which is both a live
 # HTTP listener (any port, set by environment) and carries a busybox `wget`.
 PROBE_SOURCE = (
-    "registry@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8"
+    "registry@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c"
 )
 PROBE_TAG = "agent-platform-probe:test"
 

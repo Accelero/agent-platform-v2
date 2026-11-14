@@ -14,7 +14,7 @@ uuid.workspace = true
 [dev-dependencies]
 hermes-core = { workspace = true, features = ["testing"] }
 serde_yaml_ng = "=0.10.0"
-jsonschema = { version = "=0.59.0", default-features = false }
+jsonschema = { version = "=0.61.2", default-features = false }
 
 [lints]
 workspace = true

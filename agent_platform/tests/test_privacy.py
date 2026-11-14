@@ -164,6 +164,7 @@ def test_privacy_failure_prevents_all_build_and_publication_commands(tmp_path):
 def test_example_email_and_digest_references_are_not_personal_data():
     privacy.check_content(b"owner@example.invalid git@github.com hermes@localhost")
     privacy.check_content(b"ghcr.io/example/image@sha256:" + b"a" * 64)
+    privacy.check_content(b"npm:typescript@7.0.2")
 
 
 def test_build_attestations_do_not_copy_the_github_event_payload():

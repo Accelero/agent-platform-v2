@@ -1,2 +1,5 @@
-# Hindsight's local_external provider; installed at image build, never at boot.
-hindsight-client==0.10.1
+# Runtime adapters and Hindsight providers; installed at image build, never at boot.
+PyYAML==6.0.3
+hindsight-client==1.2.1
+hindsight-embed==1.2.1
+ddgs==9.16.1

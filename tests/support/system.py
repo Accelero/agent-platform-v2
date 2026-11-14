@@ -53,7 +53,7 @@ ISSUER = f"https://{KEYCLOAK}:8443/realms/agents"
 GATEWAY_IDENTITY = "spiffe://e2e.test/hermes-gateway"
 KEYCLOAK_IMAGE = (
     "quay.io/keycloak/keycloak@sha256:"
-    "27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741"
+    "c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0"
 )
 NODE_PORTS = {"keycloak": 30843, "gateway": 30443, "admin": 30444}
 # Exact Keycloak subjects, fixed in the imported realm.
@@ -276,6 +276,7 @@ def realm(passwords, shared_hosts=()):
         "clients": [
             {
                 "clientId": "e2e-directory",
+                "defaultClientScopes": ["roles", "kc-admin-api"],
                 "enabled": True,
                 "publicClient": False,
                 "secret": passwords["directory"],

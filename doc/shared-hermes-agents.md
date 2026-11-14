@@ -52,8 +52,8 @@ Outside the initial feature:
 ## Verified constraints
 
 These facts were established against the source tree, the pinned Hermes image
-(`nousresearch/hermes-agent@sha256:d4da4a40…`, as patched by
-`runtimes/hermes/Dockerfile`) and the pinned Keycloak 26.8.0 image. The design
+(`nousresearch/hermes-agent@sha256:276d4468…`, as patched by
+`runtimes/hermes/Dockerfile`) and the pinned Keycloak image. The design
 depends on them. Facts marked as experiments come from disposable, networkless
 or loopback-only probes that are not checked in. Collected Phase 0 cases cover
 native login, refresh, logout, home binding and callbacks on the project image;

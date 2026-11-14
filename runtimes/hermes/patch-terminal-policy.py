@@ -8,22 +8,22 @@ ROOT = Path("/opt/hermes")
 PATCHES = [
     (
         "hermes_cli/env_loader.py",
-        "f33feafb58da3bd1e19eb3c97fdfc461c570ed3823fb56dd84f8e95357d2e7b9",
-        "    assignments = list(DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse())",
+        "b4ba716b5e9d73ccbbc16f507b366ffad0c02bbf12d164568ca32461bf858e11",
+        "    return list(DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse())",
         "    from hermes_cli._platform_terminal_policy import filter_dashboard_auth\n"
-        "    assignments = filter_dashboard_auth(\n"
+        "    return filter_dashboard_auth(\n"
         "        list(DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse()))",
     ),
     (
         "hermes_cli/managed_scope.py",
-        "692289b37fa3ce547b37d8fc20baf12f0e1a8358689ebdc48e51d06250e91037",
+        "1c5d16b92952a0101cb8ee8f0f70cf7cd2d19faffe224f9ca1b52dd29e794ed2",
         '    override = os.environ.get("HERMES_MANAGED_DIR", "").strip()',
         "    from hermes_cli._platform_terminal_policy import managed_directory\n"
         "    return managed_directory()",
     ),
     (
         "tools/terminal_scope.py",
-        "4ba7e1a357b4c6d1b58d506bff7dbc20a66b1b34163ec645dd817f9d3b2e4c35",
+        "2c6268b99b2db70af38158002ed1487aefde30f43f23bb3ff0f7a98b80b5fdf8",
         "    scope = _terminal_scope_var.get()\n    if scope is None:",
         "    scope = _terminal_scope_var.get()\n"
         "    enforce_no_refusal()\n"
@@ -35,7 +35,7 @@ PATCHES = [
     ),
     (
         "tools/terminal_tool_backends.py",
-        "d241563d0ce81f65beb9aaf74e10b812488fe4edd97b63198590ba8aad85381a",
+        "8467cebf8086ed8b8786637d74d172b826aab43ec35db5f055be7a44c771a574",
         "    builder = _ENV_BUILDERS.get(env_type)",
         "    from hermes_cli._platform_terminal_policy import enforce_backend\n"
         "    enforce_backend(env_type)\n"
@@ -43,7 +43,7 @@ PATCHES = [
     ),
     (
         "hermes_cli/plugins_discovery.py",
-        "518504306fe937bae73a10f24bcfb040d81b2579cfb6115ef7fccd3c28d77a4b",
+        "08731e1f0f932edda7e74af4bae4c2f16870ade04b8fc31173380544bc42baf8",
         "    for manifest in manifests:\n        key = manifest_key(manifest)",
         "    from hermes_cli._platform_terminal_policy import trusted_manifests\n"
         "    for manifest in trusted_manifests(manifests):\n"
@@ -60,7 +60,8 @@ def patch(root=ROOT):
         if hashlib.sha256(original).hexdigest() != digest:
             raise RuntimeError("Pinned terminal source changed; review policy hooks")
         text = original.decode()
-        if text.count(before) != 1:
+        expected = 2 if relative == "hermes_cli/env_loader.py" else 1
+        if text.count(before) != expected:
             raise RuntimeError("Native terminal policy integration no longer matches")
         text = text.replace(before, after)
         if relative == "tools/terminal_scope.py":
@@ -70,11 +71,11 @@ def patch(root=ROOT):
             text = text.replace(
                 before_scope,
                 "    from hermes_cli._platform_terminal_policy import load_policy\n"
-                '    _apply(load_policy()["terminal"])\n'
+                '    _apply_terminal_mapping(scope, load_policy()["terminal"])\n'
                 "    _resolve_scope_cwd_placeholder(scope)\n    return scope",
             )
         if relative == "hermes_cli/plugins_discovery.py":
-            before_gate = "    lookup_key = manifest_key(manifest)\n    names ="
+            before_gate = "    lookup_key = manifest_key(manifest)\n"
             if text.count(before_gate) != 1:
                 raise RuntimeError("Native terminal plugin gate no longer matches")
             text = text.replace(
@@ -83,7 +84,7 @@ def patch(root=ROOT):
                 "import required_manifest\n"
                 "    if required_manifest(manifest):\n"
                 '        return ManifestGate("load", enabled=True)\n'
-                "    lookup_key = manifest_key(manifest)\n    names =",
+                "    lookup_key = manifest_key(manifest)\n",
             )
         compile(text, str(path), "exec")
         changes.append((path, text))
@@ -99,7 +100,7 @@ def patch_terminal_schema(source: Path) -> None:
     original = source.read_bytes()
     if (
         hashlib.sha256(original).hexdigest()
-        != "02ca12ce0ca241ee41e839a0388cbd88618b986e6e8a460b6699e0b125e16ae9"
+        != "5e731a2aa007bb04b9b59e9daecc87574642bace793dfa3e0b836d170401bc5c"
     ):
         raise RuntimeError(
             "Pinned native settings source changed; review terminal selector"

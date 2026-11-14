@@ -23,7 +23,7 @@ import time
 import pytest
 
 from tests.support import system
-from tests.support.people import person, ready
+from tests.support.people import person, ready, template
 
 pytestmark = [pytest.mark.e2e, pytest.mark.cluster, pytest.mark.slow]
 
@@ -60,9 +60,10 @@ def backend_definition(platform, **limits):
     }
 
 
-def instance_with(platform, backends, default, mode):
+def instance_with(platform, backends, default, mode, assistant=None):
     """A new person whose assignment allows `backends` (id -> definition), and
-    the names of the backends it was given."""
+    the names of the backends it was given. `assistant` is the template
+    reference; the commissioned `personal` template by default."""
     tag = secrets.token_hex(3)
     versions = {
         name: platform.admin.publish("terminal-backends", f"{name}-{tag}", definition)
@@ -73,7 +74,8 @@ def instance_with(platform, backends, default, mode):
         platform,
         "lease",
         {
-            "template": {"id": "personal", "version": platform.state.template},
+            "template": assistant
+            or {"id": "personal", "version": platform.state.template},
             "terminal": {
                 "default": names[default],
                 "allowed": {names[name]: versions[name] for name in backends},
@@ -164,11 +166,22 @@ print(json.dumps({{
 def test_profiles_select_their_backends_and_a_new_default_applies_to_new_requests_only(
     platform,
 ):
+    # The change of default restarts Hermes while the held leases go unrenewed,
+    # so the instance must be back within the lease TTL (120 s). Its startup is
+    # CPU-bound and exceeds that at the shared 250m, so this one instance gets
+    # more; the node still fits the case's peak.
+    faster = f"lease-cpu-{secrets.token_hex(3)}"
+    version = platform.admin.publish(
+        "templates",
+        faster,
+        template(platform, resources={**system.HERMES_RESOURCES, "cpuMillis": 750}),
+    )
     receipt, namespace, names = instance_with(
         platform,
         {"alpha": backend_definition(platform), "beta": backend_definition(platform)},
         "alpha",
         "per_profile_on_demand",
+        assistant={"id": faster, "version": version},
     )
     alpha, beta = names["alpha"], names["beta"]
     first = run(

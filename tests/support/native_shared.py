@@ -32,9 +32,9 @@ HOSTS = ("engineering.agents.test", "support.agents.test")
 UNREGISTERED = "unregistered.agents.test"
 UPSTREAM = (
     "nousresearch/hermes-agent@sha256:"
-    "d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db"
+    "276d44685c65c0cb2a25f190b63c65c8906f9dc76486fb1c05ae71b5826bda08"
 )
-PROVIDER_SHA256 = "31b46690fb333fffa1524a63a54225ecc6c8731dcbfdfac95ea7647816cdbf5e"
+PROVIDER_SHA256 = "445da06266065691d4936688812cd6787736cb4a4775dce196e15e62973ccb5b"
 
 
 def test_image(_cleanup: Cleanup):
@@ -192,7 +192,11 @@ class SharedNative:
                     "password_hash": "",
                     "secret": "",
                 },
-                "oauth": {"client_id": "", "portal_url": ""},
+                "oauth": {
+                    "client_id": "",
+                    "portal_url": "",
+                    "self_hosted": {"id_token_leeway": 0},
+                },
             }
             layout.write_managed()
             (directory / "owner/context.json").write_text(json.dumps(layout.context))

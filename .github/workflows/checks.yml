@@ -23,16 +23,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: '0.13.0'
+          version: '0.13.8'
           python-version: '3.14'
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
-          version: 'v3.22.1'
+          version: 'v4.3.1'
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -51,7 +51,7 @@ jobs:
         run: uv run pytest -v --tb=short -m '(tooling or chart or hermes) and not image' --junitxml=.local/reports/python.xml
       - name: Upload the test report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-report
           path: .local/reports/
@@ -69,25 +69,27 @@ jobs:
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Free runner disk before the Rust build
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: services/hermes-manager/ui/.node-version
           cache: npm
           cache-dependency-path: services/hermes-manager/ui/package-lock.json
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Install the pinned npm
+        run: npm install --global npm@12.2.2 --ignore-scripts --fetch-timeout=60000 --fetch-retries=2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: '0.13.0'
+          version: '0.13.8'
           python-version: '3.14'
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
-          version: 'v3.22.1'
+          version: 'v4.3.1'
       - run: uv sync --locked
       - name: cargo fmt
         working-directory: services/hermes-manager
@@ -105,7 +107,7 @@ jobs:
         run: uv run pytest -v --tb=short -m 'manager or gateway or dashboard or worker' --junitxml=.local/reports/services.xml
       - name: Upload the test report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: services-report
           path: .local/reports/
@@ -120,25 +122,25 @@ jobs:
     # A cold build followed by the cache upload, for the two images in turn.
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Free runner disk for the image builds
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: '0.13.0'
+          version: '0.13.8'
           python-version: '3.14'
       - run: uv sync --locked
       - name: Set up BuildKit
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           driver-opts: provenance-add-gha=false
           buildkitd-config-inline: |
             [worker.oci]
               max-parallelism = 2
       - name: Expose the cache runtime to the build command
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {
@@ -163,7 +165,7 @@ jobs:
           docker save personal-hermes-native-test:local | zstd -T0 -3 -o images/personal-hermes-native-test_local.tar.zst
           docker save hermes-manager:e2e | zstd -T0 -3 -o images/hermes-manager_e2e.tar.zst
           docker save hermes-next-worker:test | zstd -T0 -3 -o images/hermes-next-worker_test.tar.zst
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: images
           path: images/
@@ -178,15 +180,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: '0.13.0'
+          version: '0.13.8'
           python-version: '3.14'
       - run: uv sync --locked
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: images
           path: images
@@ -197,7 +199,7 @@ jobs:
         run: uv run pytest -v --tb=short -m 'hermes and image' --prebuilt --junitxml=.local/reports/hermes-image.xml
       - name: Upload the test report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hermes-image-report
           path: .local/reports/
@@ -218,18 +220,18 @@ jobs:
         # tests/e2e/durations.json; keep the count in step with the command.
         part: ['1', '2', '3', '4', '5']
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Free runner disk for the clusters
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: '0.13.0'
+          version: '0.13.8'
           python-version: '3.14'
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
-          version: 'v3.22.1'
+          version: 'v4.3.1'
       - run: uv sync --locked
       - name: Install Chromium and the certificate tool for the browser cases
         run: |
@@ -240,7 +242,7 @@ jobs:
           curl -fsSL -o /tmp/k3d https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64
           echo '06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0  /tmp/k3d' | sha256sum -c -
           sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: images
           path: images
@@ -251,7 +253,7 @@ jobs:
         run: uv run pytest -v --tb=short -m e2e --prebuilt --shard ${{ matrix.part }}/5 --junitxml=.local/reports/e2e-${{ matrix.part }}.xml
       - name: Upload the test report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-${{ matrix.part }}-report
           path: .local/reports/
@@ -274,18 +276,18 @@ jobs:
       group: agent-platform-release
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Free runner disk for the images
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: '0.13.0'
+          version: '0.13.8'
           python-version: '3.14'
-      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
-          version: 'v3.22.1'
+          version: 'v4.3.1'
       - name: Validate sources and release version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -301,7 +303,7 @@ jobs:
             echo 'This release already exists. Publish a new version.' >&2
             exit 1
           fi
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: images
           path: images
@@ -309,7 +311,7 @@ jobs:
         shell: bash
         run: for archive in images/*.tar.zst; do zstd -dc "$archive" | docker load; done
       - name: Authenticate image publishing
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -325,7 +327,7 @@ jobs:
           uv run python -m agent_platform.release
           --version "${GITHUB_REF_NAME#v}" --revision "$GITHUB_SHA" --publish
       - name: Upload chart package and informational receipt
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-release
           path: |

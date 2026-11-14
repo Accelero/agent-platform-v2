@@ -12,7 +12,7 @@ hermes-wire.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 hyper-util.workspace = true
-jsonschema = { version = "=0.59.0", default-features = false }
+jsonschema = { version = "=0.61.2", default-features = false }
 rustls.workspace = true
 rustls-pemfile.workspace = true
 serde.workspace = true

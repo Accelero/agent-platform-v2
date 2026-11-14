@@ -2,8 +2,8 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:hermes-manager:hermes-managed:1",
   "title": "Reviewed personal Hermes managed settings",
-  "x-revision": 2,
-  "x-compatibleImageDigests": ["sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db"],
+  "x-revision": 3,
+  "x-compatibleImageDigests": ["sha256:276d44685c65c0cb2a25f190b63c65c8906f9dc76486fb1c05ae71b5826bda08"],
   "description": "Reviewed terminal, plugin and dashboard authentication policy from the pinned personal runtime. Other keys are preserved and explicitly unvalidated.",
   "type": "object",
   "properties": {

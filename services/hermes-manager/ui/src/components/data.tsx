@@ -2,11 +2,14 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   flexRender,
-  getCoreRowModel,
-  useReactTable,
+  columnVisibilityFeature,
+  tableFeatures,
+  useTable,
 } from "@tanstack/react-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useLocation, useNavigate } from "@tanstack/react-router";
+
+const dataTableFeatures = tableFeatures({ columnVisibilityFeature });
 export function ErrorNotice({ error }: { error: Error }) {
   return (
     <div role="alert" className="error">
@@ -38,7 +41,7 @@ export function CopyId({ value }: { value: string }) {
     </span>
   );
 }
-export function DataTable<T>({
+export function DataTable<T extends object>({
   caption,
   rows,
   columns,
@@ -46,15 +49,13 @@ export function DataTable<T>({
 }: {
   caption: string;
   rows: T[];
-  columns: ColumnDef<T>[];
+  columns: ColumnDef<typeof dataTableFeatures, T>[];
   empty: string;
 }) {
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: rows,
     columns,
-    getCoreRowModel: getCoreRowModel(),
-    manualSorting: true,
-    manualPagination: true,
   });
   return (
     <section className="panel">

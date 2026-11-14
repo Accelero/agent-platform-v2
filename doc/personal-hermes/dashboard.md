@@ -303,6 +303,9 @@ review it.
 
 ## Read-only Keycloak directory
 
+Assign the built-in `kc-admin-api` client scope to the directory reader as a
+default scope so its token carries the Admin REST API audience and scope.
+
 Optionally enable `hermesManager.api.directory` with its client ID; the client
 secret is the `directory-client-secret` key of the API's Secret. The generated
 configuration then contains:
@@ -391,6 +394,8 @@ for `keycloak.localhost:8443` (the sign-in page), or import the generated CA wit
 | `keycloak` | The identity provider, with the realm `agents` and its test users imported on first start. | `https://keycloak.localhost:8443` |
 | `certs` | Runs once: a throwaway CA and the two server certificates, written to a volume. | none |
 
+The database uses the `pgdata18` volume mounted at `/var/lib/postgresql`.
+
 The test identities are fixed for local use: `test` is the administrator, `bob`
 and `carol` are ordinary users for assignments and the users view, all with the
 password `test`. The realm is `services/hermes-manager/dev/keycloak/agents.json`.
@@ -421,6 +426,11 @@ the release image serves `ui/dist`, built as described above.
 
 The dashboard lives in `services/hermes-manager/ui`. Node and npm versions are
 pinned by the image and frontend configuration:
+
+The production and development images install the pinned npm release explicitly.
+The dashboard type checker uses the current TypeScript compiler through the
+`typescript-compiler` package alias. The OpenAPI generator resolves its supported
+TypeScript API separately through its peer dependency.
 
 ```bash
 cd services/hermes-manager/ui

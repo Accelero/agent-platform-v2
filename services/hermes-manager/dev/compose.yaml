@@ -20,13 +20,13 @@ services:
     restart: "no"
 
   postgres:
-    image: postgres@sha256:2a0d0fe14825b0939f78a8cad5cd4e6aa68bf94d0e5dd96e24b6d23af4315545
+    image: postgres@sha256:b9f6b8ff03b62f3cfd9d9ba3fe56226a9991c79d3fb46fd46536263bf02be553
     environment:
       POSTGRES_USER: hermes
       POSTGRES_PASSWORD: hermes
       POSTGRES_DB: hermes
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
       interval: 2s
@@ -37,7 +37,7 @@ services:
   # start. The name and port are the ones the browser uses too, so the issuer
   # is the same on both sides.
   keycloak:
-    image: quay.io/keycloak/keycloak@sha256:27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741
+    image: quay.io/keycloak/keycloak@sha256:c68e286cacd87b942ac1939a0a1481461109d6acd3a57dc496969a319a76bbf0
     command:
       - start-dev
       - --import-realm
@@ -86,7 +86,10 @@ services:
   # The Vite dev server with hot module reloading. The sources are mounted from
   # the checkout, so saving a file in ui/src updates the open page.
   dashboard:
-    image: node@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567
+    build:
+      context: .
+      target: dashboard
+    image: agent-platform-dev-dashboard
     working_dir: /app
     environment:
       MANAGER_DEV_TLS_CERT_FILE: /pki/admin.crt
@@ -115,7 +118,7 @@ services:
 
 volumes:
   pki:
-  pgdata:
+  pgdata18:
   state:
   target:
   cargo-registry:

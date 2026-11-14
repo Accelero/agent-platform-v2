@@ -14,10 +14,10 @@ export const registry = [
   },
   {
     id: "urn:hermes-manager:hermes-managed:1",
-    revision: 2,
-    digest: "840bf84721906f19e634a890e077fdbaf0f654af9bb639a46d3acfa37d1cfb63",
+    revision: 3,
+    digest: "413dd7f22579751b38f6295d8364de3e4a10187b5d019abe7e8144fe24a4b599",
     compatibleImageDigests: [
-      "sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db",
+      "sha256:276d44685c65c0cb2a25f190b63c65c8906f9dc76486fb1c05ae71b5826bda08",
     ],
   },
 ] as const;
@@ -369,9 +369,9 @@ export const schemas = {
     $schema: "http://json-schema.org/draft-07/schema#",
     $id: "urn:hermes-manager:hermes-managed:1",
     title: "Reviewed personal Hermes managed settings",
-    "x-revision": 2,
+    "x-revision": 3,
     "x-compatibleImageDigests": [
-      "sha256:d4da4a40cd7a28aba983775d9fd31d94cbf153eeb0cb9e844d6d0f612b7c24db",
+      "sha256:276d44685c65c0cb2a25f190b63c65c8906f9dc76486fb1c05ae71b5826bda08",
     ],
     description:
       "Reviewed terminal, plugin and dashboard authentication policy from the pinned personal runtime. Other keys are preserved and explicitly unvalidated.",

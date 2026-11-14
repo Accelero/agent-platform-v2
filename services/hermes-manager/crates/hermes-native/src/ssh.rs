@@ -183,7 +183,7 @@ async fn login(
 mod tests {
     use super::*;
     use russh::keys::PublicKey;
-    use russh::server::{self, Auth, ChannelOpenHandle, Msg, Session};
+    use russh::server::{self, Auth, ChannelOpenHandle, Msg, Session, VerifiedPublicKey};
     use russh::{Channel, ChannelId};
     use std::sync::atomic::AtomicUsize;
     use tokio::net::TcpListener;
@@ -203,10 +203,10 @@ mod tests {
         async fn auth_publickey(
             &mut self,
             user: &str,
-            key: &PublicKey,
+            key: VerifiedPublicKey<'_>,
         ) -> Result<Auth, Self::Error> {
             Ok(
-                if user == "worker" && key.key_data() == self.authorized.key_data() {
+                if user == "worker" && key.public_key.key_data() == self.authorized.key_data() {
                     Auth::Accept
                 } else {
                     Auth::reject()

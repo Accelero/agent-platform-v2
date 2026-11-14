@@ -65,6 +65,7 @@
   "clients": [
     {
       "clientId": "manager-directory-reader",
+      "defaultClientScopes": ["roles", "kc-admin-api"],
       "enabled": true,
       "publicClient": false,
       "secret": "dev-directory-secret",

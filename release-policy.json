@@ -14,6 +14,8 @@
       "root": ".",
       "files": [
         "runtimes/hermes/Dockerfile",
+        "runtimes/hermes/licenses/uv-LICENSE-APACHE",
+        "runtimes/hermes/licenses/uv-LICENSE-MIT",
         "runtimes/hermes/terminal-policy.py",
         "runtimes/hermes/patch-terminal-policy.py",
         "runtimes/hermes/managed-exec",

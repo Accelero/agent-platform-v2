@@ -19,8 +19,9 @@ _CREDENTIALS = {
     "tailscale-key": rb"\btskey-(?:auth|api|client)-[A-Za-z0-9_-]{20,}\b",
     "aws-key": rb"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b",
 }
+# DNS top-level domains begin with a letter; numeric npm version pins are not emails.
 _EMAIL = re.compile(
-    rb"[A-Za-z0-9_.+-]+@(?:(?:[A-Za-z0-9-]+\.)+[A-Za-z0-9-]+|localhost)\b"
+    rb"[A-Za-z0-9_.+-]+@(?:(?:[A-Za-z0-9-]+\.)+[A-Za-z][A-Za-z0-9-]*|localhost)\b"
 )
 _PRIVATE_NAMES = {
     "soul.md",
