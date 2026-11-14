@@ -736,21 +736,22 @@ scale promise. Keep external model/provider benchmarks optional and separate.
 
 Current: release unit tests mock build/publish commands, and image checks smoke
 specific properties. A version tag runs all of `Checks` on images its `images`
-job builds once, labelled with source, revision and declared version; the
+job builds once, labelled with source, revision and the tag's version; the
 `publish` job `needs` every test job, including every end-to-end case, and
 pushes those same images after checking their labels name the tagged commit
 and version (`agent_platform.release.publish`). `agent_platform/tests/test_build.py`
 and `test_release.py` cover that publication waits for every test job, builds
 nothing, refuses another commit's or version's image, and stops before the
-first push when GHCR refuses any package. The tag workflow also
-requires the chart and project versions in the tagged commit to equal the tag,
-while ordinary commits keep the `0.0.0` placeholder. That rule is now
-`agent_platform.release.verify_release_source` and `verify_placeholder_source`,
-called by the tag workflow before any login or publication, and
-`agent_platform/tests/test_release_versions.py` covers the version grammar including
-`-dev.N`, the trigger pattern against it, each of chart and project being stale,
-the placeholder never being a release, and this tree being a placeholder tree or
-the exact release commit.
+first push when GHCR refuses any package. A release tags an ordinary commit:
+every commit, the tagged one included, keeps the `0.0.0` placeholder in chart
+and project, and the version lives only in the tag (`agent_platform.build.build_version`
+for the image labels, the packaging for the chart). The tag workflow checks
+this with `agent_platform.release.verify_release_source` before any login or
+publication, and `agent_platform/tests/test_release_versions.py` covers the
+version grammar including `-dev.N`, the trigger pattern against it, a tagged
+commit that declares any version being refused, the placeholder never being a
+release, and this tree keeping the placeholder; `test_build.py` covers the
+build version of tag, branch and local builds.
 
 Test installing the packaged chart with all three exact built image digests,
 then supported upgrade and uninstall retention. Verify labels/licenses,

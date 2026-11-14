@@ -93,11 +93,12 @@ Review the staged diff and `git diff --check` before committing.
 
 ## Releases
 
-Source chart and project versions stay at the `0.0.0` placeholder except in the
-tagged release commit, which sets both to the tag's version; do not add
-release numbers to documentation. A release requires an explicit
-`vMAJOR.MINOR.PATCH` tag, or `vMAJOR.MINOR.PATCH-dev.N` for a prerelease of
-unmerged work. This repository is its own product: it publishes only under
+Source chart and project versions always stay at the `0.0.0` placeholder; a
+release's version lives only in its tag, which the build stamps into the image
+labels and the packaged chart. Do not add release numbers to documentation or
+make version-bump commits. A release is an explicit `vMAJOR.MINOR.PATCH` tag on
+a commit of main, or `vMAJOR.MINOR.PATCH-dev.N` on a commit of unmerged work for
+a prerelease; push only the tag. This repository is its own product: it publishes only under
 `ghcr.io/accelero/agent-platform-v2` (images and the `agent-platform-v2`
 chart) with its own version line, never to the public `agent-platform`
 repository's packages. Never overwrite or reuse an existing version. A version tag runs

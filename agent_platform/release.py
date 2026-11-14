@@ -1,9 +1,9 @@
 """Build versioned agent artifacts locally, or publish the tested ones.
 
-A release tag runs every test job of `Checks` on images built once from the
-tagged commit; only when all of them passed does its `publish` job push those
-same images and the chart that pins their digests. No deployment credentials
-are involved.
+A release tags a commit on main. The tag runs every test job of `Checks` on
+images built once from that commit; only when all of them passed does its
+`publish` job push those same images and the chart that pins their digests.
+No deployment credentials are involved.
 """
 
 from __future__ import annotations
@@ -22,7 +22,15 @@ from pathlib import Path
 
 import yaml
 
-from agent_platform.build import REPOSITORY, ROOT, TARGETS, bake_arguments
+from agent_platform.build import (
+    PLACEHOLDER,
+    REPOSITORY,
+    ROOT,
+    TARGETS,
+    VERSION,
+    VERSION_RULE,
+    bake_arguments,
+)
 from agent_platform.command import run
 from agent_platform.privacy import chart_files, stage_contexts
 
@@ -39,17 +47,6 @@ TESTED = {
     "agent-runtime": "hermes-next-worker:test",
     "hermes-manager": "hermes-manager:e2e",
 }
-# MAJOR.MINOR.PATCH, or a development prerelease MAJOR.MINOR.PATCH-dev.N that
-# never collides with a stable version and is never resolved as the latest one.
-VERSION = re.compile(
-    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-dev\.(?:0|[1-9][0-9]*))?"
-)
-
-
-# Untagged commits carry this in the chart and the project; only a tagged
-# release commit carries the tag's version.
-PLACEHOLDER = "0.0.0"
-VERSION_RULE = "Release tag must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-dev.N"
 
 
 def source_versions(root: Path = ROOT) -> dict[str, str]:
@@ -64,20 +61,18 @@ def source_versions(root: Path = ROOT) -> dict[str, str]:
 
 
 def verify_release_source(version: str, root: Path = ROOT) -> None:
-    """A release commit declares exactly the tag's version in chart and project.
+    """A release tags an ordinary commit: the tag is a valid version, and the
+    source keeps the placeholder, since the version lives only in the tag.
 
     The placeholder is never a release: it names unreleased source.
     """
     if not VERSION.fullmatch(version) or version == PLACEHOLDER:
         raise ValueError(VERSION_RULE)
-    declared = source_versions(root)
-    for name in ("chart", "project"):
-        if declared[name] != version:
-            raise ValueError(f"The {name} version must equal the release tag.")
+    verify_placeholder_source(root)
 
 
 def verify_placeholder_source(root: Path = ROOT) -> None:
-    """Ordinary commits keep the placeholder everywhere."""
+    """Every commit keeps the placeholder everywhere, a tagged one included."""
     for name, found in source_versions(root).items():
         if found != PLACEHOLDER:
             raise ValueError(f"The {name} version must stay {PLACEHOLDER}.")

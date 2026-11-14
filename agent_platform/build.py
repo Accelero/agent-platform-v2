@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
-import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,15 @@ TARGETS = (
     "agent-runtime",
     "hermes-manager",
 )
+# MAJOR.MINOR.PATCH, or a development prerelease MAJOR.MINOR.PATCH-dev.N that
+# never collides with a stable version and is never resolved as the latest one.
+VERSION = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-dev\.(?:0|[1-9][0-9]*))?"
+)
+# The chart and the project always declare this; a release's version is its
+# tag's, stamped into the image labels and the packaged chart.
+PLACEHOLDER = "0.0.0"
+VERSION_RULE = "Release tag must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-dev.N"
 
 
 def _context_arguments(contexts: dict[str, Path]) -> list[str]:
@@ -41,12 +51,24 @@ def _fills_github_cache() -> bool:
     )
 
 
+def build_version(environ: Mapping[str, str] = os.environ) -> str:
+    """The version an image build carries: the tag's in a run for a version
+    tag, the placeholder in any other."""
+    if environ.get("GITHUB_REF_TYPE") != "tag":
+        return PLACEHOLDER
+    tag = environ.get("GITHUB_REF_NAME", "")
+    version = tag.removeprefix("v")
+    if tag == version or not VERSION.fullmatch(version) or version == PLACEHOLDER:
+        raise ValueError(VERSION_RULE)
+    return version
+
+
 def image_labels(root: Path = ROOT) -> list[str]:
     """The source, revision and version labels of every image build.
 
     A release publishes the very images its tests ran, so they carry the
-    labels from the start: the version is the one the source declares, the
-    tag's version on a release commit and the placeholder otherwise.
+    labels from the start: the revision is the tagged commit and the version
+    is the tag's (`build_version`).
     """
     revision = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -56,11 +78,10 @@ def image_labels(root: Path = ROOT) -> list[str]:
         text=True,
         timeout=10,
     ).stdout.strip()
-    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
     labels = {
         "org.opencontainers.image.source": REPOSITORY,
         "org.opencontainers.image.revision": revision,
-        "org.opencontainers.image.version": version,
+        "org.opencontainers.image.version": build_version(),
     }
     return [part for item in labels.items() for part in ("--label", "=".join(item))]
 

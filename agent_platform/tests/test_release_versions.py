@@ -1,5 +1,6 @@
-"""The release version rule: placeholders on ordinary commits, the tag's exact
-version on a release commit, and nothing publishable before it is verified."""
+"""The release version rule: the version lives only in the tag, every commit
+(the tagged one included) keeps the placeholder, and nothing is publishable
+before the tag is verified."""
 
 import re
 import subprocess
@@ -64,16 +65,14 @@ def test_stable_and_development_versions_are_releasable_and_start_the_workflow(
 ):
     assert release.VERSION.fullmatch(version)
     assert trigger().fullmatch(f"v{version}")
-    release.verify_release_source(
-        version, tree(tmp_path, chart=version, project=version)
-    )
+    release.verify_release_source(version, tree(tmp_path))
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("version", [item for item in MALFORMED if item])
 def test_a_malformed_version_is_never_releasable(version, tmp_path):
     assert not release.VERSION.fullmatch(version)
-    root = tree(tmp_path, chart=version, project=version)
+    root = tree(tmp_path)
     with pytest.raises(ValueError, match="Release tag must be"):
         release.verify_release_source(version, root)
 
@@ -89,9 +88,7 @@ def test_a_tag_the_trigger_accepts_but_the_version_rule_refuses_stops_before_pub
     assert trigger().fullmatch(tag)
     version = tag.removeprefix("v")
     with pytest.raises(ValueError):
-        release.verify_release_source(
-            version, tree(tmp_path, chart=version, project=version)
-        )
+        release.verify_release_source(version, tree(tmp_path))
 
 
 @pytest.mark.unit
@@ -102,27 +99,21 @@ def test_tags_outside_the_release_pattern_do_not_start_the_workflow(tag):
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("chart", "project", "stale"),
+    ("field", "value", "name"),
     [
-        ("0.0.0", "1.2.3", "chart"),
-        ("1.2.3", "0.0.0", "project"),
-        ("1.2.2", "1.2.3", "chart"),
-        ("1.2.3", "1.2.4", "project"),
-        ("1.2.3-dev.1", "1.2.3", "chart"),
+        ("chart", "1.2.3", "chart"),
+        ("app", "1.2.3", "chart appVersion"),
+        ("project", "1.2.3", "project"),
+        ("chart", "1.2.2", "chart"),
+        ("project", "1.2.3-dev.1", "project"),
     ],
-    ids=[
-        "chart-placeholder",
-        "project-placeholder",
-        "chart-older",
-        "project-newer",
-        "chart-prerelease",
-    ],
+    ids=["chart-tag", "app-tag", "project-tag", "chart-other", "project-prerelease"],
 )
-def test_a_release_commit_must_carry_the_tags_version_in_chart_and_project(
-    chart, project, stale, tmp_path
+def test_a_tagged_commit_keeps_the_placeholder_even_for_its_own_version(
+    field, value, name, tmp_path
 ):
-    root = tree(tmp_path, chart=chart, project=project)
-    with pytest.raises(ValueError, match=f"The {stale} version"):
+    root = tree(tmp_path, **{field: value})
+    with pytest.raises(ValueError, match=f"The {name} version must stay 0.0.0"):
         release.verify_release_source("1.2.3", root)
 
 
@@ -149,7 +140,7 @@ def test_ordinary_commits_keep_the_placeholder_everywhere(field, name, tmp_path)
 
 
 @pytest.mark.unit
-def test_this_source_tree_is_a_placeholder_tree_or_the_exact_release_commit():
+def test_this_source_tree_keeps_the_placeholder_and_any_tag_on_it_is_a_version():
     tags = subprocess.run(
         ["git", "tag", "--points-at", "HEAD"],
         cwd=release.ROOT,

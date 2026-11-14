@@ -70,8 +70,8 @@ wire protocol), route resolution and the gateway.
 Agent platform v2 is released as its own product, separate from the public
 `agent-platform` repository: its images, chart and version numbers live under
 `ghcr.io/accelero/agent-platform-v2` and never reuse that repository's
-packages. Source versions stay at the `0.0.0` placeholder. Stable releases are
-`MAJOR.MINOR.PATCH`; builds of unmerged work are `MAJOR.MINOR.PATCH-dev.N`
+packages. Source versions stay at the `0.0.0` placeholder; a release's version
+is its tag, set on a commit of main. Stable releases are `MAJOR.MINOR.PATCH`; builds of unmerged work are `MAJOR.MINOR.PATCH-dev.N`
 prereleases above the latest stable version, published through the same pipeline
 and never resolved as the latest release.
 

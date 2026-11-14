@@ -106,7 +106,7 @@ chart, renders the manager example and publishes that `.tgz` to GHCR and GitHub
 Releases. Select the chart's SemVer version or OCI digest and deploy it with its
 own image defaults. The controller runs one active replica by leader election;
 `api` and `gateway` can run several. Source charts carry the `0.0.0`
-development placeholder until a release sets the version.
+development placeholder; the release packaging sets the tag's version.
 
 `hermesManager.dataIdentity` is the identity of every Hermes container. Each
 backend record requires explicit `uid` and `gid` values; workers do not inherit

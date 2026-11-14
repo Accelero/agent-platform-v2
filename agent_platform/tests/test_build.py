@@ -49,7 +49,10 @@ def test_missing_cache_runtime_stops_before_external_operations(monkeypatch):
         build.image_build("hermes", github_cache=True)
 
 
-def test_every_image_build_carries_the_source_revision_and_declared_version():
+def test_every_image_build_carries_the_source_revision_and_build_version(
+    monkeypatch,
+):
+    monkeypatch.delenv("GITHUB_REF_TYPE", raising=False)
     labels = build.image_labels()
     pairs = dict(labels[index + 1].split("=", 1) for index in range(0, len(labels), 2))
     assert set(labels[::2]) == {"--label"}
@@ -61,13 +64,33 @@ def test_every_image_build_carries_the_source_revision_and_declared_version():
         check=True,
         timeout=10,
     ).stdout.strip()
-    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     assert pairs == {
         "org.opencontainers.image.source": release.REPOSITORY,
         "org.opencontainers.image.revision": revision,
-        "org.opencontainers.image.version": version,
+        "org.opencontainers.image.version": "0.0.0",
     }
     assert build.image_build("hermes")[-len(labels) :] == labels
+
+
+@pytest.mark.parametrize("version", ["1.2.3", "0.7.0-dev.4"])
+def test_a_version_tag_build_carries_the_tags_version(version):
+    environ = {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": f"v{version}"}
+    assert build.build_version(environ) == version
+
+
+@pytest.mark.parametrize(
+    "environ",
+    [{}, {"GITHUB_REF_TYPE": "branch", "GITHUB_REF_NAME": "v1.2.3"}],
+    ids=["local", "branch"],
+)
+def test_any_other_build_carries_the_placeholder(environ):
+    assert build.build_version(environ) == "0.0.0"
+
+
+@pytest.mark.parametrize("tag", ["1.2.3", "v1.2.3-rc.1", "v0.0.0", "v1.2"])
+def test_a_tag_build_with_an_invalid_version_tag_stops(tag):
+    with pytest.raises(ValueError, match="Release tag must be"):
+        build.build_version({"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": tag})
 
 
 def test_the_job_that_fills_the_cache_cannot_publish_packages():
